@@ -293,6 +293,20 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
+  // Street View fires in parallel with the listing lanes — it's a single
+  // fast request, and holding it in reserve means the listing failures
+  // can't starve the fallback inside the per-comp timeout.
+  const svPromise: Promise<PropertyPhotos | null> = env.GOOGLE_MAPS_KEY
+    ? (async () => {
+        const location = comp.latitude != null && comp.longitude != null
+          ? `${comp.latitude},${comp.longitude}`
+          : `${comp.address}, ${comp.city}, ${comp.state} ${comp.zipCode ?? ''}`
+        const svUrl = `https://maps.googleapis.com/maps/api/streetview?location=${encodeURIComponent(location)}&size=640x640&key=${env.GOOGLE_MAPS_KEY}&source=outdoor&radius=500&return_error_code=true`
+        if (!(await tryFetchImage(svUrl))) return null
+        return { propertyId: comp.propertyId, photos: [svUrl], source: 'streetview', fetchedAt: new Date().toISOString() }
+      })().catch(() => null)
+    : Promise.resolve(null)
+
   let photos: PropertyPhotos | null = null
   try {
     const photoService = createPhotoService(env, { provider: 'zillow' })
@@ -365,18 +379,10 @@ export async function gatherCompConditionEvidence(
     } catch { /* fall through */ }
   }
 
-  // Street View last resort — every address has a facade photo even when
-  // it was never listed. Curb-appeal-only evidence (no description text).
-  // return_error_code makes missing imagery a 404 instead of a gray tile.
-  if (!photos && env.GOOGLE_MAPS_KEY) {
-    const location = comp.latitude != null && comp.longitude != null
-      ? `${comp.latitude},${comp.longitude}`
-      : `${comp.address}, ${comp.city}, ${comp.state} ${comp.zipCode ?? ''}`
-    const svUrl = `https://maps.googleapis.com/maps/api/streetview?location=${encodeURIComponent(location)}&size=640x640&key=${env.GOOGLE_MAPS_KEY}&source=outdoor&radius=500&return_error_code=true`
-    if (await tryFetchImage(svUrl)) {
-      photos = { propertyId: comp.propertyId, photos: [svUrl], source: 'streetview', fetchedAt: new Date().toISOString() }
-    }
-  }
+  // Street View last resort — prefetched in parallel above. Every address
+  // has a facade photo even when it was never listed; curb-appeal-only
+  // evidence (no description text).
+  if (!photos) photos = await svPromise
 
   if (!photos) {
     evidence.skippedReason = 'no_listing'
