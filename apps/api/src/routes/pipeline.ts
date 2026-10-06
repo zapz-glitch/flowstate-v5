@@ -9,7 +9,7 @@
 
 import { Hono } from 'hono'
 import { pocketFromPayload, deterministicInputs, provisionalScore, scorePocket, metroGuess, listingSignals } from '../services/pocket-score'
-import { classifyPocket, classifyEconomics } from '../services/pocket-score/classify'
+import { classifyPocket, classifyEconomics, zillowEngagement } from '../services/pocket-score/classify'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
 
@@ -399,6 +399,7 @@ pipelineReads.get('/pocket-test', async (c) => {
     priceDrops: sig.priceDrops,
     contractFallouts: sig.contractFallouts,
     listingEvents: sig.listingEvents,
+    zillowViews: null, zillowSaves: null,
     rehabCost: sig.valuation.rehabCost ?? null,
     carryingCosts: sig.valuation.carryingCosts ?? null,
     closingCosts: sig.valuation.closingCosts ?? null,
@@ -416,7 +417,7 @@ pipelineReads.get('/pocket-test', async (c) => {
 
 /** Score one evaluated property end-to-end — pocket (cached/classify) +
  *  economics + evidence flag + fallout flag → property_scores row. */
-async function scoreProperty(c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } }, row: { job_id: string; user_id: string | null; payload_json: string; created_at?: string }, wholesalePrice: number | null): Promise<{ jobId: string; ok: boolean; pocketScore?: number | null; economicsScore?: number | null; overall?: number | null; error?: string }> {
+async function scoreProperty(c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } }, row: { job_id: string; user_id: string | null; payload_json: string; created_at?: string }, wholesalePrice: number | null): Promise<{ jobId: string; ok: boolean; pocketScore?: number | null; economicsScore?: number | null; overall?: number | null; error?: string; zillow?: string }> {
   let payload: unknown
   try { payload = JSON.parse(row.payload_json) } catch { return { jobId: row.job_id, ok: false, error: 'bad payload' } }
   const id = pocketFromPayload(payload)
@@ -446,14 +447,17 @@ async function scoreProperty(c: { env: Env; executionCtx: { waitUntil(p: Promise
   }
 
   // Economics — per-property, reasons the cost stack + listing signals.
+  const engagement = sig.zillowUrl ? await zillowEngagement(c.env, sig.zillowUrl).catch((e) => ({ _err: String(e) } as never)) : null
+  const zillowStatus = !sig.zillowUrl ? 'no-url' : engagement == null ? 'scrape-null' : (engagement as { _err?: string })._err ? 'scrape-error' : engagement.views != null ? 'ok' : 'no-counters'
   const ws = sig.valuation.wholesalePrice ?? wholesalePrice
   const econ = {
     wholesalePrice: ws, listPrice: sig.listPrice,
     medianLo: inputs.medianLo, medianHi: inputs.medianHi,
     arv: subj?.report?.arv?.value ?? inputs.arv,
     asIsValue: subj?.report?.arv?.asIsValue ?? null,
-    daysOnMarket: sig.daysOnMarket, priceDrops: sig.priceDrops,
+    daysOnMarket: sig.daysOnMarket ?? engagement?.days ?? null, priceDrops: sig.priceDrops,
     contractFallouts: sig.contractFallouts, listingEvents: sig.listingEvents,
+    zillowViews: engagement?.views ?? null, zillowSaves: engagement?.saves ?? null,
     rehabCost: sig.valuation.rehabCost ?? null, carryingCosts: sig.valuation.carryingCosts ?? null,
     closingCosts: sig.valuation.closingCosts ?? null, wholesaleFee: sig.valuation.wholesaleFee ?? null,
     buyPrice: sig.valuation.buyPrice ?? null, projectedProfit: sig.valuation.projectedProfit ?? null,
@@ -480,11 +484,11 @@ async function scoreProperty(c: { env: Env; executionCtx: { waitUntil(p: Promise
   ).bind(
     row.job_id, row.user_id, addr?.fullAddress ?? addr?.address ?? null, id.pocketKey,
     pocketScore, pocketRationale, econScore, econResult?.rationale ?? null, overall,
-    evidence, sig.contractFallouts, sig.daysOnMarket, sig.listPrice, ws,
+    evidence, sig.contractFallouts, econ.daysOnMarket, sig.listPrice, ws,
     JSON.stringify({ ...inputs, ...econ, listingEvents: undefined }), new Date().toISOString(),
   ).run().catch((e) => { throw new Error(`property_scores write: ${e}`) })
 
-  return { jobId: row.job_id, ok: true, pocketScore, economicsScore: econScore, overall }
+  return { jobId: row.job_id, ok: true, pocketScore, economicsScore: econScore, overall, zillow: zillowStatus }
 }
 
 // POST /v1/pipeline/score-batch?limit=10 — score the newest unscored
@@ -503,6 +507,9 @@ pipelineReads.post('/score-batch', async (c) => {
 
   // wholesalePrice ships inside the eval payload (valuation.wholesalePrice) —
   // scoreProperty reads it there; no queue join needed.
-  const results = await Promise.all(batch.map((r) => scoreProperty(c, r, null)))
+  const results = []
+  for (let i = 0; i < batch.length; i += 3) {
+    results.push(...await Promise.all(batch.slice(i, i + 3).map((r) => scoreProperty(c, r, null))))
+  }
   return c.json({ ok: true, scored: results.filter((r) => r.ok).length, results })
 })

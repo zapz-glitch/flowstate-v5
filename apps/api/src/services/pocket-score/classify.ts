@@ -183,6 +183,8 @@ export interface EconomicsInput {
   priceDrops: number            // count of downward price events
   contractFallouts: number      // pending→relisted cycles
   listingEvents: string[]       // compact "Oct 2: Listed $279k" lines
+  zillowViews: number | null    // scraped from subject's Zillow page
+  zillowSaves: number | null
   /** The real cost stack from valuation — the number where everything fits */
   rehabCost: number | null
   carryingCosts: number | null
@@ -211,9 +213,44 @@ export async function classifyEconomics(env: Env2, id: PocketIdentity, econ: Eco
       `Cost stack (eval's own math): rehab ${econ.rehabCost ? '$'+econ.rehabCost.toLocaleString() : '?'}, closing ${econ.closingCosts ? '$'+econ.closingCosts.toLocaleString() : '?'}, carrying ${econ.carryingCosts ? '$'+econ.carryingCosts.toLocaleString() : '?'}, wholesale fee ${econ.wholesaleFee ? '$'+econ.wholesaleFee.toLocaleString() : '?'}`,
       `MAO (number where all costs fit): ${econ.buyPrice ? '$' + econ.buyPrice.toLocaleString() : 'unknown'}${econ.projectedProfit ? ` | projected profit $${econ.projectedProfit.toLocaleString()}` : ''}`,
       `Days on market: ${econ.daysOnMarket ?? 'unknown'} | price drops: ${econ.priceDrops} | contract fallouts: ${econ.contractFallouts}`,
+      `Zillow engagement: ${econ.zillowViews != null ? `${econ.zillowViews} views / ${econ.zillowSaves ?? '?'} saves` : 'not captured'}`,
       econ.listingEvents.length ? `Listing history:\n${econ.listingEvents.join('\n')}` : 'Listing history: none',
     ].join('\n') },
   ])
   const parsed = parseScore(out)
   return parsed ? { score: parsed.score, rationale: parsed.rationale, clefScore: null, confidence: null, model: 'luna' } : null
+}
+
+// ── Zillow engagement — views + saves via Scrapfly scrape ──────────────────
+
+export async function zillowEngagement(env: Env2, zillowUrl: string): Promise<{ views: number | null; saves: number | null; days: number | null }> {
+  if (!env.SCRAPFLY_MCP_URL) return { views: null, saves: null, days: null }
+  const res = await fetch(env.SCRAPFLY_MCP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: 'web_scrape', arguments: { url: zillowUrl } },
+    }),
+    signal: AbortSignal.timeout(25000),
+  }).catch(() => null)
+  if (!res?.ok) return { views: null, saves: null, days: null }
+  try {
+    const raw = await res.text()
+    const m = raw.match(/data: (\{.*\})/)
+    // Scrape text carries literal "\n" sequences — normalize before parsing.
+    const text = (JSON.parse(m?.[1] ?? 'null')?.result?.content?.[0]?.text ?? '')
+      .replace(/<[^>]+>/g, ' ').replace(/\\n/g, ' ')
+    // Zillow renders "**24 days** **753** **58**" — DOM / views / saves.
+    const strip = text.match(/\*\*(\d[\d,]*)\s*days?\*\*[^*]*\*\*(\d[\d,]*)\*\*[^*]*\*\*(\d[\d,]*)\*\*/)
+      ?? text.match(/(\d[\d,]*)\s*days?\s*on\s*zillow[^0-9]*(\d[\d,]*)\s*views?[^0-9]*(\d[\d,]*)\s*saves?/i)
+    if (strip) return { days: Number(strip[1].replace(/,/g, '')), views: Number(strip[2].replace(/,/g, '')), saves: Number(strip[3].replace(/,/g, '')) }
+    const views = text.match(/(\d[\d,]*)\s*views?/i)
+    const saves = text.match(/(\d[\d,]*)\s*saves?/i)
+    return {
+      views: views ? Number(views[1].replace(/,/g, '')) : null,
+      saves: saves ? Number(saves[1].replace(/,/g, '')) : null,
+      days: null,
+    }
+  } catch { return { views: null, saves: null, days: null } }
 }
