@@ -204,6 +204,93 @@ export class ScrapflyZillowFetcher {
 
   // ─── Non-Zillow lanes (Redfin, Realtor) ──────────────────────────────────
 
+  /** Redfin stingray autocomplete — free JSON resolver, no search API.
+   *  Returns the property's Redfin id + listing URL for the row that
+   *  matches street number, street name tokens, and city. */
+  private async stingrayResolve(
+    property: ZillowPropertyIdentifier,
+  ): Promise<{ propertyId: string; url: string } | null> {
+    const q = `${property.address} ${property.city} ${property.state} ${property.zipCode ?? ''}`.trim()
+    const target =
+      'https://www.redfin.com/stingray/do/location-autocomplete?location=' +
+      encodeURIComponent(q) +
+      '&v=2&al=1&iss=false&ooa=true&mrs=false'
+    const body = await this.scrape(target)
+    if (!body) return null
+    try {
+      const j = JSON.parse(body.startsWith('{}&&') ? body.slice(4) : body) as {
+        payload?: { sections?: Array<{ rows?: Array<{ id?: string; name?: string; subName?: string; url?: string; urlV2?: string }> }> }
+      }
+      const rows = j?.payload?.sections?.[0]?.rows ?? []
+      const num = property.address.match(/\d+/)?.[0]
+      const nameToks = property.address
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter(
+          (t) =>
+            t.length > 1 &&
+            !/^\d+$/.test(t) &&
+            !/^(st|ave|dr|rd|ct|ln|cir|blvd|pl|ter|way|pkwy|trl|cv|run|n|s|e|w|ne|nw|se|sw)$/.test(t),
+        )
+      const cityTok = property.city.toLowerCase()
+      for (const r of rows) {
+        const nm = (r.name ?? '').toLowerCase()
+        const sub = (r.subName ?? '').toLowerCase()
+        const url = r.url ?? r.urlV2
+        if (!url || !/\/home\/\d+/.test(url)) continue
+        if (num && !nm.includes(num)) continue
+        if (!nameToks.every((t) => nm.includes(t))) continue
+        if (cityTok && !sub.includes(cityTok)) continue
+        const propertyId = String(r.id ?? '').replace(/^\d+_/, '')
+        if (!propertyId) continue
+        return { propertyId, url: `https://www.redfin.com${url}` }
+      }
+    } catch { /* stingray parse is best-effort */ }
+    return null
+  }
+
+  /** Property-bound photos + description from the stingray detail JSON —
+   *  the verified-source alternative to scraping a rendered page (whose
+   *  CDN URLs can include similar-homes thumbnails). */
+  private async stingrayMedia(
+    propertyId: string,
+  ): Promise<Pick<ZillowExtraction, 'photos' | 'description'>> {
+    const parse = (body: string | null) => {
+      if (!body) return { photos: [] as string[], description: undefined as string | undefined }
+      try {
+        const j = JSON.parse(body.startsWith('{}&&') ? body.slice(4) : body) as { payload?: any }
+        const p = j?.payload ?? {}
+        const seen = new Set<string>()
+        const collect = (arr: any[]) => {
+          for (const ph of arr ?? []) {
+            const u = ph?.photoUrls?.fullScreenPhotoUrl ?? ph?.photoUrls?.nonFullScreenPhotoUrl
+            if (typeof u === 'string' && u && !seen.has(u)) seen.add(u)
+          }
+        }
+        collect(p?.mediaBrowserInfo?.photos)
+        for (const v of Object.values(p?.propertyHistoryInfo?.mediaBrowserInfoBySourceId ?? {}) as any[]) {
+          collect(v?.photos)
+        }
+        const description =
+          p?.amenitiesInfo?.marketingRemarks ??
+          p?.addressSectionInfo?.marketingRemarks ??
+          p?.listingRemarks ??
+          undefined
+        return { photos: [...seen], description }
+      } catch {
+        return { photos: [] as string[], description: undefined }
+      }
+    }
+    const [above, below] = await Promise.all([
+      this.scrape(`https://www.redfin.com/stingray/api/home/details/aboveTheFold?propertyId=${propertyId}&accessLevel=1`),
+      this.scrape(`https://www.redfin.com/stingray/api/home/details/belowTheFold?propertyId=${propertyId}&accessLevel=1`),
+    ])
+    const a = parse(above)
+    const b = parse(below)
+    return { photos: a.photos.length ? a.photos : b.photos, description: a.description ?? b.description }
+  }
+
   /** Meta description + CDN-pattern photo pull for a rendered listing page. */
   private parseGenericListing(html: string, photoPattern: RegExp): Pick<ZillowExtraction, 'photos' | 'description'> {
     const desc =
@@ -240,7 +327,22 @@ export class ScrapflyZillowFetcher {
             normalize: (u: string) => u.replace(/-(?:s|m|od|w|t)\.jpg$/i, '-l.jpg'),
           }
 
-    const listingUrl = await this.serperResolve(cfg.query, cfg.urlPattern)
+    let listingUrl: string | null = null
+    if (site === 'redfin') {
+      // Free internal resolver first — stingray covers every parcel and its
+      // media endpoints carry property-bound photos (verified, unlike CDN
+      // matches on a rendered page which can be similar-homes thumbnails).
+      const st = await this.stingrayResolve(property)
+      if (st) {
+        const media = await this.stingrayMedia(st.propertyId)
+        if (media.photos.length) {
+          console.log(`[ScrapflyZillow] redfin stingray lane: ${media.photos.length} photos`)
+          return { photos: media.photos, description: media.description }
+        }
+        listingUrl = st.url // verified URL — page scrape below as last resort
+      }
+    }
+    if (!listingUrl) listingUrl = await this.serperResolve(cfg.query, cfg.urlPattern)
     if (!listingUrl || !this.urlMatchesAddress(listingUrl, property)) return null
     const html = await this.scrape(listingUrl, { render: true })
     if (!html) return null
