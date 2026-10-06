@@ -48,6 +48,13 @@ export interface AnalysisPageLayoutProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
+  /**
+   * True from the click of a run until its last result has landed · the page's own run state, which
+   * moves in the same step as the results. The steady hold keys on this: the evaluation atom's
+   * streaming flag lags a render behind, and that one-render gap used to release the hold and
+   * re-freeze half-loaded data.
+   */
+  busy?: boolean
   /** Fire an offer workflow — returns the outcome the hero flashes */
   onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
@@ -71,13 +78,14 @@ export function AnalysisPageLayout({
   notesSlot,
   onRerun,
   rerunning,
+  busy,
   onOfferWorkflow,
   disposition,
 }: AnalysisPageLayoutProps) {
   // While a rerun streams in, keep what is on screen steady (dimmed, not clickable) and bring the
   // fresh results in together at the end · a first run, with nothing on screen yet, still builds up live.
   const live = useEvaluation()
-  const held = useHeldDuringRerun(live, !!rerunning || live.isStreaming, !!live.displayValuation)
+  const held = useHeldDuringRerun(live, busy ?? (!!rerunning || live.isStreaming), !!live.displayValuation)
   const refreshing = held.holding
   const { subject, displayComps: comps, compOverride, displayValuation: valuation, isRecalculated } = held.value
   const selectedCompKeys = compOverride?.selectedCompKeys

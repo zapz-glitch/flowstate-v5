@@ -971,6 +971,7 @@ export default function AnalyzePage() {
           valuationCardRef={valuationCardRef}
           onRerun={() => runAnalysis(true)}
           rerunning={isFetching}
+          busy={isFetching || (streamingStep !== 'idle' && streamingStep !== 'done')}
           onOfferWorkflow={handleOfferWorkflow}
           statusLabel={
             streamingStep === 'idle' && isFetching ? 'Starting analysis...'

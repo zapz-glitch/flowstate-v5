@@ -65,6 +65,8 @@ Not run: a full real rerun (it would start a real analysis and overwrite the sav
 Also fixed: the sweep had left a broken class on the valuation resize bar's hover.
 Tests: unit 22 files; e2e 30 of 30, twice.
 
+Follow-up (same day): a real rerun on the local test property (56 s) showed the hold leaking. About 28 s in, the subject card shrank 127 px and the comp list went from 28 to 32 cards, because the evaluation atom's streaming flag lags the page's run state by one render; that one render released the hold and it re-froze half-loaded data. The hold now keys on the page's own run state (`busy`). Re-measured on a real rerun: zero position or size changes of the buttons, subject card, first comp card or comp count from the click to the finish; the release fades the comps in one after another. The rerun saved a fresh copy of the report (same ARV, 28 comps).
+
 ### 2026-10-06 — Gray hover everywhere, ARV edit box, Offers icons, area line, map legend
 Screenshots: `g1` (ARV edit/after, hover pill, hover nav), `g2` (Offers), `a2` (area line, report with block groups), `c1` (legend)
 Requirements: one light-gray hover across the app (green only on Prep offer); the ARV edit box matches the number; Offers: Evaluating icon not spinning (clock), Ready icon not a check (inbox), Next up button removed; area line "Group N - Neighborhood" on the subject card, comp cards and hover panel; legend Included green, Excluded light silver.
