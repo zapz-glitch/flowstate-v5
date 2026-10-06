@@ -88,7 +88,8 @@ Selection preferences, roughly in order of importance:
   ranch — closer twins win even at a lower sale price.
 - **Living area: ±250–500 sqft preferred range** for selection (overrides
   the earlier ±250). Beyond it, the comp can still be used — with the full
-  square-footage adjustment from Section 7.
+  square-footage adjustment from Section 7. A comp whose GLA varies more
+  than ±25% from the subject loses half its selection weight.
 - **Year built: ±10 years preferred** — construction technology improves
   every decade. If ±10 fails, widen to ±12, then ±14, and keep stepping out
   2–3 years per iteration until the closest spec is found. Pre-1970 stock
@@ -165,49 +166,61 @@ of a pool in that submarket), and to the per-square-foot rate.
 **Square footage** is adjusted linearly from the very first square foot of
 difference — appraisers do not use threshold brackets, because market
 buyers do not discount the first 250–500 sqft as free space. Every square
-foot carries structural, material and utility cost:
+foot carries structural, material and utility cost. The full GLA spec:
+
+**Step 1 — bracketed selection.** Select 3–5 renovated comps from the
+subject's subdivision / neighborhood / block group (0.5-mile max radius),
+sold within the last 6 months, prioritizing a *bracketed* set:
+
+- At least 1 comp smaller than the subject's GLA.
+- At least 1 comp larger than the subject's GLA.
+- If a comp's GLA variance exceeds ±25% of the subject, reduce that
+  comp's weight by 50%.
+
+**Step 2 — the marginal GLA rate.** The marginal value of extra square
+footage is 40% of the blended renovated $/sqft:
 
 ```
-adjustment = market rate per sqft  ×  full |comp sqft − subject sqft|
+Avg_Comp_$/sqft   = sum(selected comp sale prices) / sum(selected comp GLAs)
+Marginal_GLA_Rate = Avg_Comp_$/sqft × 0.40
 ```
 
-- Direction: subtract when the comp is larger, add when it is smaller.
-- Worked example from the spec: subject 2,000 sqft, comp 2,300 sqft,
-  $50/sqft market rate → −$15,000 (not −$2,500, which is what adjusting
-  only past the 250 threshold would give).
-- Per the source-of-truth interview, a comp that is bigger or smaller than
-  the subject only commands **50% of the price per square foot** for the
-  size difference — so the default rate is 0.5 × the local $/sqft, applied
-  linearly across the full difference, unless paired sales in that pocket
-  demonstrate a stronger rate.
+Adjust each comp linearly across the full difference:
 
-**Regression — the neighborhood ceiling.** When the subject is
-significantly larger or more luxurious than the surrounding homes, its
-value is dragged down by its smaller neighbors. If the home truly belongs
-to this sub-market, it cannot escape the gravity of the neighborhood's
-ceiling — a buyer willing to spend record-breaking money usually leaves
-the pocket entirely for a neighborhood where that price is the average,
-not the maximum.
+```
+GLA_Delta            = Subject_GLA − Comp_GLA
+Adjusted_Comp_Price  = Comp_Sale_Price + (GLA_Delta × Marginal_GLA_Rate)
+```
 
-Do not cap the ARV at the top print out of fear — but do not trust raw
-math above the ceiling either. To project ARV above the pocket's highest
-sale:
+Direction: add when the comp is smaller, subtract when it is larger.
+Preliminary ARV is the weighted average of the adjusted comp prices.
 
-1. **Slash the size adjustment.** For square footage *above the
-   neighborhood average*, cut the rate 50–60% — excess space is worth
-   roughly 40–50% of the normal 0.5×PSF rate, i.e. about 0.2–0.25 ×
-   local $/sqft.
-2. **Bracket the size.** Require at least one comp of similar large size
-   — even unrenovated, even two miles out in a competing neighborhood —
-   proving the market actually desires and pays for that extra footage.
-3. **If nothing at that scale has ever sold** in competing areas either,
-   the market is saying the ceiling is real: pull the ARV back to the
-   pocket's highest historical print (time-adjusted if needed).
+**Step 3 — ceiling and floor guardrails.**
 
-Before declaring the ceiling real, expand the search — go further out to
-competing similar-quality neighborhoods where larger homes trade, and go
-further back (12–24 months) in the immediate pocket and apply a market
-adjustment for time. This is what `widen` is for (Section 8a).
+- **Ceiling (prevent over-improvement):** find the subdivision's highest
+  *renovated* sale (`Max_Renovated_Price`). If the preliminary ARV
+  exceeds it, cap: `Final_ARV = Max_Renovated_Price` and set flag
+  `CEILING_CAP_APPLIED` — a renovated valuation may never claim a value
+  higher than the best renovated sale that exists. Regression is real: a
+  buyer willing to spend record money leaves the pocket for a
+  neighborhood where that price is the average, not the maximum.
+- **Floor (prevent undervaluation):**
+  `ARV_Floor = max(Min_Renovated_Price × 0.90, Max_Distressed_Price × 1.15)`.
+  If the preliminary ARV falls below it, raise to the floor and set flag
+  `FLOOR_GUARDRAIL_APPLIED`.
+
+Before declaring the ceiling real, expand the search — go further back
+(12–24 months) in the immediate pocket and, only if the block group is
+truly empty, to competing similar-value block groups — to look for a
+renovated sale at the subject's scale. This is what `widen` is for
+(Section 8a).
+
+**Step 4 — output.** The verdict reports the preliminary ARV, the final
+ARV after guardrails, the applied flags (`NONE`, `CEILING_CAP_APPLIED`,
+`FLOOR_GUARDRAIL_APPLIED`, `WIDE_GLA_BRACKET` — the last when no larger
+comp exists to bracket the subject), and an itemized adjustment matrix:
+per comp, base price, GLA delta, marginal adjustment, final adjusted
+price.
 
 **FOUNDATION-001 — directional:** concrete and concrete-block foundations
 are equivalent. Wood, pier-and-beam and crawlspace are a separate group.
