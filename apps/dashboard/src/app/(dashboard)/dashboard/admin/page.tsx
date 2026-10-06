@@ -6,6 +6,7 @@ import { useUser } from '@/components/auth/UserProvider'
 import { getAdminStats, getAdminDailyUsage, type AdminStats, type DailyUsage } from '@/lib/admin-api'
 import Link from 'next/link'
 import { Users, Activity, FileText, TrendingUp, ArrowRight } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 
 export default function AdminOverviewPage() {
   const { user } = useUser()
@@ -53,19 +54,18 @@ export default function AdminOverviewPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-heading-lg font-bold">Admin Panel</h1>
-          <p className="text-foreground-secondary mt-1">Platform overview and user management</p>
-        </div>
-        <Link
-          href="/dashboard/admin/users"
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 text-body-sm font-medium transition-colors"
-        >
-          Manage Users
-          <ArrowRight className="w-4 h-4" />
-        </Link>
-      </div>
+      <PageHeader
+        title="Admin Panel"
+        actions={
+          <Link
+            href="/dashboard/admin/users"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 text-body-sm font-medium transition-colors"
+          >
+            Manage Users
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        }
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -735,6 +735,7 @@ export default function AnalyzePage() {
   // Overlays are built on first open, then kept mounted so they can animate out
   const mountSettings = useStayMounted(settingsOpen)
   const mountComparison = useStayMounted(comparisonOpen)
+  const mountExisting = useStayMounted(showExistingDialog)
   usePreloadOnIdle(loadCompComparisonDialog)
 
   // ─── Layout Flags ────────────────────────────────────────────────────────
@@ -1053,7 +1054,7 @@ export default function AnalyzePage() {
       />}
 
       {/* Existing Reports Dialog */}
-      {showExistingDialog && <ExistingReportsDialog
+      {mountExisting && <ExistingReportsDialog
         open={showExistingDialog}
         onOpenChange={setShowExistingDialog}
         reports={existingReports}

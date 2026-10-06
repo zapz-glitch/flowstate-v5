@@ -11,6 +11,7 @@ import {
   type Pagination,
 } from '@/lib/admin-api'
 import { Search, ChevronLeft, ChevronRight, Crown, Shield } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 
 const PLAN_COLORS: Record<string, string> = {
   free: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
@@ -70,12 +71,10 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-heading-lg font-bold">User Management</h1>
-        <p className="text-foreground-secondary mt-1">
-          {pagination ? `${pagination.total} total users` : 'Loading...'}
-        </p>
-      </div>
+      <PageHeader
+        title="User Management"
+        actions={<span className="text-body-sm text-foreground-tertiary">{pagination ? `${pagination.total} total users` : ''}</span>}
+      />
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">

@@ -67,6 +67,15 @@ Gate: <n>/21 checked. Unchecked and why:
 
 Newest first.
 
+### 2026-10-05 — Decisions on four review findings
+Screenshots: `hdr-batch-light-1440`, `hdr-cdarv-light-1440`, `hdr-seo-light-1440`
+1. Same title-only header on every dashboard page (decided): Batch Import, SEO Engine, CDARV, Admin Panel, User Management, Observability and API request detail now use `PageHeader`. Subtitles are gone; useful values moved to the right side (user count, request time). Not changed: the two record-detail headers (a user's name with email and join date; a run's address with status and job ID), which carry data, not a section title.
+2. Existing Reports dialog on Property Search now stays mounted after first open, so it fades out like the settings panel and comp dialog (decided).
+3. Comp rules stay removed from the page entirely (decided).
+4. Street View: the photo on the subject card and the subject card in the hover panel now open Street View in a new tab, as the comp cards already did; the comp details dialog photo already did (decided; the map has no Street View button).
+Verification: unit 21 pass for the touched files and the whole suite passes; end-to-end 26 of 26, twice in a row.
+Not verified in a browser: Admin Panel, User Management and Observability. The local test user is not an admin and is redirected, so those three were checked by type check and lint only. The CDARV page lost its "Experimental / Shadow" label and the note that production underwriting is unaffected.
+
 ### 2026-10-05 — Comp rules off the subject card, one-row buttons, costs line into the valuation header
 Screenshots: `after10-search-{light,dark}-1440`, `after10-search-light-1100`, `after10-search-light-390`
 Requirement: remove the comp rules from the subject card; the five deal buttons in one horizontal row; move "Close / Carry / Invest / Wholesale" into the valuation header, right-aligned (Close left, Wholesale right); drop List from it (it is already the List tile).

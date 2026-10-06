@@ -409,6 +409,15 @@ export function streetViewHref(comp: Pick<CompItem, 'latitude' | 'longitude' | '
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(full)}`
 }
 
+/** The subject's Street View link · same destination rule as a comp's, from the subject's location. */
+export function subjectStreetViewHref(subject: { latitude?: number | null; longitude?: number | null; address?: string | null }): string | null {
+  return streetViewHref({
+    latitude: subject.latitude ?? undefined,
+    longitude: subject.longitude ?? undefined,
+    address: subject.address ?? undefined,
+  })
+}
+
 /** A filter's measured value or threshold, readable · 0.0748427 → "0.07" */
 export function fmtRuleValue(v: unknown): string {
   if (typeof v === 'number') {

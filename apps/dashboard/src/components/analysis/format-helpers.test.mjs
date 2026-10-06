@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { loadModule, realUtils } from '../../lib/test-load.mjs'
 
-const { formatShortDate } = loadModule(new URL('./format-helpers.ts', import.meta.url), {
+const { formatShortDate, streetViewHref, subjectStreetViewHref } = loadModule(new URL('./format-helpers.ts', import.meta.url), {
   '@/lib/utils': realUtils(),
   '@flowstate-api/shared': { subdivisionsMatch: () => true },
   './feature-match': { compFeatureMatches: () => [], featureState: () => 'unknown', MATCH_TEXT: '', MISMATCH_TEXT: '' },
@@ -39,4 +39,25 @@ test('a full timestamp is still shown in the viewer’s own zone', () => {
     if (original === undefined) delete process.env.TZ
     else process.env.TZ = original
   }
+})
+
+test('a property with coordinates links to Street View at that spot', () => {
+  const href = streetViewHref({ latitude: 33.9, longitude: -84.5, address: '1 Main St' })
+  assert.equal(href, 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=33.9,-84.5')
+})
+
+test('without coordinates it falls back to a map search on the address', () => {
+  const href = streetViewHref({ address: '1 Main St', city: 'Marietta', state: 'GA' })
+  assert.match(href, /maps\/search\/\?api=1&query=1%20Main%20St%2C%20Marietta%2C%20GA/)
+})
+
+test('with no location at all there is no link', () => {
+  assert.equal(streetViewHref({}), null)
+})
+
+test('the subject uses the same Street View rule as a comp', () => {
+  const where = { latitude: 33.9, longitude: -84.5, address: '951 Oriole Ln SE, Marietta, GA 30067' }
+  assert.equal(subjectStreetViewHref(where), streetViewHref(where))
+  assert.equal(subjectStreetViewHref({ latitude: null, longitude: null, address: null }), null)
+  assert.match(subjectStreetViewHref({ address: '951 Oriole Ln SE, Marietta, GA 30067' }), /maps\/search/)
 })

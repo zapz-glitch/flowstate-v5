@@ -4,7 +4,7 @@ import { MapPin } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
-import { formatAddressCasing, formatBlockGroup, formatLotSize, formatShortDate, titleCaseWords } from './format-helpers'
+import { formatAddressCasing, formatBlockGroup, formatLotSize, formatShortDate, subjectStreetViewHref, titleCaseWords } from './format-helpers'
 import { PropertyPermits } from './PropertyPermits'
 import { PhotoGallery } from './PhotoGallery'
 import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
@@ -35,25 +35,43 @@ export function SubjectGridCard({ subject, isLoading, footer, actions }: Subject
   // Written like a comp's address: street, city, state · no ZIP (the copy button keeps it)
   const shortAddress = subject.address ? formatAddressCasing(subject.address.replace(/\s+\d{5}(-\d{4})?$/, '')) : null
 
+  const streetViewUrl = subjectStreetViewHref(subject)
+  const photo = (
+    <StreetViewImage
+      photos={subject.photos}
+      address={subject.address}
+      latitude={subject.latitude}
+      longitude={subject.longitude}
+      width={500}
+      height={300}
+      className="w-full h-full object-cover"
+    />
+  )
+  const badge = (
+    <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/90 backdrop-blur-sm shadow-sm">
+      <MapPin className="w-2.5 h-2.5 text-white" />
+      <span className="text-[9px] font-semibold text-white uppercase tracking-wider">Subject</span>
+    </div>
+  )
+
   return (
     <div data-card-key="subject" className="border border-primary/30 rounded-sm overflow-hidden bg-primary/[0.02]">
       {/* Body: Image left + Details right */}
       <div className="subject-card-row">
         {/* Image with subject badge overlay */}
         <div className="subject-card-media relative bg-muted/30 overflow-hidden">
-          <StreetViewImage
-            photos={subject.photos}
-            address={subject.address}
-            latitude={subject.latitude}
-            longitude={subject.longitude}
-            width={500}
-            height={300}
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/90 backdrop-blur-sm shadow-sm">
-            <MapPin className="w-2.5 h-2.5 text-white" />
-            <span className="text-[9px] font-semibold text-white uppercase tracking-wider">Subject</span>
-          </div>
+          {/* Clicking the photo opens Street View in a new tab, like the comp cards */}
+          {streetViewUrl ? (
+            <a href={streetViewUrl} target="_blank" rel="noopener noreferrer" className="block h-full w-full" title="Open Street View">
+              {photo}
+              {badge}
+            </a>
+          ) : (
+            <>
+              {photo}
+              {badge}
+            </>
+          )}
         </div>
 
         {/* Details */}

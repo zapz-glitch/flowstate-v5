@@ -8,7 +8,7 @@ import { Fact, Pair, STAMP } from './property-card-parts'
 import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
 import type { SubjectData } from './shared-types'
-import { formatAddressCasing, formatCensusTract, formatLotSize, formatShortDate, getCompKey, titleCaseWords } from './format-helpers'
+import { formatAddressCasing, formatCensusTract, formatLotSize, formatShortDate, getCompKey, subjectStreetViewHref, titleCaseWords } from './format-helpers'
 import { onMarkerHover, type MarkerHover } from './map-hover'
 
 const WIDTH = 660
@@ -122,19 +122,28 @@ function SubjectCompareCard({ subject }: { subject: SubjectData }) {
   const perSqft = price != null && subject.squareFeet ? `$${Math.round(price / subject.squareFeet)}/sf` : null
   // Same empty line the comp card fills with "136 sf smaller" and the like
   const NO_DELTA = '\u00a0'
+  const streetViewUrl = subjectStreetViewHref(subject)
+  const photo = (
+    <StreetViewImage
+      photos={subject.photos}
+      address={subject.address}
+      latitude={subject.latitude}
+      longitude={subject.longitude}
+      width={640}
+      height={427}
+      className="w-full h-full object-cover"
+    />
+  )
   return (
     <div className="relative isolate flex h-full flex-col border border-border rounded-sm overflow-hidden">
       <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] z-10 pointer-events-none bg-blue-500" />
       <div className="relative aspect-[2/1] flex-shrink-0 bg-muted/30 overflow-hidden">
-        <StreetViewImage
-          photos={subject.photos}
-          address={subject.address}
-          latitude={subject.latitude}
-          longitude={subject.longitude}
-          width={640}
-          height={427}
-          className="w-full h-full object-cover"
-        />
+        {/* Clicking the photo opens Street View in a new tab, like the comp card beside it */}
+        {streetViewUrl ? (
+          <a href={streetViewUrl} target="_blank" rel="noopener noreferrer" className="block h-full w-full" title="Open Street View">
+            {photo}
+          </a>
+        ) : photo}
         <div className="absolute top-2 left-2.5 flex flex-wrap items-center gap-1 pointer-events-none">
           <div className={cn(STAMP, 'bg-blue-600 text-white')}>SUBJECT</div>
         </div>

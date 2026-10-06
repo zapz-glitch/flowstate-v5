@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { submitBatchAnalysis, retryFailedAddresses, getBatchStreamToken, resumeBatch, stopBatch, cancelBatch, type BatchResult } from './actions'
 
 import { getBatchStatus, getBatchJobs } from '@/lib/batch-client'
+import { PageHeader } from '@/components/ui/page-header'
 
 type Phase = 'upload' | 'processing' | 'complete'
 type ConfBucket = 'high' | 'medium' | 'low' | 'unrated'
@@ -599,13 +600,7 @@ export default function BatchPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Batch Import</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Upload a CSV with addresses to generate analysis reports in bulk.
-        </p>
-      </div>
+      <PageHeader title="Batch Import" />
 
       {/* Error */}
       {error && (

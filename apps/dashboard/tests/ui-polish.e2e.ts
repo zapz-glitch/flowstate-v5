@@ -20,9 +20,14 @@ const MENU_PAGES = [
   { path: '/dashboard/analytics', title: 'Analytics' },
   { path: '/dashboard/api-hub', title: 'API Hub' },
   { path: '/dashboard/settings', title: 'Settings' },
+  { path: '/dashboard/batch', title: 'Batch Import' },
+  { path: '/dashboard/seo', title: 'SEO Engine' },
+  { path: '/dashboard/cdarv', title: 'CDARV' },
+  // Admin Panel, User Management and Observability also use PageHeader, but the
+  // local test user is not an admin and is redirected, so they are not checked here.
 ]
 
-describe('page headers are title only', () => {
+describe('page headers are title only on every dashboard page', () => {
   for (const page of MENU_PAGES) {
     test(`${page.title} opens with one title and no subtitle line`, WEB, async ({ app, screen }) => {
       await app.open(page.path)
@@ -126,6 +131,18 @@ describe('Property Search with a report loaded', () => {
     await expect(screen.getByText('List $', { exact: false })).toHaveCount(0)
   })
 
+  test('the subject photo and the comp photos open Street View in a new tab', WEB, async (fx) => {
+    const { browser } = fx
+    await openLoadedSearch(fx)
+    const subjectLink = browser.locator('[data-card-key="subject"] a[title="Open Street View"]')
+    await expect(subjectLink).toBeVisible()
+    await expect(subjectLink).toHaveAttribute('target', '_blank')
+    expect(String(await subjectLink.getAttribute('href'))).toMatch(/^https:\/\/www\.google\.com\/maps\//)
+    const compLink = browser.locator('[data-card-key]:not([data-card-key="subject"]) a[title="Open Street View"]').first()
+    await expect(compLink).toBeVisible()
+    expect(String(await compLink.getAttribute('href'))).toMatch(/^https:\/\/www\.google\.com\/maps\//)
+  })
+
   test('Condition sits under Sq Ft', WEB, async (fx) => {
     const { browser } = fx
     await openLoadedSearch(fx)
@@ -175,6 +192,8 @@ describe('Property Search with a report loaded', () => {
     await browser.mouse.move(target.x - 8, target.y - 8)
     await browser.mouse.move(target.x, target.y)
     await expect(panel).toBeVisible()
+    // Both photos in the panel, the comp's and the subject's, open Street View
+    await expect(browser.locator('[role="dialog"][aria-label="Comp beside the subject property"] a[title="Open Street View"]')).toHaveCount(2)
     // Record the panel's opacity while it closes
     await browser.evaluate(() => {
       const w = window as unknown as { __opacity: Array<number | null> }
@@ -263,6 +282,44 @@ describe('Property Search with a report loaded', () => {
     // Going up retraces the same positions and ends at the top
     expect(run.up.map((s) => s.scrollTop).slice(0, 3)).toEqual([run.down[2].scrollTop, run.down[1].scrollTop, run.down[0].scrollTop])
     expect(run.up[3].scrollTop).toBeLessThan(5)
+  })
+})
+
+describe('Existing Reports dialog', () => {
+  test('opens for an address that already has a report, and fades out when closed', WEB, async ({ app, screen, browser }) => {
+    // Never write: block non-GET API calls (the run is never started, we only close the dialog)
+    await browser.route('**/user/reports/**', async (route) => {
+      if (route.request.method === 'GET') await route.continue()
+      else await route.abort()
+    })
+    await app.open('/dashboard/reports')
+    const firstRow = screen.getByRole('link', 'View').first()
+    await expect(firstRow).toBeVisible({ timeout: 30_000 })
+    // The address of the first saved report, read from its row
+    const address = (await browser.evaluate(() => {
+      const link = [...document.querySelectorAll('a')].find((a) => a.textContent?.trim() === 'View')
+      const row = link?.closest('tr')
+      return row?.querySelector('td')?.textContent?.trim() ?? ''
+    })) as string
+    expect(address.length, 'the first report row has an address').toBeGreaterThan(5)
+    await app.open(`/dashboard/analyze?address=${encodeURIComponent(address)}`)
+    const dialog = screen.getByRole('dialog', 'Existing Reports Found')
+    await expect(dialog).toBeVisible({ timeout: 30_000 })
+    await browser.evaluate(() => {
+      const w = window as unknown as { __opacity: Array<number | null> }
+      w.__opacity = []
+      const id = setInterval(() => {
+        const el = document.querySelector('[role="dialog"]')
+        w.__opacity.push(el ? Number(getComputedStyle(el).opacity) : null)
+      }, 16)
+      setTimeout(() => clearInterval(id), 2500)
+      return true
+    })
+    // Cancel, not Escape: Escape can land before the dialog has taken focus
+    await screen.getByRole('button', 'Cancel').tap()
+    await expect(dialog).toBeHidden({ timeout: 5000 })
+    const opacity = (await browser.evaluate(() => (window as unknown as { __opacity: Array<number | null> }).__opacity)) as Array<number | null>
+    expect(opacity.some((v) => v !== null && v > 0.05 && v < 0.95), 'it faded rather than cut out').toBe(true)
   })
 })
 

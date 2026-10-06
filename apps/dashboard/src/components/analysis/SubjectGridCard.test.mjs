@@ -105,6 +105,23 @@ test('the photo strip uses compact thumbnails', () => {
   assert.match(render(base), /data-gallery="2" data-compact="true"/)
 })
 
-test('no Street View button on the card', () => {
-  assert.doesNotMatch(render(base), /Street View/i)
+
+test('the photo opens Street View in a new tab when the subject has a location', () => {
+  const out = render({ ...base, latitude: 33.9, longitude: -84.5 })
+  assert.match(out, /<a href="https:\/\/www\.google\.com\/maps\/@\?api=1&amp;map_action=pano&amp;viewpoint=33\.9,-84\.5" target="_blank" rel="noopener noreferrer"[^>]*title="Open Street View">/)
+  // the photo and the SUBJECT badge are both inside the link
+  const link = out.slice(out.indexOf('title="Open Street View"'), out.indexOf('</a>', out.indexOf('title="Open Street View"')))
+  assert.match(link, /data-stub="photo"/)
+  assert.match(link, />Subject</)
+})
+
+test('with only an address the photo still links, to a map search', () => {
+  assert.match(render(base), /title="Open Street View"/)
+  assert.match(render(base), /maps\/search/)
+})
+
+test('with no location at all the photo is not a link', () => {
+  const out = render({ ...base, address: undefined, latitude: null, longitude: null })
+  assert.doesNotMatch(out, /Open Street View/)
+  assert.match(out, /data-stub="photo"/)
 })
