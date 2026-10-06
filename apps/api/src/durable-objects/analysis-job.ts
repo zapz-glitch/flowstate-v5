@@ -333,7 +333,7 @@ export class AnalysisJobDO {
             await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
             return
           }
-          await this.env.API_CACHE.delete(config.evalResultCacheKey).catch(() => {})
+          await this.env.API_CACHE?.delete(config.evalResultCacheKey).catch(() => {})
         }
       } catch { /* cache lookup best-effort */ }
     }
@@ -1229,7 +1229,7 @@ export class AnalysisJobDO {
       }).catch((e) => console.log('[telemetry] run_telemetry insert failed:', e))
 
       if (config.evalResultCacheKey) {
-        await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+        await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
           expirationTtl: 21 * 24 * 60 * 60, // 21 days
         }).catch(() => { /* best-effort */ })
       }
@@ -1424,7 +1424,7 @@ export class AnalysisJobDO {
           })
           await linkRunRecordToReport(db.$client, runRecordId, config.jobId, config.userId)
           if (config.evalResultCacheKey) {
-            await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+            await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
               expirationTtl: 21 * 24 * 60 * 60, // 21 days
             }).catch(() => { /* best-effort */ })
           }
@@ -1458,18 +1458,18 @@ export class AnalysisJobDO {
   private markEvalActive(body: { jobId: string; userId: string; search?: { address?: string; streetAddress?: string; city?: string; state?: string; zipCode?: string } }): void {
     const srch = body.search ?? {}
     const address = srch.address ?? [srch.streetAddress, srch.city, srch.state, srch.zipCode].filter(Boolean).join(', ')
-    this.state.waitUntil(
-      this.env.API_CACHE.put(
-        `eval-active:${body.userId}:${body.jobId}`,
-        JSON.stringify({ jobId: body.jobId, userId: body.userId, address, startedAt: new Date().toISOString() }),
-        { expirationTtl: 1800 },
-      ).catch(() => {}),
-    )
+    const marker = this.env.API_CACHE?.put(
+      `eval-active:${body.userId}:${body.jobId}`,
+      JSON.stringify({ jobId: body.jobId, userId: body.userId, address, startedAt: new Date().toISOString() }),
+      { expirationTtl: 1800 },
+    ).catch(() => {})
+    if (marker) this.state.waitUntil(marker)
   }
 
   private clearEvalActive(jobId: string): void {
     const uid = this.jobState?.userId ?? ''
-    this.state.waitUntil(this.env.API_CACHE.delete(`eval-active:${uid}:${jobId}`).catch(() => {}))
+    const cleared = this.env.API_CACHE?.delete(`eval-active:${uid}:${jobId}`).catch(() => {})
+    if (cleared) this.state.waitUntil(cleared)
   }
 
   private async saveRunRecord(
