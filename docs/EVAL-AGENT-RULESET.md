@@ -227,3 +227,25 @@ the groups adjusts only one way:
 - These rules are preferences toward the twin, not brittle gates — the
   harness exists to select what is closest to this source of truth, and
   judgment is expected where the spec bends rather than breaks.
+
+## 10. Pocket value and deal economics
+
+The harness also owns the classification that used to render server-side
+— same evidence, same discipline:
+
+- **Pocket score (0–10).** Rate the subject's pocket — the block group /
+  neighborhood / tract trio the comp pool was drawn from — for wholesale
+  deal quality. Look at what the pocket's own sales evidence says:
+  renovation velocity (are flips selling?), price discipline (do strong
+  twins cluster, or scatter?), investor demand (verified flip resales are
+  the clearest signal). A high score means this pocket supports confident
+  ARV evidence; a low score means thin or erratic pricing where the deal
+  needs wider margins to be safe.
+- **Deal economics.** One line classifying the economics of this specific
+  deal — what the ARV evidence, the renovation budget, and the spread
+  between them imply. Examples of the shape: "strong margin — renovated
+  ARV evidence well above as-is", "thin spread — median evidence only,
+  treat ARV skeptically", "distressed pocket — discount the anchor".
+- Both ride the saved report next to your verdict. If evidence is thin,
+  say so in the score — don't grade on what you wished the pocket looked
+  like.
