@@ -448,19 +448,19 @@ export async function performAnalysisPhase1(
   let { bundle } = params
   const appraisalService = createAppraisalService()
   const rules = params.appraisalRules ?? {}
-  const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
-  const adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
+  let filters: AppraisalFilter[]
+  let adjustments: AppraisalAdjustment[]
 
   if (params.harness === 'agent') {
     // Ruleset-governed run — the caller's overrides are the whole grid.
     // No default injection: an empty override means "no filters", so comps
     // stay enabled unless a hard data gate fails. The agent weighs geo /
     // age / size preferences itself under EVAL-AGENT-RULESET.md.
-    filters.length = 0
-    filters.push(...(rules.filters ?? []))
-    adjustments.length = 0
-    adjustments.push(...(rules.adjustments ?? []))
+    filters = [...(rules.filters ?? [])]
+    adjustments = [...(rules.adjustments ?? [])]
   } else {
+    filters = [...(rules.filters ?? DEFAULT_FILTERS)]
+    adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
     // Filters the preset doesn't define at all are injected with system defaults
     // so the audit trail always covers every rule. Filters the preset DOES define
     // keep the user's own enabled + required(preferred) choices — the preset is
@@ -2062,6 +2062,10 @@ export function harnessWiden(ctx: Phase1Context, widened: NormalizedComparable[]
     adjustments: ctx.adjustments,
   })
   ctx.appraisalResult.comparables.push(...widenedResult.comparables)
+  // The response builder reads bundle.comparables for comp source/listing
+  // detail — widened comps must join it or a selected widened comp loses
+  // its source evidence in the saved report.
+  ctx.bundle.comparables.push(...added)
   stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays)
   const cls = new Map(ctx.compClassifications)
   for (const [id, c] of classifyCompsByEvidence(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.compCurbAppeal)) {

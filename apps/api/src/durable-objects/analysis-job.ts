@@ -368,9 +368,14 @@ export class AnalysisJobDO {
     const filters = [...(config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS)] as AppraisalFilter[]
     // Inject defaults for filter types the preset doesn't define — same
     // merge performAnalysis does, so pruning/params see the identical
-    // effective rule set (incl. sale_age_expansion* tiers).
-    for (const df of DEFAULT_FILTERS) {
-      if (!filters.some((f) => f.type === df.type)) filters.push({ ...df })
+    // effective rule set (incl. sale_age_expansion* tiers). Agent runs
+    // keep the caller's overrides verbatim instead: injected defaults
+    // would push sqft/sale-age constraints into the provider request and
+    // cull upstream the very comps the agent is meant to weigh.
+    if (config.harness !== 'agent') {
+      for (const df of DEFAULT_FILTERS) {
+        if (!filters.some((f) => f.type === df.type)) filters.push({ ...df })
+      }
     }
     const apiFilterParams = filtersToApiParams(filters)
 
