@@ -46,6 +46,12 @@ export interface PipelineItem {
   offer_stage?: 'deadline_today' | 'waiting_for_offers' | string | null
   deadline_at?: string | null
   deadline_note?: string | null
+  /** Pocket presence — attached by the queue merge */
+  metro?: string | null
+  pocketKey?: string | null
+  pocketName?: string | null
+  pocketScore?: number | null
+  source?: 'api' | string | null
 }
 
 export interface PipelineMetrics {
