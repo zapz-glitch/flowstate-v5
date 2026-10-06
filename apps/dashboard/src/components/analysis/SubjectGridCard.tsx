@@ -86,7 +86,7 @@ export function SubjectGridCard({ subject, isLoading, footer, stats, actions }: 
                     href={subject.listingUrl ?? `https://www.zillow.com/homes/${encodeURIComponent(subject.address!)}_rb/`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-body-sm font-semibold hover:text-primary hover:underline truncate"
+                    className="text-body-sm font-semibold text-foreground truncate rounded px-0.5 -mx-0.5 transition-colors hover:text-foreground hover:bg-secondary active:scale-[0.98]"
                     title={subject.address ?? undefined}
                   >
                     {shortAddress}
