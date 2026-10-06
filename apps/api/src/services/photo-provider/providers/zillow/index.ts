@@ -28,6 +28,10 @@ import {
   createFirecrawlZillowFetcher,
   generateZillowUrl as generateZillowUrlFromFirecrawl,
 } from './firecrawl-fetcher'
+import {
+  ScrapflyZillowFetcher,
+  createScrapflyZillowFetcher,
+} from './scrapfly-fetcher'
 import type { ZillowPropertyIdentifier } from './types'
 
 // Re-export types and utilities
@@ -38,14 +42,15 @@ export { FirecrawlZillowFetcher, createFirecrawlZillowFetcher } from './firecraw
 // Re-export generateZillowUrl (use Firecrawl version as primary)
 export { generateZillowUrlFromFirecrawl as generateZillowUrl }
 
-// Type alias for the fetcher (supports both)
-export type ZillowFetcher = FirecrawlZillowFetcher | GeminiZillowFetcher
+// Type alias for the fetcher (supports all three)
+export type ZillowFetcher = ScrapflyZillowFetcher | FirecrawlZillowFetcher | GeminiZillowFetcher
 
 /**
  * Check if Zillow fetching is available (for Workers)
  * Requires Firecrawl API key. OpenRouter is optional (fallback for LLM parsing).
  */
 export function isZillowFetcherAvailable(env: Env): boolean {
+  if (env.SCRAPFLY_API_KEY) return true
   if (env.FIRECRAWL_API_KEY) return true
   return false
 }
@@ -55,6 +60,16 @@ export function isZillowFetcherAvailable(env: Env): boolean {
  * Uses Firecrawl v2 JSON extraction (primary) + OpenRouter LLM (fallback)
  */
 export function createZillowFetcher(env: Env): ZillowFetcher | null {
+  // Serper+Scrapfly is the primary fetcher — Firecrawl removed from the stack.
+  if (env.SCRAPFLY_API_KEY) {
+    return createScrapflyZillowFetcher({
+      apiKey: env.SCRAPFLY_API_KEY,
+      apiUrl: env.SCRAPFLY_URL,
+      serperApiKey: env.SERPER_API_KEY,
+      cache: env.API_CACHE,
+      cacheTtl: 30 * 24 * 60 * 60,
+    })
+  }
   if (env.FIRECRAWL_API_KEY) {
     return createFirecrawlZillowFetcher({
       apiKey: env.FIRECRAWL_API_KEY,
@@ -76,6 +91,7 @@ export const createZillowFetcherFromEnv = createZillowFetcher
  * Get the provider name being used
  */
 export function getZillowFetcherProvider(env: Env): string | null {
+  if (env.SCRAPFLY_API_KEY) return env.SERPER_API_KEY ? 'serper+scrapfly' : 'scrapfly'
   if (env.FIRECRAWL_API_KEY) return env.OPENROUTER_API_KEY ? 'firecrawl-json+openrouter-fallback' : 'firecrawl-json'
   return null
 }

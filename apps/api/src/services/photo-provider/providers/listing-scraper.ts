@@ -137,7 +137,13 @@ export const realtorAdapter: ListingSiteAdapter = {
 
 export interface ListingScraperConfig {
   /** Firecrawl API key */
-  apiKey: string
+  apiKey?: string
+  /** Scrapfly API key — scrape engine when Firecrawl is absent */
+  scrapflyApiKey?: string
+  /** Scrapfly endpoint (default https://api.scrapfly.io/scrape) */
+  scrapflyUrl?: string
+  /** Serper API key — listing-URL resolution before the legacy chains */
+  serperApiKey?: string
   /** OpenRouter API key for LLM fallback extraction */
   openrouterApiKey?: string
   openrouterModel?: string
@@ -166,7 +172,10 @@ RULES:
 4. Return ONLY valid JSON, no markdown fences or explanation`
 
 export class ListingPhotoScraper {
-  private apiKey: string
+  private apiKey?: string
+  private scrapflyApiKey?: string
+  private scrapflyUrl?: string
+  private serperApiKey?: string
   private openrouterApiKey?: string
   private openrouterModel: string
   private cache?: KVNamespace
@@ -174,6 +183,9 @@ export class ListingPhotoScraper {
 
   constructor(config: ListingScraperConfig) {
     this.apiKey = config.apiKey
+    this.scrapflyApiKey = config.scrapflyApiKey
+    this.scrapflyUrl = config.scrapflyUrl
+    this.serperApiKey = config.serperApiKey
     this.openrouterApiKey = config.openrouterApiKey
     this.openrouterModel = config.openrouterModel ?? 'google/gemini-2.5-flash'
     this.cache = config.cache
@@ -190,8 +202,9 @@ export class ListingPhotoScraper {
     return `listing-photos-v2:${adapter.name}:${slug}`
   }
 
-  /** Scrape a listing page through Firecrawl */
+  /** Scrape a listing page — Firecrawl when keyed, Scrapfly otherwise */
   private async scrape(url: string): Promise<{ html: string; markdown: string }> {
+    if (!this.apiKey && this.scrapflyApiKey) return this.scrapeViaScrapfly(url)
     const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
       headers: {
@@ -217,6 +230,50 @@ export class ListingPhotoScraper {
     // Prefer rawHtml — Firecrawl's sanitized `html` strips <script> blocks,
     // which is where Redfin/Realtor embed listPrice + JSON-LD offers.price.
     return { html: data.data.rawHtml || data.data.html || '', markdown: data.data.markdown || '' }
+  }
+
+  /** Scrapfly scrape — ASP + JS render, residential escalation on denial. */
+  private async scrapeViaScrapfly(url: string, residential = false): Promise<{ html: string; markdown: string }> {
+    const params = new URLSearchParams({
+      key: this.scrapflyApiKey as string,
+      url,
+      asp: 'true',
+      country: 'us',
+      render_js: 'true',
+    })
+    if (residential) params.set('proxy_pool', 'public_residential_pool')
+    const resp = await fetch(`${this.scrapflyUrl ?? 'https://api.scrapfly.io/scrape'}?${params}`, {
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (!resp.ok) throw new Error(`Scrapfly failed: ${resp.status}`)
+    const data = (await resp.json()) as { result?: { status_code?: number; content?: string } }
+    const content = data.result?.content
+    const status = data.result?.status_code
+    if (!content || (status != null && status >= 400)) {
+      if (!residential) return this.scrapeViaScrapfly(url, true)
+      throw new Error(`Scrapfly upstream ${status ?? 'empty'}`)
+    }
+    return { html: content, markdown: '' }
+  }
+
+  /** Serper site-search → first organic link matching the adapter pattern. */
+  private async serperResolveUrl(query: string, pattern: RegExp): Promise<string | null> {
+    if (!this.serperApiKey) return null
+    try {
+      const resp = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': this.serperApiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, gl: 'us', num: 5 }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!resp.ok) return null
+      const data = (await resp.json()) as { organic?: Array<{ link?: string }> }
+      for (const item of data.organic ?? []) {
+        const m = item.link?.match(pattern)
+        if (m) return m[0]
+      }
+    } catch { /* best-effort */ }
+    return null
   }
 
   /** LLM extraction fallback when CDN patterns yield too few photos */
@@ -348,8 +405,12 @@ export class ListingPhotoScraper {
     const valid = (url: string | null | undefined) =>
       url && this.listingUrlMatchesAddress(url, property) ? url : null
 
+    // 0. Serper site-search — direct listing-URL hits without a Google scrape
+    const viaSerper = valid(await this.serperResolveUrl(query, adapter.listingUrlPattern))
+    if (viaSerper) return viaSerper
+
     // 1. Firecrawl search API
-    try {
+    if (this.apiKey) try {
       const res = await fetch('https://api.firecrawl.dev/v1/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
@@ -368,6 +429,7 @@ export class ListingPhotoScraper {
 
     // 2. DuckDuckGo HTML endpoint — outbound links are wrapped in uddg=
     //    params, so decode those before scanning for the listing URL.
+    //    (kept as the keyless fallback path when Serper is absent)
     try {
       const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
         headers: { 'User-Agent': UA, Accept: 'text/html' },

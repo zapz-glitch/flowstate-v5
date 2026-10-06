@@ -771,18 +771,25 @@ export async function performAnalysisPhase1(
   // classifications (the pipeline's longest wall-clock segment, up to ~45s)
   // overlap the vision assessment and valuation instead of serializing at
   // step 8b. Awaited where the comp_curb_appeal step records.
+  const clefCompsSorted = appraisalResult.comparables
+    .slice()
+    .sort((a, b) =>
+      Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
+      || Number(b.isEnabled) - Number(a.isEnabled)
+      || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)
-      ? Promise.all(
-          appraisalResult.comparables
-            .slice()
-            .sort((a, b) =>
-              Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
-              || Number(b.isEnabled) - Number(a.isEnabled)
-              || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-            .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
-            .map((comp) =>
-              Promise.race([
+      ? (async () => {
+          // Concurrency pool — Scrapfly saturates well below 27 parallel
+          // renders, so lanes run 6-wide in the sorted priority order.
+          const out: (CompConditionEvidence | null)[] = new Array(clefCompsSorted.length).fill(null)
+          let next = 0
+          const lane = async () => {
+            while (next < clefCompsSorted.length) {
+              const i = next++
+              const comp = clefCompsSorted[i]
+              out[i] = await Promise.race([
                 gatherCompConditionEvidence(env, {
                   propertyId: comp.id,
                   address: comp.address,
@@ -795,9 +802,12 @@ export async function performAnalysisPhase1(
                   squareFeet: comp.squareFeet ?? undefined,
                 }),
                 new Promise<null>((r) => setTimeout(() => r(null), 45_000)),
-              ]).catch(() => null),
-            ),
-        )
+              ]).catch(() => null)
+            }
+          }
+          await Promise.all(Array.from({ length: Math.min(6, clefCompsSorted.length) }, lane))
+          return out
+        })()
       : null
   if (arvComps.length > 0) {
     appraisalResult.insufficientComps = false
