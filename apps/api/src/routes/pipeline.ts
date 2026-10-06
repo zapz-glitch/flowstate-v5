@@ -285,10 +285,21 @@ async function attachPockets(
   const jobIds = [...new Set(items.map(jobIdOf).filter((x): x is string => x != null))]
   if (!jobIds.length) return
 
-  const rows = await c.env.DB.prepare(
-    `SELECT job_id, payload_json FROM run_records WHERE job_id IN (${jobIds.map(() => '?').join(',')})`,
-  ).bind(...jobIds).all<{ job_id: string; payload_json: string }>().catch(() => null)
-  const payloadByJob = new Map((rows?.results ?? []).map((r) => [r.job_id, r.payload_json]))
+  // D1 caps ~100 binds per query — chunk; and pull only the subtrees
+  // scoring reads (evidence + report), not the full payload.
+  const payloadByJob = new Map<string, string>()
+  for (let i = 0; i < jobIds.length; i += 90) {
+    const chunk = jobIds.slice(i, i + 90)
+    const rows = await c.env.DB.prepare(
+      `SELECT job_id,
+              json_extract(payload_json, '$.evidence') AS evidence,
+              json_extract(payload_json, '$.result.response.report') AS report
+         FROM run_records WHERE job_id IN (${chunk.map(() => '?').join(',')})`,
+    ).bind(...chunk).all<{ job_id: string; evidence: string | null; report: string | null }>().catch(() => null)
+    for (const r of rows?.results ?? []) {
+      payloadByJob.set(r.job_id, JSON.stringify({ evidence: JSON.parse(r.evidence ?? 'null'), result: { response: { report: JSON.parse(r.report ?? 'null') } } }))
+    }
+  }
 
   // Pass 1 — derive pocket identity + deterministic inputs per item.
   const resolved = new Map<string, { id: ReturnType<typeof pocketFromPayload> & object; inputs: ReturnType<typeof deterministicInputs> }>()
