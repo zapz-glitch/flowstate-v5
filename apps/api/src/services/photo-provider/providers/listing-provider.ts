@@ -34,7 +34,8 @@ export class ListingPhotoProvider implements PhotoProvider {
   }
 
   isAvailable(): boolean {
-    return Boolean(this.env.FIRECRAWL_API_KEY || this.env.SCRAPFLY_API_KEY)
+    // Firecrawl-only fetch path — Scrapfly/Serper removed per owner spec.
+    return Boolean(this.env.FIRECRAWL_API_KEY)
   }
 
   private getScraper(): ListingPhotoScraper | null {
@@ -42,9 +43,6 @@ export class ListingPhotoProvider implements PhotoProvider {
     if (!this.scraper) {
       this.scraper = new ListingPhotoScraper({
         apiKey: this.env.FIRECRAWL_API_KEY,
-        scrapflyApiKey: this.env.SCRAPFLY_API_KEY,
-        scrapflyUrl: this.env.SCRAPFLY_URL,
-        serperApiKey: this.env.SERPER_API_KEY,
         openrouterApiKey: this.env.OPENROUTER_API_KEY,
         openrouterModel: this.env.OPENROUTER_MODEL,
         cache: this.env.API_CACHE,
@@ -63,7 +61,7 @@ export class ListingPhotoProvider implements PhotoProvider {
       return {
         success: false,
         propertyId: property.propertyId,
-        error: `${this.name} fetcher not available - SCRAPFLY_API_KEY or FIRECRAWL_API_KEY required`,
+        error: `${this.name} fetcher not available - FIRECRAWL_API_KEY required`,
         code: 'PROVIDER_UNAVAILABLE',
       }
     }

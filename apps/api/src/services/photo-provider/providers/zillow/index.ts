@@ -60,22 +60,12 @@ export function isZillowFetcherAvailable(env: Env): boolean {
  * Uses Firecrawl v2 JSON extraction (primary) + OpenRouter LLM (fallback)
  */
 export function createZillowFetcher(env: Env): ZillowFetcher | null {
-  // Serper+Scrapfly is the primary fetcher — Firecrawl removed from the stack.
-  if (env.SCRAPFLY_API_KEY) {
-    return createScrapflyZillowFetcher({
-      apiKey: env.SCRAPFLY_API_KEY,
-      apiUrl: env.SCRAPFLY_URL,
-      serperApiKey: env.SERPER_API_KEY,
-      cache: env.API_CACHE,
-      cacheTtl: 30 * 24 * 60 * 60,
-    })
-  }
+  // Owner-specified chain — Firecrawl only:
+  //   Address → /v1/search → URL → /v1/scrape → photos+text → Clef.
+  // No Scrapfly, no Serper, no Stingray in the fetch path.
   if (env.FIRECRAWL_API_KEY) {
-    return createFirecrawlZillowFetcher({
-      apiKey: env.FIRECRAWL_API_KEY,
-      openrouterApiKey: env.OPENROUTER_API_KEY,  // Optional fallback
-      openrouterModel: env.OPENROUTER_MODEL,
-      scrapflyApiKey: env.SCRAPFLY_API_KEY,
+    return createScrapflyZillowFetcher({
+      firecrawlApiKey: env.FIRECRAWL_API_KEY,
       cache: env.API_CACHE,
       cacheTtl: 30 * 24 * 60 * 60,
     })
@@ -91,8 +81,7 @@ export const createZillowFetcherFromEnv = createZillowFetcher
  * Get the provider name being used
  */
 export function getZillowFetcherProvider(env: Env): string | null {
-  if (env.SCRAPFLY_API_KEY) return env.SERPER_API_KEY ? 'serper+scrapfly' : 'scrapfly'
-  if (env.FIRECRAWL_API_KEY) return env.OPENROUTER_API_KEY ? 'firecrawl-json+openrouter-fallback' : 'firecrawl-json'
+  if (env.FIRECRAWL_API_KEY) return 'firecrawl-search+scrape'
   return null
 }
 

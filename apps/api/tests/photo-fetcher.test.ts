@@ -8,9 +8,9 @@ import {
 import { parseZillowHtml } from '../src/services/photo-provider/providers/zillow/firecrawl-fetcher'
 import type { Env } from '../src/types'
 
-// Unit coverage for the Serper+Scrapfly listing fetcher: Zillow HTML parsing,
-// URL-resolution ladder (generated URL → Serper → site fallbacks), fetch
-// transport, and provider selection. Fetch is stubbed — no network.
+// Unit coverage for the Firecrawl listing fetcher — the owner-specified
+// chain: /v1/search → URL → /v1/scrape → photos+description, with
+// Zillow → Redfin → Realtor fallback lanes. Fetch is stubbed — no network.
 
 const PROP = {
   propertyId: 'p1',
@@ -20,9 +20,12 @@ const PROP = {
   zipCode: '76105',
 }
 
+const ZILLOW_URL = 'https://www.zillow.com/homedetails/4428-Crenshaw-Ave-Fort-Worth-TX-76105/12345_zpid/'
+const REDFIN_URL = 'https://www.redfin.com/TX/Fort-Worth/4428-Crenshaw-Ave-76105/home/99887766'
+
 const ZILLOW_HTML = `
 <html><head>
-<link rel="canonical" href="https://www.zillow.com/homedetails/4428-Crenshaw-Ave-Fort-Worth-TX-76105/12345_zpid/"/>
+<link rel="canonical" href="${ZILLOW_URL}"/>
 </head><body>
 <div class="hollywood-gallery">
   <img src="https://photos.zillowstatic.com/fp/abc123abc123abc123abc123-p_f.jpg"/>
@@ -33,18 +36,39 @@ const ZILLOW_HTML = `
 <meta property="og:description" content="Charming 3 bed 1 bath ranch in Eastwood Addition with updated kitchen and large backyard."/>
 </body></html>`
 
-const EMPTY_HTML = '<html><body>not found</body></html>'
+const REDFIN_HTML = `<html><body>
+  <img src="https://ssl.cdn-redfin.com/photo/1/bigphoto/123/123_1.jpg"/>
+  <img src="https://ssl.cdn-redfin.com/photo/1/bigphoto/123/123_2.jpg"/>
+  <meta property="og:description" content="Sold as-is fixer upper in Eastwood Addition bring your contractor vision to life today."/>
+</body></html>`
 
-function stubFetch(handlers: Array<{ match: string | RegExp; body: unknown; ok?: boolean }>) {
+const SEARCH_PAGE_HTML = `
+<html><body>
+  <img src="https://photos.zillowstatic.com/fp/other111other111other111-p_f.jpg"/>
+  <img src="https://photos.zillowstatic.com/fp/other222other222other222-p_f.jpg"/>
+</body></html>`
+
+const fcSearch = (urls: string[]) => ({
+  success: true,
+  data: urls.map((url) => ({ url })),
+})
+const fcScrape = (html: string) => ({
+  success: true,
+  data: { rawHtml: html, html },
+})
+
+/** Stub fetch: handlers keyed on the Firecrawl endpoint + (optionally) a
+ *  substring the POSTed query/url must contain, matched against the request
+ *  body too. Calls log `endpoint :: body` so tests can assert order. */
+function stubFetch(handlers: Array<{ endpoint: string; contains?: string; body: unknown }>) {
   const calls: string[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input)
-    calls.push(url)
+    const reqBody = typeof init?.body === 'string' ? init.body : ''
+    calls.push(`${url} :: ${reqBody}`)
     for (const h of handlers) {
-      const hit = typeof h.match === 'string' ? url.includes(h.match) : h.match.test(url)
-      if (hit) {
-        const body = typeof h.body === 'string' ? h.body : JSON.stringify(h.body)
-        return new Response(body, { status: h.ok === false ? 500 : 200 })
+      if (url.includes(h.endpoint) && (!h.contains || reqBody.includes(h.contains))) {
+        return new Response(JSON.stringify(h.body), { status: 200 })
       }
     }
     return new Response('{}', { status: 404 })
@@ -60,11 +84,11 @@ function stubFetch(handlers: Array<{ match: string | RegExp; body: unknown; ok?:
   assert.ok(ext.photos.every((p) => !p.includes('-h_')), 'agent headshots must be excluded')
 }
 
-// ── 2. Provider selection: Scrapfly preferred, provider name reflects keys ──
+// ── 2. Provider selection: Firecrawl key only — no Scrapfly/Serper needed ──
 {
-  const env = { SCRAPFLY_API_KEY: 'k', SERPER_API_KEY: 's' } as Env
+  const env = { FIRECRAWL_API_KEY: 'fc-x' } as Env
   assert.equal(isZillowFetcherAvailable(env), true)
-  assert.equal(getZillowFetcherProvider(env), 'serper+scrapfly')
+  assert.equal(getZillowFetcherProvider(env), 'firecrawl-search+scrape')
   const fetcher = createZillowFetcher(env)
   assert.ok(fetcher instanceof ScrapflyZillowFetcher)
   const noKeys = {} as Env
@@ -72,166 +96,82 @@ function stubFetch(handlers: Array<{ match: string | RegExp; body: unknown; ok?:
   assert.equal(createZillowFetcher(noKeys), null)
 }
 
-// ── 3. Happy path: generated Zillow URL scrape yields photos ──
+// ── 3. Happy path: search resolves Zillow URL, scrape yields photos ──
 {
   const calls = stubFetch([
-    {
-      match: 'api.scrapfly.io/scrape',
-      body: { result: { status_code: 200, content: ZILLOW_HTML } },
-    },
+    { endpoint: 'v1/search', contains: 'zillow.com/homedetails', body: fcSearch([ZILLOW_URL]) },
+    { endpoint: 'v1/scrape', body: fcScrape(ZILLOW_HTML) },
   ])
-  const f = new ScrapflyZillowFetcher({ apiKey: 'k' })
+  const f = new ScrapflyZillowFetcher({ firecrawlApiKey: 'k' })
   const res = await f.fetchListing(PROP, { skipCache: true })
   assert.ok(res.listing, 'expected a listing')
   assert.ok((res.listing?.photos.length ?? 0) >= 2)
-  // Stingray lane fires first (non-rendered) and fails to parse HTML, then the
-  // rendered Zillow scrape succeeds — at least one render_js call required.
-  assert.ok(calls.some((c) => c.includes('render_js=true')), 'expected a rendered fallback call')
-  assert.equal(f.firecrawlCallCount >= 1, true)
+  assert.match(res.listing?.description ?? '', /Charming 3 bed/)
+  // Exactly the decision tree: one search call, one scrape call, in order.
+  const searches = calls.filter((c) => c.includes('v1/search'))
+  const scrapes = calls.filter((c) => c.includes('v1/scrape'))
+  assert.equal(searches.length, 1)
+  assert.equal(scrapes.length, 1)
+  assert.ok(scrapes[0].includes(ZILLOW_URL))
+  assert.equal(f.firecrawlCallCount, 2)
 }
 
-// ── 3c. Stingray-first: resolve + media JSON short-circuit before any render ──
+// ── 3b. Search-page photos are NOT listing evidence: a scrape that lands on
+// a results page (no homedetails canonical) must be rejected even when it
+// carries photos — wrong-house evidence is worse than none.
 {
-  const ST_AUTOCOMPLETE = '{}&&' + JSON.stringify({
-    payload: { sections: [{ rows: [{
-      id: '1_31706722',
-      name: '4428 Crenshaw Ave',
-      subName: 'Fort Worth, TX 76105',
-      url: '/TX/Fort-Worth/4428-Crenshaw-Ave-76105/home/31706722',
-    }] }] },
-  })
-  const ST_MEDIA = '{}&&' + JSON.stringify({
-    payload: {
-      mediaBrowserInfo: { photos: [
-        { photoUrls: { fullScreenPhotoUrl: 'https://ssl.cdn-redfin.com/photo/a.jpg' } },
-        { photoUrls: { nonFullScreenPhotoUrl: 'https://ssl.cdn-redfin.com/photo/b.jpg' } },
-      ] },
-      addressSectionInfo: { marketingRemarks: 'Updated ranch with new roof.' },
-    },
-  })
+  stubFetch([
+    { endpoint: 'v1/search', body: fcSearch([ZILLOW_URL, REDFIN_URL]) },
+    { endpoint: 'v1/scrape', contains: 'zillow.com', body: fcScrape(SEARCH_PAGE_HTML) },
+    { endpoint: 'v1/scrape', contains: 'redfin.com', body: fcScrape(REDFIN_HTML) },
+  ])
+  const f = new ScrapflyZillowFetcher({ firecrawlApiKey: 'k' })
+  const res = await f.fetchListing(PROP, { skipCache: true })
+  assert.ok(res.listing, 'results-page zillow photos rejected → redfin lane should win')
+  assert.ok(res.listing?.photos.every((p) => p.includes('cdn-redfin.com')))
+}
+
+// ── 4. Wrong-house guard: neighbor URL rejected at resolution ──
+{
   const calls = stubFetch([
-    { match: 'location-autocomplete', body: { result: { status_code: 200, content: ST_AUTOCOMPLETE } } },
-    { match: 'aboveTheFold', body: { result: { status_code: 200, content: ST_MEDIA } } },
-    { match: 'belowTheFold', body: { result: { status_code: 200, content: '{}&&{"payload":{}}' } } },
+    { endpoint: 'v1/search', body: fcSearch(['https://www.zillow.com/homedetails/9999-Wrong-Ave-Fort-Worth-TX-76105/111_zpid/']) },
+    { endpoint: 'v1/scrape', body: fcScrape(ZILLOW_HTML) },
   ])
-  const f = new ScrapflyZillowFetcher({ apiKey: 'k' })
-  const res = await f.fetchListing(PROP, { skipCache: true })
-  assert.ok(res.listing, 'expected a stingray listing')
-  assert.equal(res.listing?.photos.length, 2)
-  assert.ok(res.listing?.description?.includes('Updated ranch'))
-  // The whole point of the reorder: no rendered scrape should ever fire.
-  assert.ok(!calls.some((c) => c.includes('render_js=true')), 'stingray hit must not render')
-}
-
-// ── 3d. Stingray resolve must reject wrong-house rows ──
-{
-  const ST_WRONG = '{}&&' + JSON.stringify({
-    payload: { sections: [{ rows: [{
-      id: '1_999',
-      name: '4428 Different Blvd',
-      subName: 'Fort Worth, TX 76105',
-      url: '/TX/Fort-Worth/4428-Different-Blvd-76105/home/999',
-    }] }] },
-  })
-  const calls = stubFetch([
-    { match: 'location-autocomplete', body: { result: { status_code: 200, content: ST_WRONG } } },
-    { match: 'api.scrapfly.io/scrape', body: { result: { status_code: 200, content: ZILLOW_HTML } } },
-  ])
-  const f = new ScrapflyZillowFetcher({ apiKey: 'k' })
-  const res = await f.fetchListing(PROP, { skipCache: true })
-  // Wrong row ignored → falls through to the rendered Zillow lane.
-  assert.ok(res.listing, 'expected zillow fallback listing')
-  assert.ok((res.listing?.photos.length ?? 0) >= 2)
-}
-
-// ── 3b. Search-page photos are NOT listing evidence: a scrape that lands
-// on a results page (no homedetails canonical) must be rejected even when
-// it carries photos — wrong-house evidence is worse than none.
-{
-  const SEARCH_PAGE_HTML = `
-  <html><body>
-    <img src="https://photos.zillowstatic.com/fp/other111other111other111-p_f.jpg"/>
-    <img src="https://photos.zillowstatic.com/fp/other222other222other222-p_f.jpg"/>
-  </body></html>`
-  stubFetch([
-    { match: 'api.scrapfly.io/scrape', body: { result: { status_code: 200, content: SEARCH_PAGE_HTML } } },
-  ])
-  const f = new ScrapflyZillowFetcher({ apiKey: 'k' })
-  const res = await f.fetchListing(PROP, { skipCache: true })
-  assert.equal(res.listing, undefined, 'results-page photos must not pass as listing evidence')
-}
-
-// ── 4. Ladder: search-page miss → Serper homedetails → photos ──
-{
-  stubFetch([
-    { match: 'google.serper.dev', body: { organic: [{ link: 'https://www.zillow.com/homedetails/4428-Crenshaw-Ave-Fort-Worth-TX-76105/12345_zpid/' }] } },
-    { match: /scrape\?.*homedetails/, body: { result: { status_code: 200, content: ZILLOW_HTML } } },
-    { match: 'api.scrapfly.io/scrape', body: { result: { status_code: 200, content: EMPTY_HTML } } },
-  ])
-  const f = new ScrapflyZillowFetcher({ apiKey: 'k', serperApiKey: 's' })
-  const res = await f.fetchListing(PROP, { skipCache: true })
-  assert.ok(res.listing, 'expected listing via Serper-resolved URL')
-  assert.ok(res.listing?.photos.length)
-}
-
-// ── 5. Wrong-house guard: Serper neighbor URL rejected, falls to site lanes ──
-{
-  stubFetch([
-    // Serper returns a neighbor's zillow + a correct redfin listing
-    {
-      match: 'google.serper.dev',
-      body: {
-        organic: [
-          { link: 'https://www.zillow.com/homedetails/9999-Wrong-Ave-Fort-Worth-TX-76105/111_zpid/' },
-        ],
-      },
-    },
-    { match: 'api.scrapfly.io/scrape', body: { result: { status_code: 200, content: EMPTY_HTML } } },
-  ])
-  const f = new ScrapflyZillowFetcher({ apiKey: 'k', serperApiKey: 's' })
+  const f = new ScrapflyZillowFetcher({ firecrawlApiKey: 'k' })
   const res = await f.fetchListing(PROP, { skipCache: true })
   assert.equal(res.listing, undefined, 'wrong-number listing must be rejected')
   assert.ok(res.error)
+  // Every lane searched, but no scrape may fire on a wrong-number URL.
+  assert.ok(!calls.some((c) => c.includes('v1/scrape') && c.includes('9999-Wrong')))
 }
 
-// ── 6. Redfin lane: zillow misses everywhere, redfin listing carries photos ──
+// ── 5. Ladder: zillow lane misses → redfin lane hits → photos ──
 {
-  const REDFIN_HTML = `<html><body>
-    <img src="https://ssl.cdn-redfin.com/photo/1/bigphoto/123/123_1.jpg"/>
-    <img src="https://ssl.cdn-redfin.com/photo/1/bigphoto/123/123_2.jpg"/>
-    <meta property="og:description" content="Sold as-is fixer upper in Eastwood Addition bring your contractor vision to life today."/>
-  </body></html>`
-  stubFetch([
-    {
-      match: 'serper.dev',
-      body: (() => { /* dynamic per-query handled below */ return {} })(),
-    },
-    { match: 'api.scrapfly.io/scrape', body: { result: { status_code: 200, content: EMPTY_HTML } } },
+  const calls = stubFetch([
+    { endpoint: 'v1/search', contains: 'zillow', body: fcSearch([]) },
+    { endpoint: 'v1/search', contains: 'redfin', body: fcSearch([REDFIN_URL]) },
+    { endpoint: 'v1/scrape', body: fcScrape(REDFIN_HTML) },
   ])
-  // serper: first call (zillow) misses, second (redfin) hits
-  let serperCall = 0
-  globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
-    const url = String(input)
-    if (url.includes('serper.dev')) {
-      serperCall++
-      const link = serperCall === 1
-        ? null
-        : 'https://www.redfin.com/TX/Fort-Worth/4428-Crenshaw-Ave-76105/home/99887766'
-      return new Response(JSON.stringify({ organic: link ? [{ link }] : [] }))
-    }
-    if (url.includes('redfin.com')) {
-      return new Response(JSON.stringify({ result: { status_code: 200, content: REDFIN_HTML } }))
-    }
-    if (url.includes('api.scrapfly.io')) {
-      return new Response(JSON.stringify({ result: { status_code: 200, content: EMPTY_HTML } }))
-    }
-    return new Response('{}', { status: 404 })
-  }) as typeof fetch
-  const f = new ScrapflyZillowFetcher({ apiKey: 'k', serperApiKey: 's' })
+  const f = new ScrapflyZillowFetcher({ firecrawlApiKey: 'k' })
   const res = await f.fetchListing(PROP, { skipCache: true })
   assert.ok(res.listing, 'expected listing via Redfin lane')
   assert.ok(res.listing?.photos.every((p) => p.includes('cdn-redfin.com')))
   assert.match(res.listing?.description ?? '', /as-is/i)
+  // Redfin search only fires after the zillow lane failed — order matters.
+  const zi = calls.findIndex((c) => c.includes('v1/search') && c.includes('zillow'))
+  const rd = calls.findIndex((c) => c.includes('v1/search') && c.includes('redfin'))
+  assert.ok(zi >= 0 && rd > zi, 'zillow search must run before redfin search')
+}
+
+// ── 6. Total miss: all lanes empty → honest error, never fabricated evidence ──
+{
+  stubFetch([
+    { endpoint: 'v1/search', body: fcSearch([]) },
+  ])
+  const f = new ScrapflyZillowFetcher({ firecrawlApiKey: 'k' })
+  const res = await f.fetchListing(PROP, { skipCache: true })
+  assert.equal(res.listing, undefined)
+  assert.ok(res.error?.includes('no listing found'))
 }
 
 console.log('photo-fetcher: all assertions passed')
