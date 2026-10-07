@@ -375,8 +375,13 @@ human underwriter reads plus the pricing context:
 - `finishParity` — finish keywords the pocket's ARV comps advertise vs
   what the subject has. Items missing on the subject are your cosmetic
   upgrade list.
-- `flipDelta` — the local rehab $/sf measured from verified flip pairs in
-  this pool. `pathBRates.flipDeltaPerSqft` is the Path-B rate.
+- `flipDelta` — the local all-in rehab $/sf measured from verified flip
+  pairs in this pool. It is **corroboration, not the Path-B rate**: the
+  all-in number already carries systems spend, so stacking majors on it
+  double-counts. Post cosmetics at the tier rate + majors separately;
+  the harness benchmarks your priced subtotal against
+  `subjectSqft × flipDeltaPerSqft` and flags `HIGH_CAPEX_DENSITY` /
+  `LOW_CAPEX_DENSITY` beyond ±15%.
 - `costSchedule` — effective per-item costs (user overrides applied).
 
 Post a `renovation` object inside your selection:

@@ -90,6 +90,8 @@ export interface RenovationEvidence {
     pairs: Array<{ compId: string; buy: number; resale: number; sqft: number; rate: number }>
     medianRate: number | null
   }
+  /** Subject GLA — sizes the flip-delta corroboration benchmark. */
+  subjectSqft: number | null
   /** Effective per-item cost schedule (user overrides applied). */
   costSchedule: Record<string, number>
   /** Path-B rates: flip-delta first, caller table second, defaults last. */
@@ -243,6 +245,8 @@ export function buildRenovationEvidence(input: {
   subjectFeatures?: string[] | null
   /** Subject year built — drives the Tier-3 age baseline. */
   yearBuilt?: number | null
+  /** Subject GLA — sizes the flip-delta corroboration benchmark. */
+  subjectSqft?: number | null
   permits?: NormalizedPermit[] | null
   /** derivedBuybox.majorItems — already permit-assessed + override-priced */
   majorItems: Array<MajorItem & { reason?: string }>
@@ -358,6 +362,7 @@ export function buildRenovationEvidence(input: {
     sellerNoteClaims: { additions: input.rehabAdditions, advisories: input.rehabAdvisories },
     finishParity: { arvStandard, subjectHas, missingOnSubject },
     flipDelta: { pairs, medianRate },
+    subjectSqft: input.subjectSqft ?? null,
     costSchedule,
     pathBRates: {
       flipDeltaPerSqft: medianRate,
@@ -469,6 +474,18 @@ export function priceAgentRenovation(
   const subtotal = items.reduce((s, i) => s + i.resolvedCost, 0)
   const total = Math.round(subtotal * (1 + contingencyPct / 100))
   audit.push(`${items.length} line items, subtotal $${subtotal.toLocaleString()}, +${contingencyPct}% contingency → $${total.toLocaleString()}`)
+
+  // Flip-delta corroboration — the all-in local rehab rate benchmarks the
+  // bottom-up scope without contaminating it (renovation-crediting-rules.md
+  // + decision log: option b). ±15% passes; beyond → density flags.
+  const flipRate = evidence.pathBRates.flipDeltaPerSqft
+  if (flipRate != null && flipRate > 0 && evidence.subjectSqft != null && evidence.subjectSqft > 0 && subtotal > 0) {
+    const benchmark = evidence.subjectSqft * flipRate
+    const variance = (subtotal - benchmark) / benchmark
+    audit.push(`flip-delta benchmark $${Math.round(benchmark).toLocaleString()} (${evidence.subjectSqft}sf × $${flipRate}/sf) — variance ${(variance * 100).toFixed(1)}%`)
+    if (variance > 0.15) flags.push('HIGH_CAPEX_DENSITY')
+    else if (variance < -0.15) flags.push('LOW_CAPEX_DENSITY')
+  }
   if (posted.totalEstimate != null && Math.abs(posted.totalEstimate - total) > total * 0.15) {
     flags.push(`total_divergence:${Math.round(((posted.totalEstimate - total) / total) * 100)}%`)
     audit.push(`agent total $${posted.totalEstimate.toLocaleString()} diverged >15% from priced $${total.toLocaleString()} — priced wins`)
