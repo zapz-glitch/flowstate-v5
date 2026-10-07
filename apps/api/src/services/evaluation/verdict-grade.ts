@@ -45,8 +45,14 @@ export interface VerdictGrade {
   warnings: string[]
   /** Flat soft-penalty deducted from the composite (geo bleed = 0.1). */
   scorePenalty: number
-  /** Targeted correction feedback for the 1-revision gate — populated
-   *  only on hard d1/d2 fails, naming the failing driver/pick + boundary. */
+  /** Check names whose fail contradicts verified evidence — what the
+   *  revision gate rejects on. Hard fails on d1-d7 always gate; d8 gates
+   *  only when the agent STATED edges that contradict the verified band
+   *  (an unstated band is an invalid disregard — grade fails, gate
+   *  doesn't reject: no contradiction was posted). */
+  gateFails: string[]
+  /** Targeted correction feedback for the revision gate — populated for
+   *  every gated fail, naming the comp/item and the evidence violated. */
   gateFeedback: string[]
   gradedAt: string
 }
@@ -279,9 +285,18 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     arv: gradeBand('arv', statedEdges.arv ?? null, bands.arv),
   }
   const bandResults = BAND_NAMES.map((bn) => bandGrades[bn].result)
+  const d8Contradicts = BAND_NAMES.some(
+    (bn) => bandGrades[bn].result === 'fail' && bandGrades[bn].stated != null,
+  )
   if (bandResults.includes('fail')) {
     checks.d8 = 'fail'
     for (const bn of BAND_NAMES) if (bandGrades[bn].result === 'fail') failures.push(`d8_${bn}_edge_miss`)
+    for (const bn of BAND_NAMES) {
+      const bg = bandGrades[bn]
+      if (bg.result === 'fail' && bg.stated != null && bg.evidence != null) {
+        gateFeedback.push(`d8: your ${bn} band edges $${Math.round(bg.stated.low).toLocaleString()}\u2013$${Math.round(bg.stated.high).toLocaleString()} disagree with the verified band $${Math.round(bg.evidence.low).toLocaleString()}\u2013$${Math.round(bg.evidence.high).toLocaleString()} (IoU ${bg.iou?.toFixed(2) ?? '0'}) — restate them or flag why the band should differ`)
+      }
+    }
   } else if (bandResults.every((r) => r === 'skipped')) {
     checks.d8 = 'skipped'
   } else if (bandResults.includes('warn')) {
@@ -293,10 +308,14 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const results = Object.values(checks)
   const active = results.filter((r) => r !== 'skipped')
   const earned = active.reduce((a, r) => a + (r === 'pass' ? 1 : r === 'warn' ? 0.5 : 0), 0)
+  const gateFails = Object.entries(checks)
+    .filter(([k, r]) => r === 'fail' && (k !== 'd8' || d8Contradicts))
+    .map(([k]) => k)
 
   return {
     checks,
     bandGrades,
+    gateFails,
     score: active.length > 0 ? Math.max(0, earned / active.length - scorePenalty) : 1,
     failures: [...new Set(failures)],
     warnings: [...new Set(warnings)],

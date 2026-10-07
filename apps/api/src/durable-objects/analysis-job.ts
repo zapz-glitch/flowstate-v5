@@ -1694,9 +1694,7 @@ export class AnalysisJobDO {
     const attempts = js.harnessAttempts ?? []
     const evidence = buildHarnessEvidence(ctx)
     const gateGrade = gradeVerdict(evidence, sel)
-    const checkFails = Object.entries(gateGrade.checks)
-      .filter(([, r]) => r === 'fail')
-      .map(([k]) => k)
+    const checkFails = gateGrade.gateFails
     const renoViolations: string[] = []
     if (sel.renovation && evidence.renovationEvidence) {
       const dry = priceAgentRenovation(sel.renovation, evidence.renovationEvidence)
