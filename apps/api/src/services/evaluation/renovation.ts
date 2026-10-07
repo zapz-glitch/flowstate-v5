@@ -29,16 +29,33 @@ export interface DescriptionClaim {
   evidence: string
 }
 
+/** 4-tier evidence hierarchy per docs/renovation-crediting-rules.md:
+ *  credited       — Tier 1: verified permit in window → $0 replacement
+ *  claimed_dated  — Tier 2: dated text claim → soft-repair tier (≤20% of schedule)
+ *  past_threshold — permit on record but older than threshold → mandatory replace
+ *  assumed_past   — Tier 3: no verification and home age exceeds design life
+ *                 → mandatory replace (age baseline)
+ *  unknown        — no evidence and home within design life → advisory */
+export type LedgerStatus =
+  | 'credited'
+  | 'claimed_dated'
+  | 'past_threshold'
+  | 'assumed_past'
+  | 'unknown'
+
 export interface PermitLedgerEntry {
   item: string
-  ageThreshold: number | null
+  /** Design life in years used for the RUL / age-baseline computation. */
+  designLife: number | null
   /** Newest matching permit year, if any */
   latestPermitYear: number | null
-  /** credited = verified within threshold → $0; past_threshold = charge;
-   *  unknown = no permit evidence either way */
-  status: 'credited' | 'past_threshold' | 'unknown'
-  /** Effective cost after user overrides */
+  /** Claimed year from listing text when status is claimed_dated */
+  claimedYear: number | null
+  status: LedgerStatus
+  /** Effective replacement cost after user overrides */
   cost: number
+  /** Tier-2 soft-repair allowance (≈8% of cost, capped at 20%) */
+  softRepairCost: number
 }
 
 export interface RenovationEvidence {
@@ -203,10 +220,22 @@ const FINISH_KEYWORDS: Array<{ label: string; re: RegExp }> = [
 
 // ─── Build ───────────────────────────────────────────────────────────────────
 
+/** Design-life benchmarks for the age baseline (appraiser standard per
+ *  docs/renovation-crediting-rules.md §2) — items not listed fall back to
+ *  the configured age threshold. */
+const DESIGN_LIFE: Record<string, number> = {
+  roof: 25,
+  hvac: 15,
+  water_heater: 10,
+  electric_panel: 30,
+}
+
 export function buildRenovationEvidence(input: {
   renovation: RenovationAssessment | null | undefined
   subjectDescription?: string | null
   subjectFeatures?: string[] | null
+  /** Subject year built — drives the Tier-3 age baseline. */
+  yearBuilt?: number | null
   permits?: NormalizedPermit[] | null
   /** derivedBuybox.majorItems — already permit-assessed + override-priced */
   majorItems: Array<MajorItem & { reason?: string }>
@@ -247,28 +276,45 @@ export function buildRenovationEvidence(input: {
   const subjectText = [input.subjectDescription ?? '', ...(input.subjectFeatures ?? [])].join('. ')
   const descriptionClaims = extractDescriptionClaims(subjectText)
 
-  // ── Permit ledger — permits are the only $0 credit ───────────────────────
+  // ── Permit ledger — 4-tier evidence hierarchy ────────────────────────────
   const defaultsById = new Map(MAJOR_ITEMS.map((m) => [m.id, m]))
   const itemsById = new Map(input.majorItems.map((m) => [m.id, m]))
+  const now = new Date().getFullYear()
+  const homeAge = input.yearBuilt != null ? now - input.yearBuilt : null
+  const datedClaims = new Map(
+    descriptionClaims.filter((c) => c.year != null).map((c) => [c.item, c.year!] as const),
+  )
   const permitLedger: PermitLedgerEntry[] = []
   for (const [item, re] of Object.entries(PERMIT_ITEM_KEYWORDS)) {
     const cfg = input.majorItemConfig?.[item]
     if (cfg?.enabled === false) continue // user disabled
     const threshold = cfg?.ageThreshold ?? defaultsById.get(item as MajorItem['id'])?.ageThreshold ?? null
+    const designLife = DESIGN_LIFE[item] ?? threshold
     const year = latestPermitYear(input.permits, re)
-    const now = new Date().getFullYear()
-    const status: PermitLedgerEntry['status'] =
+    const claimedYear = datedClaims.get(item) ?? null
+    const cost = itemsById.get(item as MajorItem['id'])?.cost ?? cfg?.cost ?? defaultsById.get(item as MajorItem['id'])?.defaultCost ?? 0
+    const status: LedgerStatus =
+      // Tier 1 — verified permit inside the service window
       year != null && threshold != null && now - year <= threshold
         ? 'credited'
+        // permit on record but older than the window → replace
         : year != null && threshold != null
           ? 'past_threshold'
-          : 'unknown'
+          // Tier 2 — dated text claim → soft-repair tier
+          : claimedYear != null
+            ? 'claimed_dated'
+            // Tier 3 — no verification; age baseline exceeds design life
+            : homeAge != null && designLife != null && homeAge > designLife
+              ? 'assumed_past'
+              : 'unknown'
     permitLedger.push({
       item,
-      ageThreshold: threshold,
+      designLife,
       latestPermitYear: year,
+      claimedYear,
       status,
-      cost: itemsById.get(item as MajorItem['id'])?.cost ?? cfg?.cost ?? defaultsById.get(item as MajorItem['id'])?.defaultCost ?? 0,
+      cost,
+      softRepairCost: Math.round(cost * 0.08),
     })
   }
 
@@ -315,13 +361,15 @@ export function buildRenovationEvidence(input: {
 // ─── Deterministic pricing of the agent's posted scope ───────────────────────
 
 /**
- * Price a posted renovation scope against the evidence's cost schedule.
- * Rules (fail-open — flag, never fabricate):
- *  - user-override items the agent omitted are appended at override cost
- *  - mandatory permit items (past_threshold) the agent omitted are appended
- *    at schedule cost
- *  - posted item costs are clamped to 0.4×–2.5× the schedule when a schedule
- *    price exists (agent judgment inside a sane band, guard against typos)
+ * Price a posted renovation scope against the evidence's cost schedule and
+ * the 4-tier crediting rules (docs/renovation-crediting-rules.md §4).
+ * Fail-open — flag, never fabricate:
+ *  - Tier 1 (credited): posted cost >10% of schedule → flag t1_overcharge
+ *  - Tier 2 (claimed_dated): full schedule → t2_overbudget; $0 →
+ *    t2_underbudget; >20% → t2_partial_outside; ≤20% passes
+ *  - Tier 3 (assumed_past) / past_threshold / Tier 4: posted < schedule →
+ *    flag + resolve to schedule; omitted → auto-append at schedule
+ *  - Schedule clamp 0.4×–2.5× for everything else (typo guard)
  *  - total = Σ resolved costs × (1 + contingency)
  */
 export function priceAgentRenovation(
@@ -332,13 +380,39 @@ export function priceAgentRenovation(
   const flags: string[] = []
   const items: PricedRenovation['items'] = []
 
-  const scheduleCost = (itemId: string): number | null => evidence.costSchedule[itemId] ?? null
+  const scheduleCost = (itemId: string): number | null =>
+    evidence.costSchedule[itemId] ?? evidence.permitLedger.find((p) => p.item === itemId)?.cost ?? null
+  const ledgerById = new Map(evidence.permitLedger.map((p) => [p.item, p]))
 
   for (const li of posted.lineItems) {
     const sched = scheduleCost(li.item)
+    const ledger = ledgerById.get(li.item)
     let resolved = li.cost
     let resolution = 'posted'
-    if (sched != null && sched > 0) {
+    if (ledger?.status === 'credited' && sched != null && sched > 0 && li.cost > sched * 0.10) {
+      flags.push(`t1_overcharge:${li.item}`)
+      resolved = Math.round(sched * 0.10)
+      resolution = 'clamped to Tier-1 inspection allowance'
+    } else if (ledger?.status === 'claimed_dated' && sched != null && sched > 0) {
+      if (li.cost === 0) {
+        flags.push(`t2_underbudget:${li.item}`)
+        resolved = ledger.softRepairCost
+        resolution = 'raised to Tier-2 soft-repair allowance'
+      } else if (li.cost >= sched) {
+        flags.push(`t2_overbudget:${li.item}`)
+        resolved = ledger.softRepairCost
+        resolution = 'reduced to Tier-2 soft-repair allowance'
+      } else if (li.cost > sched * 0.20) {
+        flags.push(`t2_partial_outside:${li.item}`)
+      }
+    } else if (
+      (ledger?.status === 'assumed_past' || ledger?.status === 'past_threshold') &&
+      sched != null && sched > 0 && li.cost < sched
+    ) {
+      flags.push(`t3_underbudget:${li.item}`)
+      resolved = sched
+      resolution = 'raised to schedule — unverified past design life'
+    } else if (sched != null && sched > 0) {
       const lo = sched * 0.4
       const hi = sched * 2.5
       if (li.cost < lo || li.cost > hi) {
@@ -350,25 +424,37 @@ export function priceAgentRenovation(
     items.push({ ...li, resolvedCost: Math.round(resolved), resolution })
   }
 
-  // Mandatory items the agent omitted — user overrides first, then permits.
+  // Mandatory items the agent omitted — Tier 3/4 charges append at schedule;
+  // Tier 2 dated claims append at the soft-repair allowance.
   const postedItems = new Set(posted.lineItems.map((l) => l.item))
-  for (const [itemId, cost] of Object.entries(evidence.costSchedule)) {
-    if (cost <= 0 || postedItems.has(itemId)) continue
-    const ledger = evidence.permitLedger.find((p) => p.item === itemId)
-    if (ledger?.status === 'past_threshold') {
+  for (const entry of evidence.permitLedger) {
+    if (postedItems.has(entry.item)) continue
+    if (entry.status === 'past_threshold' || entry.status === 'assumed_past') {
+      if (entry.cost <= 0) continue
       items.push({
-        item: itemId, action: 'replace', category: 'capex', cost,
-        resolvedCost: cost, resolution: 'appended — mandatory permit threshold',
+        item: entry.item, action: 'replace', category: 'capex', cost: entry.cost,
+        resolvedCost: entry.cost,
+        resolution: entry.status === 'past_threshold'
+          ? 'appended — permit past threshold'
+          : 'appended — unverified, past design life (age baseline)',
         source: 'permit',
       })
-      flags.push(`permit_item_auto_added:${itemId}`)
+      flags.push(`mandatory_item_auto_added:${entry.item}:${entry.status}`)
+    } else if (entry.status === 'claimed_dated') {
+      items.push({
+        item: entry.item, action: 'repair', category: 'capex', cost: entry.softRepairCost,
+        resolvedCost: entry.softRepairCost,
+        resolution: `appended — Tier-2 soft repair (claimed ${entry.claimedYear})`,
+        source: 'description',
+      })
+      flags.push(`dated_claim_auto_added:${entry.item}:${entry.claimedYear}`)
     }
   }
   for (const claim of evidence.descriptionClaims) {
-    if (postedItems.has(claim.item) || claim.year == null) continue
-    // Undated claims are advisory only; dated claims get flagged so a human
-    // sees the agent skipped a stated replacement.
-    flags.push(`description_claim_skipped:${claim.item}:${claim.year}`)
+    if (postedItems.has(claim.item) || claim.year != null) continue
+    // Undated claims are advisory only — surfaced so a human sees the agent
+    // left a stated-but-unverified system at age baseline.
+    flags.push(`undated_claim_advisory:${claim.item}`)
   }
 
   const contingencyPct = posted.contingencyPct ?? 15

@@ -2142,6 +2142,7 @@ export function buildRenoEvidence(
       ctx.subjectListingDetails?.details?.foundation,
     ].filter((s): s is string => typeof s === 'string' && s.length > 0),
     permits: ctx.bundle.enrichment.permits?.items,
+    yearBuilt: ctx.bundle.property.yearBuilt ?? null,
     majorItems: ctx.derivedBuybox.majorItems,
     rehabAdditions: ctx.rehabAdditions,
     rehabAdvisories: ctx.rehabAdvisories,

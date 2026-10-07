@@ -361,9 +361,15 @@ human underwriter reads plus the pricing context:
   Otherwise Path B (zip $/sf fallback).
 - `descriptionClaims` — year-anchored work claims pulled from the
   subject's listing text ("roof replaced in 2019").
-- `permitLedger` — every major item with its age threshold, newest
-  matching permit year, and status: `credited` (verified in window →
-  charge $0), `past_threshold` (must charge), `unknown`.
+- `permitLedger` — every major item with its design life, newest matching
+  permit year, and a 4-tier status
+  (`docs/renovation-crediting-rules.md`): `credited` (Tier 1 — verified
+  permit in window → $0, inspection allowance only), `claimed_dated`
+  (Tier 2 — dated text claim → soft-repair tier, ≤20% of schedule;
+  `softRepairCost` is the standard allowance), `past_threshold` (permit
+  on record but past the window → mandatory full charge),
+  `assumed_past` (Tier 3 — unverified and home age exceeds design life →
+  mandatory full charge), `unknown` (within design life → advisory).
 - `sellerNoteClaims` — realtor notes parsed into additions and
   advisories. Notes only ever add scope.
 - `finishParity` — finish keywords the pocket's ARV comps advertise vs
@@ -406,13 +412,19 @@ Rules:
   the zone evidence second. Still post every mandatory permit item.
 - **Every line item** maps a UAD move (`uadFrom` → `uadTo`) — the scope
   must literally construct the ARV condition your comps prove.
-- **Dated description claims** credit an item at repair tier (not $0 —
-  permits are the only $0 credit). Undated claims are advisory.
+- **Crediting is tiered** (`docs/renovation-crediting-rules.md`):
+  permits are the only $0 credit; a dated claim prices the item at the
+  soft-repair allowance (`softRepairCost`, ≤20% of schedule) — not $0,
+  not full; an undated claim earns nothing; a defect note forces a full
+  mandatory line. Unverified systems on a home older than their design
+  life are `assumed_past` — charge them like `past_threshold`.
 - **Recondition ≠ replace** — a serviced or recently repaired system
   charges the repair/recondition cost, not full replacement.
-- The harness prices your posted scope against `costSchedule`
-  deterministically: omitted mandatory permit items are appended, costs
-  outside 0.4×–2.5× of schedule are clamped, user overrides are
+- The harness prices your posted scope against `costSchedule` and the
+  tier rules deterministically: mandatory items you omit are appended
+  (Tier-3/4 at schedule, Tier-2 at soft repair), costs violating the
+  tier bounds are resolved to schedule with a flag, anything else
+  outside 0.4×–2.5× of schedule is clamped, user overrides are
   enforced. `totalEstimate` diverging >15% from the priced total is
   flagged on the run record — price to the schedule, adjust by judgment
   inside the band.
