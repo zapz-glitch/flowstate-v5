@@ -8,7 +8,6 @@ import { useImpersonation } from '@/components/auth/ImpersonationProvider'
 import { AnalysisBridge } from '@/components/AnalysisBridge'
 import { FaviconManager } from '@/components/FaviconManager'
 import { cn } from '@/lib/utils'
-import { SkinPreview } from '@/components/prototype/SkinPreview'
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   const { collapsed } = useSidebar()
@@ -16,8 +15,6 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={cn('min-h-[100dvh] bg-background', isImpersonating && 'pt-10')}>
-      {/* PROTOTYPE: switchable looks (see SkinPreview) */}
-      <SkinPreview />
       <Sidebar />
       <main
         className={cn(

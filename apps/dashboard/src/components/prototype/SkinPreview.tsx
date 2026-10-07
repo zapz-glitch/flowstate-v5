@@ -1,42 +1,33 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { usePathname } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 
 /**
- * PROTOTYPE · switchable "skins" for the dashboard. A skin is a block of CSS overrides in globals.css
- * under html[data-skin="…"]. Our real theme tokens are not edited; choosing Current restores today's
- * look exactly.
+ * PROTOTYPE · a switchable "skin" for the page it is mounted on. The skin is a block of CSS
+ * overrides under [data-skin="nds"] in globals.css (colors, type, buttons), applied to <html> only
+ * while this page is open. Our real theme tokens are not edited; turning the skin off, or leaving
+ * the page, restores the current look exactly. Start it with ?skin=nds or the switch below.
  *
- * - "america": the whole dashboard, every menu page, in the manner of america.gov.
- * - "nds" (Studio): Property Search only; on any other page it is not applied and not offered.
- *
- * Start one with ?skin=america or ?skin=nds, or use the switch. The switch is drawn in a portal on
- * <body>, so it takes no place in the page's layout, and it sits above the phone bottom nav.
+ * The switch is drawn in a portal on <body>, so it never takes a place in the page's own layout,
+ * and it sits above the phone bottom nav instead of on top of it.
  */
 const KEY = 'flowstate:skin-preview'
-type Skin = 'nds' | 'america' | null
-const isSkin = (value: string | null): value is 'nds' | 'america' => value === 'nds' || value === 'america'
+type Skin = 'nds' | null
 
 export function SkinPreview() {
-  const pathname = usePathname()
   const [skin, setSkin] = useState<Skin>(null)
   const [ready, setReady] = useState(false)
-  const onSearch = pathname?.startsWith('/dashboard/analyze') ?? false
-  // Studio exists for Property Search only
-  const applied: Skin = skin === 'nds' && !onSearch ? null : skin
 
   // Read the choice after mount (the page is server-rendered without it)
   useEffect(() => {
     let next: Skin = null
     try {
       const fromUrl = new URLSearchParams(window.location.search).get('skin')
-      const kept = localStorage.getItem(KEY)
-      if (isSkin(fromUrl)) next = fromUrl
+      if (fromUrl === 'nds') next = 'nds'
       else if (fromUrl === 'off') next = null
-      else next = isSkin(kept) ? kept : null
+      else next = localStorage.getItem(KEY) === 'nds' ? 'nds' : null
     } catch { /* private mode */ }
     setSkin(next)
     setReady(true)
@@ -44,16 +35,12 @@ export function SkinPreview() {
 
   useEffect(() => {
     if (!ready) return
-    try { if (skin) localStorage.setItem(KEY, skin); else localStorage.removeItem(KEY) } catch { /* private mode */ }
-  }, [skin, ready])
-
-  useEffect(() => {
-    if (!ready) return
     const root = document.documentElement
-    if (applied) root.dataset.skin = applied
+    if (skin) root.dataset.skin = skin
     else delete root.dataset.skin
+    try { if (skin) localStorage.setItem(KEY, skin); else localStorage.removeItem(KEY) } catch { /* private mode */ }
     return () => { delete root.dataset.skin }
-  }, [applied, ready])
+  }, [skin, ready])
 
   // A choice made with the switch replaces one made in the address bar: drop ?skin= so a reload keeps the choice
   const choose = (value: Skin) => {
@@ -73,11 +60,11 @@ export function SkinPreview() {
   const option = (value: Skin, label: string) => (
     <button
       type="button"
-      aria-pressed={applied === value}
+      aria-pressed={skin === value}
       onClick={() => choose(value)}
       className={cn(
         'h-7 rounded px-2.5 text-[11px] font-medium transition-colors',
-        applied === value ? 'bg-foreground text-background' : 'text-foreground-secondary hover:bg-secondary hover:text-foreground',
+        skin === value ? 'bg-foreground text-background' : 'text-foreground-secondary hover:bg-secondary hover:text-foreground',
       )}
     >
       {label}
@@ -92,8 +79,7 @@ export function SkinPreview() {
     >
       <span className="px-1.5 text-[10px] uppercase tracking-wider text-foreground-tertiary">Prototype</span>
       {option(null, 'Current')}
-      {onSearch && option('nds', 'Studio')}
-      {option('america', 'America')}
+      {option('nds', 'Studio')}
     </div>,
     document.body,
   )

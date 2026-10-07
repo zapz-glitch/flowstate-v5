@@ -101,11 +101,8 @@ describe('Skin prototype', () => {
     await screen.getByRole('link', 'Property Reports').first().click()
     await expect(screen.getByRole('heading', 'Property Reports', { level: 1 })).toBeVisible()
     expect((await browser.evaluate(() => (window as unknown as { __sameDocument?: boolean }).__sameDocument === true)) as boolean, 'the document was not reloaded').toBe(true)
-    expect(await skin(browser), 'Studio ends when Property Search is left').toBe('none')
-    // The switch lives on every dashboard page now (the America look applies everywhere), but Studio is offered only on Property Search
-    expect(await switches(browser)).toEqual({ count: 1, onBody: true })
-    await expect(screen.getByRole('button', 'Studio')).toHaveCount(0)
-    await expect(screen.getByRole('button', 'America')).toBeVisible()
+    expect(await skin(browser), 'the skin ends when Property Search is left').toBe('none')
+    expect((await switches(browser)).count, 'the switch leaves with the page').toBe(0)
     // Back: the skin and exactly one switch return
     await browser.back()
     await expect(screen.getByRole('button', 'Studio')).toBeVisible()
@@ -113,24 +110,6 @@ describe('Skin prototype', () => {
     expect(await switches(browser)).toEqual({ count: 1, onBody: true })
     await screen.getByRole('button', 'Current').click()
     await expect.poll(() => skin(browser)).toBe('none')
-    await clearChoice(browser)
-  })
-
-  test('the America look applies on every dashboard page and comes off with Current', WEB, async ({ app, screen, browser }) => {
-    await app.open('/dashboard?skin=america')
-    await expect.poll(() => skin(browser)).toBe('america')
-    const ink = () => browser.evaluate(() => getComputedStyle(document.body).color) as Promise<string>
-    const navy = await ink()
-    for (const [link, title] of [['Property Reports', 'Property Reports'], ['Offers', 'Offers'], ['Tasks', 'Tasks']] as const) {
-      await screen.getByRole('link', link).first().click()
-      await expect(screen.getByRole('heading', title, { level: 1 })).toBeVisible()
-      expect(await skin(browser), `${title} keeps the look`).toBe('america')
-      // Titles speak in the serif
-      expect((await browser.evaluate(() => getComputedStyle(document.querySelector('h1')!).fontFamily)) as string).toMatch(/serif/i)
-    }
-    await screen.getByRole('button', 'Current').click()
-    await expect.poll(() => skin(browser)).toBe('none')
-    expect(await ink(), 'the ink goes back').not.toBe(navy)
     await clearChoice(browser)
   })
 
