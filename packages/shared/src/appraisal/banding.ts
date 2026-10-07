@@ -163,9 +163,12 @@ export function computeEvidenceBands(
     const kept = pool.filter((c) => unitRate(c) >= lo && unitRate(c) <= hi)
     const trimmedIds = pool.filter((c) => !kept.includes(c)).map((c) => c.id)
 
-    if (kept.length < 2) {
-      return { ...empty, n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds, method: 'insufficient_data' }
+    if (kept.length === 0) {
+      return { ...empty, n: 0, memberIds: [], trimmedIds, method: 'insufficient_data' }
     }
+    // A single surviving member still forms a band — a degenerate point band
+    // (low = mid = high = its scaled value). The agent's ±10% edge tolerance
+    // and confidence carry the thinness; the evidence is not discarded.
 
     // Transitional flag — within 5% of an adjacent band's median unit rate.
     const edgeExcluded = kept.filter((c) =>
@@ -233,5 +236,7 @@ export function bandEdgeCheck(
   const epsHigh = Math.abs(agentHigh - evidenceHigh) / evidenceHigh
   const inter = Math.max(0, Math.min(agentHigh, evidenceHigh) - Math.max(agentLow, evidenceLow))
   const union = Math.max(agentHigh, evidenceHigh) - Math.min(agentLow, evidenceLow)
-  return { epsLow, epsHigh, iou: union > 0 ? inter / union : 0 }
+  // Degenerate point band (n=1): zero-width edges agree iff they coincide.
+  const iou = union > 0 ? inter / union : (agentLow === agentHigh && epsLow === 0 && epsHigh === 0 ? 1 : 0)
+  return { epsLow, epsHigh, iou }
 }
