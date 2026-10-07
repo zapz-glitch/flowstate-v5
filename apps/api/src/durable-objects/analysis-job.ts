@@ -46,6 +46,7 @@ import {
 } from '../services/appraisal/filter-ladder'
 import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
 import { startCompEvidenceBatch } from '../services/comp-evidence'
+import { startCompDigestBatch, type CompDigest, type DigestComp, type DigestSubject } from '../services/comp-evidence/digest'
 import { isClefAvailable } from '../services/clef'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
@@ -521,6 +522,56 @@ export class AnalysisJobDO {
         subjectPropertyType: property.propertyType ?? undefined,
     }
     const compsPromise = propertyApi.getComparables(comparablesParams)
+
+    // ── Clef digest passes — the agent-assist layer, three stages ──────
+    // A rides the comps-landed tap (sale records only), B fires inside the
+    // census gate the moment geo flags land, C after gated enrichment
+    // returns. Each pass is text-only Clef per comp, lane-fanned; all merge
+    // into compDigests for the harness evidence bundle. Advisory only —
+    // the Evaluation Agent owns every verdict.
+    const digestSubject: DigestSubject = {
+      address: property.address ?? undefined,
+      squareFeet: property.squareFeet ?? null,
+      yearBuilt: property.yearBuilt ?? null,
+      lotSizeAcres: property.lotSizeAcres ?? null,
+      propertyType: property.propertyType ?? null,
+      stories: property.stories ?? null,
+      censusTract: property.censusTract ?? null,
+      censusBlockGroup: property.censusBlockGroup ?? null,
+      subdivision: property.subdivision ?? null,
+      neighborhoodName: property.neighborhoodName ?? null,
+    }
+    const toDigestComp = (c: NormalizedComparable, geo?: { tract?: string; blockGroup?: string } | null): DigestComp => ({
+      propertyId: String(c.id),
+      address: c.address,
+      salePrice: c.salePrice ?? undefined,
+      saleDate: c.saleDate ? String(c.saleDate) : undefined,
+      squareFeet: c.squareFeet ?? undefined,
+      pricePerSqft: c.pricePerSqft ?? undefined,
+      yearBuilt: c.yearBuilt ?? undefined,
+      lotSizeAcres: c.lotSizeAcres ?? null,
+      lotSizeSquareFeet: c.lotSizeSquareFeet ?? null,
+      distanceMiles: c.distanceMiles ?? null,
+      bedrooms: c.bedrooms ?? null,
+      bathrooms: c.bathrooms ?? null,
+      propertyType: c.propertyType ?? null,
+      stories: c.stories ?? null,
+      construction: c.construction?.type ?? null,
+      subdivision: c.subdivision ?? null,
+      neighborhoodName: c.neighborhoodName ?? null,
+      censusTract: c.censusTract ?? geo?.tract ?? null,
+      censusBlockGroup: c.censusBlockGroup ?? geo?.blockGroup ?? null,
+      sameBlockGroup: c.sameBlockGroup ?? (geo?.blockGroup != null && digestSubject.censusBlockGroup != null ? geo.blockGroup === digestSubject.censusBlockGroup : null),
+      crossesMajorRoad: c.crossesMajorRoad ?? null,
+      isEnriched: c.isEnriched ?? null,
+    })
+    // Stage promise collectors — B fires inside the geo gate, C after each
+    // enrich; A fires at the comps-landed tap below. All merge at evalParams.
+    const digestAPromiseParts: Promise<Map<string, CompDigest>>[] = []
+    const digestBPromiseParts: Promise<Map<string, CompDigest>>[] = []
+    const digestCPromiseParts: Promise<Map<string, CompDigest>>[] = []
+    const clefDigestsOn = this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(this.env)
+
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
     // search→scrape→Clef runs beside geo/enrich instead of behind it.
     const prefetchedCompEvidence = compsPromise.then(async (res) => {
@@ -539,9 +590,16 @@ export class AnalysisJobDO {
           yearBuilt: c.yearBuilt ?? undefined,
           squareFeet: c.squareFeet ?? undefined,
         }))
-        return await startCompEvidenceBatch(this.env, inputs, {
+        const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
         })
+        // Stage-A digest on sale records — no listing data needed, runs
+        // beside the listing fetch it precedes in the evidence batch.
+        digestAPromiseParts.push(
+          startCompDigestBatch(this.env, res.data.comparables.map((c) => toDigestComp(c)), digestSubject, 'A')
+            .catch(() => new Map()),
+        )
+        return await evidenceBatch
       } catch { return null }
     }).catch(() => null)
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
@@ -827,6 +885,17 @@ export class AnalysisJobDO {
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
       })
+      // Stage-B digest — the moment geography resolves, Clef pre-reads the
+      // block-group/neighborhood fit for every comp while the enrichment
+      // ladder runs beside it.
+      if (clefDigestsOn) {
+        digestSubject.censusTract ??= subjectGeo.tract
+        digestSubject.censusBlockGroup ??= subjectGeo.blockGroup
+        digestBPromiseParts.push(
+          startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B')
+            .catch(() => new Map()),
+        )
+      }
       // ATTOM fallback for Census misses: geography-context ships censusTract
       // on the detail call anyway — spend one provider call on comps that
       // look competitive (dead comps don't merit it) so "unverified" can't
@@ -974,6 +1043,18 @@ export class AnalysisJobDO {
       enrichedComps = await gateAndEnrich(rawComps)
       retrieval.candidatesEnriched = candidatesEnriched
       console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
+      // Stage-C digest — enriched block-matched comps get the full read
+      // (final band, bracket role, anchor strength) while valuation setup
+      // and evidence verification run beside it.
+      if (clefDigestsOn) {
+        const enriched = enrichedComps.filter((c) => c.isEnriched)
+        if (enriched.length > 0) {
+          digestCPromiseParts.push(
+            startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
+              .catch(() => new Map()),
+          )
+        }
+      }
     }
 
     // ── Expansion refetch ─────────────────────────────────────────────────────
@@ -1068,6 +1149,17 @@ export class AnalysisJobDO {
       if (isAttomMcp) {
         newCandidates = await gateAndEnrich(newCandidates)
         retrieval.candidatesEnriched = candidatesEnriched
+        // Stage-C digest for expansion-refetch enriched comps — same read
+        // as the initial pool's stage C.
+        if (clefDigestsOn) {
+          const enriched = newCandidates.filter((c) => c.isEnriched)
+          if (enriched.length > 0) {
+            digestCPromiseParts.push(
+              startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
+                .catch(() => new Map()),
+            )
+          }
+        }
       }
       const newById = new Map(newCandidates.map((c) => [c.id, c]))
       enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
@@ -1238,6 +1330,27 @@ export class AnalysisJobDO {
       // Comp evidence started the moment comps landed — a Map promise the
       // pipeline awaits instead of launching its own batch late.
       prefetchedCompEvidence,
+      // Clef agent-assist digests — stage A (comps-landed), B (post-geocode
+      // inside the census gate), C (post-enrichment). Merged per comp here;
+      // the pipeline stamps each stage's answers as comp.clefDigest.{A,B,C}.
+      compDigests: clefDigestsOn
+        ? Promise.all([
+            Promise.all(digestAPromiseParts).catch(() => []),
+            Promise.all(digestBPromiseParts).catch(() => []),
+            Promise.all(digestCPromiseParts).catch(() => []),
+          ]).then(([a, b, c]) => {
+            const out = new Map<string, { A?: CompDigest; B?: CompDigest; C?: CompDigest }>()
+            const merge = (maps: Map<string, CompDigest>[], key: 'A' | 'B' | 'C') => {
+              for (const m of maps) for (const [id, d] of m) {
+                const e = out.get(id) ?? {}
+                e[key] = d
+                out.set(id, e)
+              }
+            }
+            merge(a, 'A'); merge(b, 'B'); merge(c, 'C')
+            return out
+          }).catch(() => null)
+        : null,
       skipCache: !!config.skipCache,
       // Clef comp-evidence resolves fire-and-forget — the callback patches
       // comp curb-appeal stamps into the persisted report whenever it lands.

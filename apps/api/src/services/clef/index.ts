@@ -22,7 +22,7 @@ export interface ClefImage {
   base64: string
 }
 
-type Question =
+export type Question =
   | { type: 'noul'; instructions: string }
   | { type: 'choice'; instructions: string; criteria: Record<string, string> }
   | { type: 'score'; instructions: string; criteria: string[] }

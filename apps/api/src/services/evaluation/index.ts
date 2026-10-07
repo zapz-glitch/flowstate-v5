@@ -52,6 +52,7 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, type CompConditionEvidence } from '../comp-evidence'
+import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
@@ -162,6 +163,13 @@ export interface EvaluationParams {
    * batch inside evaluate.
    */
   prefetchedCompEvidence?: Promise<Map<string, CompConditionEvidence | null> | null> | null
+  /**
+   * Clef agent-assist digests — stage A (comps-landed), B (post-geocode),
+   * C (post-enrichment) advisory reads per comp. Serialized as
+   * comp.clefDigest.{A,B,C} into the harness evidence bundle; the agent
+   * weighs them beside the raw data — advisory only, never a verdict.
+   */
+  compDigests?: Promise<Map<string, CompDigestStages> | null> | null
   /**
    * Close CRM lead this eval belongs to — when present, realtor
    * conversation-log notes are fetched and folded into the rehab model
@@ -1243,6 +1251,10 @@ export async function performAnalysisPhase1(
   // Await the DERIVED promise — stamps + permit resolution must land
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
+  // Clef digests settle inside the same window — stage A/B/C advisory
+  // reads merged per comp for the harness evidence bundle.
+  const compDigestMap = params.compDigests ? await params.compDigests.catch(() => null) : null
+  const compDigests: Record<string, CompDigestStages> | undefined = compDigestMap ? Object.fromEntries(compDigestMap) : undefined
   // Re-classify with the vision reads now landed — the renovated-band
   // corroboration check only works once Clef/Luna stamps exist.
   if (compCurbAppeal && Object.keys(compCurbAppeal).length > 0) {
@@ -1256,7 +1268,7 @@ export async function performAnalysisPhase1(
   return freezePhase1Context({
     jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
     filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
-    compCurbAppeal, compListingPhysicalDetails, subjectListingDetails,
+    compCurbAppeal, compDigests, compListingPhysicalDetails, subjectListingDetails,
     redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
     sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
@@ -1290,6 +1302,7 @@ export async function performAnalysisPhase2(
     finalArv, valuation, valuationAnchor, rehabLevelEstimates, groupBResult, bestMatch,
   } = ctx
   let compClassifications = new Map(ctx.compClassifications)
+  const compDigests = ctx.compDigests
   const groupACompIds = new Set(ctx.groupACompIds)
   const redfinTargetsById = new Map(
     ctx.redfinTargetIds
@@ -1336,7 +1349,7 @@ export async function performAnalysisPhase2(
     // attempts — a persistently failing pool ships its honest fallback
     // tier, never a forced number.
     const bSubjectFields = buildBSubjectFields(bundle, valuation, subjectAvm)
-    const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal)
+    const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal, compDigests)
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
       const fails: string[] = []
@@ -1736,6 +1749,8 @@ export interface Phase1Context {
   compClassifications: Array<[string, ClassificationResult]>
   classificationSummary: ReturnType<typeof summarizeClassifications>
   compCurbAppeal?: CompCurbAppealMap
+  /** Clef stage digests per comp — advisory agent-assist reads. */
+  compDigests?: Record<string, CompDigestStages>
   compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
   subjectListingDetails: RedfinDetailsResult | null
   redfinDetailsEnabled: boolean
@@ -1833,6 +1848,7 @@ function toBCompsOf(
   comparables: AppraisedComparable[],
   compClassifications: Map<string, ClassificationResult>,
   compCurbAppeal?: CompCurbAppealMap,
+  compDigests?: Record<string, CompDigestStages>,
 ): BComp[] {
   return comparables.map((comp) => ({
     address: comp.address ?? null,
@@ -1859,6 +1875,7 @@ function toBCompsOf(
       ? { type: compClassifications.get(comp.id)!.classification }
       : null,
     curbAppeal: compCurbAppeal?.[comp.id] ?? null,
+    clefDigest: compDigests?.[String(comp.id)] ?? null,
     evidenceVerification: comp.evidenceVerification ?? null,
     appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
   }))
@@ -2012,7 +2029,7 @@ export interface HarnessEvidence {
 
 export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   const compClassifications = new Map(ctx.compClassifications)
-  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal)
+  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests)
   return {
     jobId: ctx.jobId,
     subject: {

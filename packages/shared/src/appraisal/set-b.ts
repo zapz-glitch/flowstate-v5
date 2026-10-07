@@ -107,6 +107,9 @@ export interface BComp {
     confidence?: number | null
     summary?: string | null
   } | null
+  /** Clef advisory digests per pipeline stage (A=post-pull, B=post-geocode,
+   *  C=post-enrichment). Agent-assist only — never feeds a B verdict. */
+  clefDigest?: { A?: unknown; B?: unknown; C?: unknown } | null
   evidenceVerification?: {
     /** Age only — stale means outside the preferred sale-age window. */
     staleness?: string | null
