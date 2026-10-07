@@ -230,6 +230,13 @@ const DESIGN_LIFE: Record<string, number> = {
   electric_panel: 30,
 }
 
+/** Systems every house has — only these get the Tier-3 age baseline.
+ *  Conditional systems (pool, septic, foundation) stay advisory without
+ *  evidence: an unverified pool is not a chargeable pool. */
+const UNIVERSAL_SYSTEMS = new Set([
+  'roof', 'hvac', 'water_heater', 'electric_panel', 'replumb', 'rewire',
+])
+
 export function buildRenovationEvidence(input: {
   renovation: RenovationAssessment | null | undefined
   subjectDescription?: string | null
@@ -303,8 +310,9 @@ export function buildRenovationEvidence(input: {
           // Tier 2 — dated text claim → soft-repair tier
           : claimedYear != null
             ? 'claimed_dated'
-            // Tier 3 — no verification; age baseline exceeds design life
-            : homeAge != null && designLife != null && homeAge > designLife
+            // Tier 3 — universal system, no verification, home older than
+            // its design life → age baseline charges full replacement
+            : UNIVERSAL_SYSTEMS.has(item) && homeAge != null && designLife != null && homeAge > designLife
               ? 'assumed_past'
               : 'unknown'
     permitLedger.push({
