@@ -954,8 +954,8 @@ export async function performAnalysisPhase1(
 
   // ── 6. Valuation ────────────────────────────────────────────────────────────
   const buybox = params.buybox ?? {}
-  const subjectSqft = bundle.property.squareFeet || 0
-  const compAvgSqft =
+  let subjectSqft = bundle.property.squareFeet || 0
+  let compAvgSqft =
     enabledComps.length > 0
       ? enabledComps.reduce((sum, c) => sum + (c.squareFeet || 0), 0) / enabledComps.length
       : subjectSqft
@@ -1215,6 +1215,42 @@ export async function performAnalysisPhase1(
         : null
       bundle.property.squareFeet ??= subjectRes.details.squareFeet ?? null
       bundle.property.yearBuilt ??= subjectRes.details.yearBuilt ?? null
+      // The fill lands after the valuation capture — when the provider had
+      // no area, rehab math ran on 0sf. Recompute so the report's buy/
+      // wholesale numbers use the same sqft the bands now see.
+      if (subjectSqft <= 0 && (bundle.property.squareFeet ?? 0) > 0) {
+        subjectSqft = bundle.property.squareFeet as number
+        compAvgSqft = enabledComps.length > 0
+          ? enabledComps.reduce((sum, c) => sum + (c.squareFeet || 0), 0) / enabledComps.length
+          : subjectSqft
+        if (valuationAnchor != null) {
+          valuation = valuationService.calculateValuation({
+            arv: valuationAnchor,
+            subjectSqft,
+            compAvgSqft,
+            rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+            skipBaseRehab: derivedBuybox.renovatedVerified === true,
+            locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, valuationAnchor, params.proximityConfig),
+            majorItems: derivedBuybox.majorItems,
+            additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
+            closingCostsPercent: buybox.closingCostsPercent ?? 8,
+            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+            wholesaleFee: buybox.wholesaleFee ?? 10000,
+            desiredProfit: buybox.desiredProfit,
+          })
+          rehabLevelEstimates = calculateAllRehabLevelEstimates(valuationService, {
+            arv: valuationAnchor,
+            subjectSqft,
+            compAvgSqft,
+            selectedRehabLevelIndex: derivedBuybox.rehabLevelIndex,
+            majorItems: derivedBuybox.majorItems,
+            additionPlay: buybox.additionPlay ?? 0,
+            closingCostsPercent: buybox.closingCostsPercent ?? 8,
+            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+            wholesaleFee: buybox.wholesaleFee ?? 10000,
+          })
+        }
+      }
     }
     step(
       'listing_details',

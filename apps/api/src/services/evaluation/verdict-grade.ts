@@ -97,8 +97,13 @@ const carriesArvEvidence = (c: GradeComp): boolean =>
   c.classification?.type === 'after_renovation' ||
   c.curbAppeal?.condition === 'renovated'
 
+// The gate's own band assignment is the authoritative label — the listing
+// class (`cls`) is a display field and lies about as-is stock in mixed
+// pools (the Ash Ln trap: cls=transitional, band=as_is).
 const asIsClassified = (c: GradeComp): boolean =>
-  c.classification?.type === 'as_is' || c.curbAppeal?.condition === 'distressed'
+  c.band === 'as_is' ||
+  c.classification?.type === 'as_is' ||
+  c.curbAppeal?.condition === 'distressed'
 
 /** Grade one band's stated edges against the evidence band (spec §4, §6.3). */
 function gradeBand(
