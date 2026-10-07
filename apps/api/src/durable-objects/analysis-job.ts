@@ -27,6 +27,7 @@ import {
   type AgentSelection,
   type Phase1Context,
 } from '../services/evaluation'
+import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
 import { createPropertyApi } from '../services/property-api'
@@ -87,6 +88,9 @@ interface JobState {
   harnessRounds?: number
   /** Epoch ms — the deterministic fallback fires when the deadline passes. */
   harnessDeadline?: number
+  /** 1-revision gate — every posted selection + its pre-pricing grade.
+   *  A hard d1/d2 fail on attempt 1 parks the job for one revision. */
+  harnessAttempts?: import('../services/evaluation').SelectionAttempt[]
 }
 
 export interface StartEnrichmentRequest {
@@ -1675,6 +1679,46 @@ export class AnalysisJobDO {
     if (fails.length) {
       return Response.json({ error: 'Selection rejected', fails }, { status: 422 })
     }
+
+    // Load-bearing 1-revision gate (locked spec): grade the selection
+    // BEFORE pricing. A hard d1 (pricing driver off-pocket while in-pocket
+    // comps remain unpicked) or d2 (outlier/data-error pick) fail on the
+    // first attempt rejects the selection with targeted feedback — the job
+    // stays parked for exactly one revision. Attempt 2 is always accepted
+    // (accepted_final); every attempt is recorded to run telemetry.
+    const attempts = js.harnessAttempts ?? []
+    const gateGrade = gradeVerdict(buildHarnessEvidence(ctx), sel)
+    const gateFail = gateGrade.checks.d1 === 'fail' || gateGrade.checks.d2 === 'fail'
+    if (gateFail && attempts.length === 0) {
+      attempts.push({ selection: sel, grade: gateGrade, decision: 'rejected', at: new Date().toISOString() })
+      js.harnessAttempts = attempts
+      this.jobState = js
+      await this.persistence.write(js)
+      await this.pushEvent('harness_gate_rejected', {
+        jobId: js.jobId,
+        checks: { d1: gateGrade.checks.d1, d2: gateGrade.checks.d2 },
+        failures: gateGrade.failures,
+      })
+      return Response.json({
+        error: 'selection_rejected_by_gate',
+        revisionAllowed: true,
+        attempt: 1,
+        checks: { d1: gateGrade.checks.d1, d2: gateGrade.checks.d2 },
+        failures: gateGrade.failures,
+        feedback: gateGrade.gateFeedback,
+      }, { status: 422 })
+    }
+    attempts.push({
+      selection: sel,
+      grade: gateGrade,
+      decision: attempts.length > 0 ? 'accepted_final' : 'accepted',
+      at: new Date().toISOString(),
+    })
+    js.harnessAttempts = attempts
+    ctx.selectionAttempts = attempts
+    js.harnessContext = JSON.stringify(ctx)
+    this.jobState = js
+    await this.persistence.write(js)
 
     // Resume the deterministic tail in the background — identical finish to
     // any completed run. The eval-active marker clears when the run ends.

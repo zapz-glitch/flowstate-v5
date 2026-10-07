@@ -37,10 +37,17 @@ export interface BandEdgeGrade {
 export interface VerdictGrade {
   checks: Record<'d1' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6' | 'd7' | 'd8', CheckResult>
   bandGrades: Record<BandName, BandEdgeGrade>
-  /** pass=1, warn=0.5 over non-skipped checks — thin markets can't inflate. */
+  /** pass=1, warn=0.5 over non-skipped checks, minus flat soft penalties. */
   score: number
   /** Machine-readable failure classes — the 'improve' loop input. */
   failures: string[]
+  /** Soft warnings — telemetry classes that cost only the flat penalty. */
+  warnings: string[]
+  /** Flat soft-penalty deducted from the composite (geo bleed = 0.1). */
+  scorePenalty: number
+  /** Targeted correction feedback for the 1-revision gate — populated
+   *  only on hard d1/d2 fails, naming the failing driver/pick + boundary. */
+  gateFeedback: string[]
   gradedAt: string
 }
 
@@ -121,6 +128,9 @@ function gradeBand(
 
 export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelection): VerdictGrade {
   const failures: string[] = []
+  const warnings: string[] = []
+  const gateFeedback: string[] = []
+  let scorePenalty = 0
   const checks: VerdictGrade['checks'] = {
     d1: 'pass', d2: 'pass', d3: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass',
   }
@@ -134,25 +144,47 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
 
   const bands = computeEvidenceBands(evidence.comps, evidence.subject)
 
-  // ── d1: right neighborhood — block group first ───────────────────────────
-  // The operative pocket is the block group whenever the pool offers BG
-  // candidates; tract-only matches only count on a BG-empty pool.
+  // ── d1: right neighborhood — drivers-only, block group first ─────────────
+  // Hard fails belong to the top-3 pricing drivers only (the comps setting
+  // the evidence edges): an off-pocket driver fails while valid in-pocket
+  // comps go unpicked. Supporting picks (4+) off-pocket pass with a
+  // SUPPORTING_COMP_GEO_BLEED soft warning + a flat 0.1 score penalty.
   const bgPool = new Set(evidence.comps.filter((c) => priceable(c) && inBg(c)).map((c) => c.id))
   const tractPool = new Set(evidence.comps.filter((c) => priceable(c) && inPocket(c, subjectTract)).map((c) => c.id))
   const pocketIds = bgPool.size > 0 ? bgPool : tractPool
-  const offPocketPicks = picks.filter((c) => !pocketIds.has(c.id))
-  if (offPocketPicks.length > 0 && enabledUnpicked.some((c) => pocketIds.has(c.id))) {
+  const pocketLabel = bgPool.size > 0 ? 'block group' : 'tract'
+  const topDrivers = drivers.slice(0, 3)
+  const topDriverIds = new Set(topDrivers.map((c) => c.id))
+  const offPocketDrivers = topDrivers.filter((c) => !pocketIds.has(c.id))
+  const offPocketSupporting = picks.filter((c) => !topDriverIds.has(c.id) && !pocketIds.has(c.id))
+  const unpickedPocket = enabledUnpicked.filter((c) => pocketIds.has(c.id))
+  if (offPocketDrivers.length > 0 && unpickedPocket.length > 0) {
     checks.d1 = 'fail'
     failures.push(bgPool.size > 0 ? 'd1_neighborhood_miss' : 'd1_off_tract_pick')
-  } else if (offPocketPicks.length > picks.length / 3) {
+    for (const c of offPocketDrivers) {
+      gateFeedback.push(
+        `d1: pricing driver ${c.id} (${c.address ?? 'unknown'}) is outside the subject ${pocketLabel} — ` +
+        `replace with an unpicked in-pocket comp (${unpickedPocket.length} remain: ${unpickedPocket.slice(0, 5).map((u) => u.id).join(', ')}${unpickedPocket.length > 5 ? ', …' : ''})`,
+      )
+    }
+  } else if (offPocketDrivers.length > topDrivers.length / 3) {
     checks.d1 = 'warn'
     failures.push('d1_thin_pocket_anchor')
   }
+  if (offPocketSupporting.length > 0) {
+    warnings.push('SUPPORTING_COMP_GEO_BLEED')
+    scorePenalty += 0.1
+  }
 
   // ── d2: right pool ────────────────────────────────────────────────────────
-  if (picks.some(flaggedOutlier)) {
+  const flaggedPicks = picks.filter(flaggedOutlier)
+  if (flaggedPicks.length > 0) {
     checks.d2 = 'fail'
     failures.push('d2_flagged_pick')
+    for (const c of flaggedPicks) {
+      const fl = (c.evidenceVerification?.flags ?? [])[0]
+      gateFeedback.push(`d2: pick ${c.id} (${c.address ?? 'unknown'}) is not market evidence — ${fl ?? 'flagged outlier'}; remove it`)
+    }
   }
 
   // ── d3: correct band membership (geometry is d8) ──────────────────────────
@@ -234,7 +266,8 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     checks.d8 = 'warn'
   }
 
-  // Composite — pass=1, warn=0.5, skipped out of the denominator.
+  // Composite — pass=1, warn=0.5, skipped out of the denominator, minus
+  // flat soft penalties (geo bleed). Spec §6.3 excluded denominator.
   const results = Object.values(checks)
   const active = results.filter((r) => r !== 'skipped')
   const earned = active.reduce((a, r) => a + (r === 'pass' ? 1 : r === 'warn' ? 0.5 : 0), 0)
@@ -242,8 +275,11 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   return {
     checks,
     bandGrades,
-    score: active.length > 0 ? earned / active.length : 1,
+    score: active.length > 0 ? Math.max(0, earned / active.length - scorePenalty) : 1,
     failures: [...new Set(failures)],
+    warnings: [...new Set(warnings)],
+    scorePenalty,
+    gateFeedback,
     gradedAt: new Date().toISOString(),
   }
 }

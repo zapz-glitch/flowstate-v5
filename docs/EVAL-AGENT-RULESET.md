@@ -162,6 +162,24 @@ per-comp assignment), every selection must state band edges:
   are advisory: state what the evidence argues, then defend it — the
   grade records agreement, it never overturns your verdict.
 
+### The 1-revision gate
+
+The harness grades your selection *before* pricing. Two failures are
+load-bearing — everything else grades after the fact:
+
+- **d1 (micro-geo):** a top-3 pricing *driver* outside the block group
+  while in-BG comps go unpicked. (Supporting picks outside the BG pass —
+  they carry a `SUPPORTING_COMP_GEO_BLEED` telemetry flag, not a veto.)
+- **d2 (pool discipline):** a pick the verification layer flagged as not
+  market evidence (extreme outlier, nominal sale, data error).
+
+On either, the post is rejected `422 selection_rejected_by_gate` with
+`feedback` naming the failing driver/pick and the boundary it crossed.
+You get **exactly one revision** — fix the named driver(s), resubmit the
+full selection. The second attempt is always accepted and both attempts
+persist to run telemetry. Design to pass the first time: the gate exists
+for the day you ship a lazy verdict, not as a draft cycle.
+
 ## 6. Sale recency
 
 - Prefer sales within 180 days. The more recent the sale, the steadier the

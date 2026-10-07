@@ -1762,6 +1762,9 @@ export async function performAnalysisPhase2(
             ),
           }
         : {}),
+      // 1-revision gate telemetry — the rejected attempt + the accepted
+      // verdict, side by side (spec: attempt_1_result + attempt_2_result).
+      ...(ctx.selectionAttempts?.length ? { selectionAttempts: ctx.selectionAttempts } : {}),
     },
   }
 }
@@ -1850,6 +1853,16 @@ export interface Phase1Context {
    *  the context is persisted for an agent resume. */
   photoBundlePromise?: Promise<PhotoBundle | null>
   apiCallStats?: ApiCallStats
+  /** 1-revision gate telemetry — every selection attempt with its grade
+   *  and gate decision (rejected | accepted | accepted_final). */
+  selectionAttempts?: SelectionAttempt[]
+}
+
+export interface SelectionAttempt {
+  selection: AgentSelection
+  grade: import('./verdict-grade').VerdictGrade
+  decision: 'rejected' | 'accepted' | 'accepted_final'
+  at: string
 }
 
 function freezePhase1Context(l: Omit<Phase1Context, 'compClassifications' | 'groupACompIds' | 'redfinTargetIds'> & {
