@@ -252,12 +252,19 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
 
   // ── d4: right ARV evidence ────────────────────────────────────────────────
   const asIsDrivers = drivers.filter(asIsClassified)
-  if (asIsDrivers.length > 0) {
+  // All-as-is pool paradox: when the pool offers zero non-as-is evidence,
+  // any driver the agent picks is as-is — the verdict is forced into a
+  // distressed read. Warn instead of making every selection unpassable.
+  const poolHasNonAsIs = evidence.comps.some((c) => priceable(c) && !asIsClassified(c))
+  if (asIsDrivers.length > 0 && poolHasNonAsIs) {
     checks.d4 = 'fail'
     failures.push('d4_as_is_driver')
     for (const c of asIsDrivers) {
       gateFeedback.push(`d4: pricing comp ${c.id} (${c.address ?? 'unknown'}) is classified as-is — as-is stock cannot drive an ARV verdict`)
     }
+  } else if (asIsDrivers.length > 0) {
+    checks.d4 = 'warn'
+    failures.push('d4_all_as_is_pool')
   } else {
     const arvBandMembers = bands.arv.method === 'ok' ? new Set(bands.arv.memberIds) : new Set<string>()
     const driversWithEvidence = drivers.filter(carriesArvEvidence)
