@@ -19,19 +19,21 @@ export function formatMatchReason(reason: string): string {
   if (clean === 'unknown subject building style') return 'Subject style unavailable; style match cannot be verified'
   if (clean === 'unknown comp building style') return 'Comparable style unavailable; style match cannot be verified'
   if (clean.startsWith('building style ') && clean.includes(' != ')) return `Style differs: ${clean.slice(15).replace(' != ', ' vs. ')}`
-  if (clean === 'subdivision mismatch') return 'Different subdivision'
+  if (clean === 'subdivision mismatch') return 'Different neighborhood'
   if (clean.startsWith('sqft difference ') && clean.includes(' exceeds ')) return 'Size difference exceeds your appraisal limit'
   if (clean.startsWith('year-built difference exceeds ')) return 'Year-built difference exceeds your appraisal limit'
   if (clean.startsWith('sale age ') && clean.includes(' exceeds ')) return 'Sale is older than your appraisal limit'
   if (clean.startsWith('distance ') && clean.includes(' exceeds ')) return 'Outside your distance limit'
+  // On the cards the area is always called the neighborhood, whatever word the server used
   return clean.replace(/_/g, ' ').replace(/\d+\.\d+/g, value => Math.round(Number(value)).toLocaleString('en-US'))
+    .replace(/\bSubdivision\b/g, 'Neighborhood').replace(/\bsubdivision\b/g, 'neighborhood')
 }
 
 export function formatComparisonDetails(comp: Pick<CompItem, 'rankingDetails' | 'matchReasons'>): string[] {
   const details = (comp.rankingDetails ?? []).map(detail => {
     const [key, ...parts] = detail.split(':')
     const value = parts.join(':').trim()
-    if (key === 'subdivision') return value === 'match' ? 'Same subdivision' : value === 'mismatch' ? 'Different subdivision' : 'Subdivision unavailable'
+    if (key === 'subdivision') return value === 'match' ? 'Same neighborhood' : value === 'mismatch' ? 'Different neighborhood' : 'Neighborhood unavailable'
     if (key === 'physical style') {
       if (comp.matchReasons?.some(reason => reason.startsWith('building_style_match:'))) return null
       return value === 'match' ? 'Same style' : value === 'mismatch' ? 'Different style' : 'Style unavailable'

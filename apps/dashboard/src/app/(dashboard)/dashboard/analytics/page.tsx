@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { BarChart3, Inbox } from 'lucide-react'
 import { FlowGlyph } from '@/components/ui/Logo'
 import {
   getAnalyticsView,
@@ -12,6 +11,9 @@ import {
 import type { PipelineItem } from '../give-offer/actions'
 import { jobIdForItem } from '../give-offer/queue'
 import { cn } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/states'
 
 const ROW_POLL_MS = 10_000
 
@@ -277,22 +279,13 @@ export default function AnalyticsPage() {
 
   return (
     <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden">
-      {/* Header band — same geometry + card chrome as Property Search */}
-      <div className="px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border space-y-3 flex-shrink-0">
-        <div className="w-full border border-border/60 overflow-hidden bg-background shadow-sm corner-accents corner-accents-bottom">
-          <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <BarChart3 className="w-3.5 h-3.5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-body-sm text-foreground-secondary">Analytics</div>
-              <div className="text-xs text-foreground-tertiary">
-                Conversation-intelligence funnel
-                {metrics ? ` · ${metrics.queueDepth} in queue` : ''}
-                {metrics?.avgPrepMinutes != null ? ` · avg prep ${Math.round(metrics.avgPrepMinutes)}m` : ''}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
+      {/* Header band — keeps Property Search's height and bottom rule so panes line up */}
+      <div className="px-4 sm:px-6 lg:px-4 pt-3 pb-3 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border flex-shrink-0">
+        <PageHeader
+          title="Analytics"
+          className="w-full"
+          actions={
+            <div className="flex items-center gap-1">
               {WINDOWS.map((w) => (
                 <button
                   key={w.key}
@@ -302,15 +295,15 @@ export default function AnalyticsPage() {
                     'px-2.5 py-1 rounded text-[11px] font-medium transition-colors',
                     win === w.key
                       ? 'bg-primary/15 text-primary'
-                      : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 ',
+                      : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary ',
                   )}
                 >
                   {w.label}
                 </button>
               ))}
             </div>
-          </div>
-        </div>
+          }
+        />
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -327,7 +320,7 @@ export default function AnalyticsPage() {
                   onClick={() => select(t)}
                   className={cn(
                     'border border-border/60 bg-background shadow-sm px-3 py-2.5 text-left transition-colors corner-accents',
-                    active ? 'border-primary/60 bg-primary/5' : 'hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 ',
+                    active ? 'border-primary/60 bg-primary/5' : 'hover:text-foreground hover:bg-secondary ',
                   )}
                 >
                   <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary">{t.label}</div>
@@ -359,16 +352,12 @@ export default function AnalyticsPage() {
             </div>
             <div className="divide-y divide-border/50">
               {rows == null ? (
-                <div className="px-4 py-8 text-center text-xs text-foreground-tertiary">Loading…</div>
+                <SkeletonRows label="Loading activity" rows={5} className="border-0 rounded-none" />
               ) : (selected ? (drillRows ?? []) : latestByProperty).length === 0 ? (
-                <div className="px-4 py-8 flex flex-col items-center gap-2 text-center">
-                  <Inbox className="w-4 h-4 text-foreground-tertiary" />
-                  <div className="text-xs text-foreground-tertiary">
-                    {rows.length > 0
-                      ? `No ${selected ? selected.label.toLowerCase() : ''} events captured in this window — detailed per-event capture began when push went live (Sep 28).`
-                      : 'No activity ingested in this window.'}
-                  </div>
-                </div>
+                <EmptyState
+                  title={rows.length > 0 ? `No ${selected ? selected.label.toLowerCase() : ''} events in this window` : 'No activity in this window'}
+                  description="Pick a longer window to see more."
+                />
               ) : (
                 (selected ? (drillRows ?? []) : latestByProperty).map((r) => {
                   const jobId = r.leadId ? jobByLead.get(r.leadId) : undefined

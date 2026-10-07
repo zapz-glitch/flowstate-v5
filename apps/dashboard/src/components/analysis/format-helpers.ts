@@ -5,7 +5,8 @@ import { compFeatureMatches, featureState, MATCH_TEXT, MISMATCH_TEXT, type Featu
 export { MATCH_TEXT, MISMATCH_TEXT }
 
 export const FILTER_TYPE_LABELS: Record<string, string> = {
-  subdivision_match: 'Subdivision Match',
+  // Shown on the comp detail's rule list · the area is called the neighborhood on every comp surface
+  subdivision_match: 'Neighborhood Match',
   neighborhood_match: 'Neighborhood',
   building_style_match: 'Building Style',
   foundation_match: 'Foundation Match',
@@ -73,7 +74,12 @@ export function fmtNumber(v: number | null | undefined): string {
 /** Format a date string as "Mar 15, 2024" */
 export function formatShortDate(date: string | null | undefined): string {
   if (!date) return '-'
-  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  // A date with no time ("2016-04-14") is a calendar day, not a moment. Read as UTC
+  // midnight and shown in the viewer's zone it lands on the day before in the US.
+  const calendarDay = /^\d{4}-\d{2}-\d{2}$/.test(date)
+  return new Date(date).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', ...(calendarDay ? { timeZone: 'UTC' } : {}),
+  })
 }
 
 /** Format a numeric delta as "+1,200" or "-300" */
@@ -194,7 +200,7 @@ export function zillowHref(comp: Pick<CompItem, 'zillowUrl' | 'address' | 'city'
 
 /** Where a comp's geography matched the subject · lower sorts first */
 export function scopeRank(scope: Pick<ScopeLabel, 'word'>): number {
-  return scope.word === 'Group' ? 0 : scope.word === 'Tract' ? 1 : scope.word === 'Tract/Group' ? 2 : scope.word === 'Neighborhood' ? 3 : 4
+  return scope.word === 'Block' ? 0 : scope.word === 'Tract' ? 1 : scope.word === 'Tract/Block' ? 2 : scope.word === 'Neighborhood' ? 3 : 4
 }
 
 /** Photo condition · missing evidence stays Unverified, never a guess */
@@ -237,7 +243,7 @@ export function conflictNote(comp: Pick<CompItem, 'classification' | 'badges'>):
 
 // ─── Geographic scope ───────────────────────────────────────────────────────
 
-export type ScopeWord = 'Group' | 'Tract' | 'Neighborhood' | 'Tract/Group' | 'Out =' | 'Out >' | 'Out <' | 'Unverified'
+export type ScopeWord = 'Block' | 'Tract' | 'Neighborhood' | 'Tract/Block' | 'Out =' | 'Out >' | 'Out <' | 'Unverified'
 export type ScopeTone = 'match' | 'out' | 'unverified'
 
 export interface ScopeLabel {
@@ -259,6 +265,49 @@ export function formatCensusTract(value?: string | null): string | null {
 /** Block-group digit from a 12-digit GEOID */
 export function formatBlockGroup(value?: string | null): string | null {
   return value ? value.slice(-1) : null
+}
+
+/**
+ * The area line on a property card: "Group 4 - Meadow Brook" · block group first,
+ * then the neighborhood name. Either half alone is drawn alone; neither gives null.
+ */
+export function formatAreaLine(blockGroupGeoid?: string | null, name?: string | null): string | null {
+  const group = formatBlockGroup(blockGroupGeoid)
+  const area = name ? titleCaseWords(name) : null
+  if (group && area) return `Block ${group} - ${area}`
+  if (group) return `Block ${group}`
+  return area
+}
+
+export type AreaMatch = 'both' | 'block' | 'neighborhood' | 'none'
+
+const geoName = (value?: string | null) => (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+/**
+ * How a comp sits against the subject's area: the same census block group, the same
+ * neighborhood (name or subdivision), both, or neither. Unknown geography reads as neither.
+ */
+export function compAreaMatch(
+  comp: Pick<CompItem, 'sameBlockGroup' | 'censusBlockGroup' | 'neighborhoodName' | 'subdivision' | 'badges'>,
+  subject?: Pick<SubjectData, 'censusBlockGroup' | 'neighborhoodName' | 'subdivision'> | null,
+): AreaMatch {
+  const block = comp.sameBlockGroup === true
+    || comp.badges?.pocketVia === 'block'
+    || !!(subject?.censusBlockGroup && comp.censusBlockGroup && subject.censusBlockGroup === comp.censusBlockGroup)
+  const compName = geoName(comp.neighborhoodName)
+  const subjectName = geoName(subject?.neighborhoodName)
+  const neighborhood = comp.badges?.pocketVia === 'name'
+    || (!!compName && !!subjectName && compName === subjectName)
+    || !!(comp.subdivision && subject?.subdivision && subdivisionsMatch(comp.subdivision, subject.subdivision))
+  return block && neighborhood ? 'both' : block ? 'block' : neighborhood ? 'neighborhood' : 'none'
+}
+
+/** The plain words for an area match · what the map tag says under the price */
+export const AREA_MATCH_WORDS: Record<AreaMatch, string> = {
+  both: 'Block + Neighborhood',
+  block: 'Block',
+  neighborhood: 'Neighborhood',
+  none: 'Outside',
 }
 
 type ScopeComp = Pick<CompItem, 'badges' | 'subdivision' | 'neighborhoodName' | 'sameBlockGroup' | 'censusTract' | 'censusBlockGroup' | 'geographyUnverified'>
@@ -298,8 +347,8 @@ export function scopeLabel(
   const name = sharedName ? titleCaseWords(sharedName) : ownName ? titleCaseWords(ownName) : null
 
   const group = (): ScopeLabel => ({
-    word: 'Group', tone: 'match', title: 'Same census block group as the subject',
-    matchedName: name ?? (tractCode ? `Tract ${tractCode}${groupCode ? ` BG ${groupCode}` : ''}` : null),
+    word: 'Block', tone: 'match', title: 'Same census block group as the subject',
+    matchedName: name ?? (tractCode ? `Tract ${tractCode}${groupCode ? ` Block ${groupCode}` : ''}` : null),
   })
   const tract = (): ScopeLabel => ({
     word: 'Tract', tone: 'match', title: 'Same census tract as the subject',
@@ -320,7 +369,7 @@ export function scopeLabel(
       // only ever a census match, so it is never labelled Neighborhood.
       if (comp.sameBlockGroup === true) return group()
       if (comp.censusTract && subject?.censusTract && comp.censusTract === subject.censusTract) return tract()
-      return { word: 'Tract/Group', tone: 'match', title: 'Inside the subject census area · match level not recorded', matchedName: name }
+      return { word: 'Tract/Block', tone: 'match', title: 'Inside the subject census area · match level not recorded', matchedName: name }
     case 'equal':
       return { word: 'Out =', tone: 'out', title: 'Outside the subject area · priced level with it', matchedName: name }
     case 'above':
@@ -402,6 +451,15 @@ export function streetViewHref(comp: Pick<CompItem, 'latitude' | 'longitude' | '
   if (!comp.address) return null
   const full = [comp.address, comp.city, comp.state].filter(Boolean).join(', ')
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(full)}`
+}
+
+/** The subject's Street View link · same destination rule as a comp's, from the subject's location. */
+export function subjectStreetViewHref(subject: { latitude?: number | null; longitude?: number | null; address?: string | null }): string | null {
+  return streetViewHref({
+    latitude: subject.latitude ?? undefined,
+    longitude: subject.longitude ?? undefined,
+    address: subject.address ?? undefined,
+  })
 }
 
 /** A filter's measured value or threshold, readable · 0.0748427 → "0.07" */

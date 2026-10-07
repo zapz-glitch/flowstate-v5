@@ -24,6 +24,7 @@ export function ReportToolbar({ lead, title, tooltip, subline, children, onClick
 }) {
   return (
     <div
+      data-surface="card"
       className={cn(
         'w-full border border-border/60 overflow-hidden bg-background shadow-sm corner-accents corner-accents-bottom',
         onClick && 'cursor-pointer hover:border-primary/30 transition-all',

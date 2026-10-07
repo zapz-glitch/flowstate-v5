@@ -38,11 +38,13 @@ import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { getBatchStatus } from '@/lib/batch-client'
+import { usePreloadOnIdle, useStayMounted } from '@/hooks/use-stay-mounted'
 
 const EvaluationSettingsSheet = dynamic(() => import('@/components/report/EvaluationSettingsSheet').then((mod) => mod.EvaluationSettingsSheet))
 const ShareReportDialog = dynamic(() => import('@/components/report/ShareReportDialog').then((mod) => mod.ShareReportDialog))
 const ReportHistoryTimeline = dynamic(() => import('@/components/report/ReportHistoryTimeline').then((mod) => mod.ReportHistoryTimeline))
-const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompComparisonDialog').then((mod) => mod.CompComparisonDialog))
+const loadCompComparisonDialog = () => import('@/components/analysis/CompComparisonDialog')
+const CompComparisonDialog = dynamic(() => loadCompComparisonDialog().then((mod) => mod.CompComparisonDialog))
 
 // ─── Give Offer fallback — queue disposition when the report can't load ────
 
@@ -130,7 +132,7 @@ function QueueFallback({ queue }: {
                   type="button"
                   onClick={() => decide('prep_offer')}
                   disabled={busy != null || !canOffer}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-secondary transition-colors disabled:opacity-50 dark:text-emerald-400"
                   title={canOffer ? `Prep offer at $${item.wholesalePrice!.toLocaleString('en-US')}` : 'No computed offer price'}
                 >
                   {busy === 'prep_offer' ? <RefreshCw size={13} className="animate-spin" /> : <FileSignature size={13} />}
@@ -239,9 +241,9 @@ export function ReportPageView({ params, queue }: {
       // Offers context gets an explicit empty state — otherwise a lead
       // with no conversation intel looks identical to a broken fetch.
       return queue ? (
-        <section className="border border-border rounded-sm px-4 py-3">
+        <section aria-label="Realtor notes" className="border-l-2 border-border pl-3 pr-1 py-0.5">
           <div className="flex items-baseline justify-between gap-2">
-            <h3 className="text-body-sm font-semibold">Realtor notes</h3>
+            <h3 className="text-[11px] font-medium text-foreground-tertiary">Realtor notes</h3>
             <span className="text-[10px] text-foreground-tertiary">none on file</span>
           </div>
           <p className="text-[11px] text-foreground-tertiary">
@@ -712,6 +714,12 @@ export function ReportPageView({ params, queue }: {
     [],
   )
 
+  // Overlays are built on first open, then kept mounted so they can animate out
+  const mountSettings = useStayMounted(settingsOpen)
+  const mountShare = useStayMounted(shareOpen)
+  const mountComparison = useStayMounted(comparisonOpen)
+  usePreloadOnIdle(loadCompComparisonDialog)
+
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps, handlePinTier },
     subject: analyzeData?.subject,
@@ -896,7 +904,7 @@ export function ReportPageView({ params, queue }: {
         />
 
       {/* Evaluation Settings Sheet */}
-      {settingsOpen && <EvaluationSettingsSheet
+      {mountSettings && <EvaluationSettingsSheet
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         settingsHook={settingsHook}
@@ -921,14 +929,14 @@ export function ReportPageView({ params, queue }: {
       </Sheet>
 
       {/* Share Dialog */}
-      {shareOpen && <ShareReportDialog
+      {mountShare && <ShareReportDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
         jobId={jobId}
       />}
 
       {/* Subject vs Comp comparison dialog */}
-      {comparisonOpen && <CompComparisonDialog
+      {mountComparison && <CompComparisonDialog
         open={comparisonOpen}
         onOpenChange={setComparisonOpen}
         subject={analyzeData?.subject ?? null}

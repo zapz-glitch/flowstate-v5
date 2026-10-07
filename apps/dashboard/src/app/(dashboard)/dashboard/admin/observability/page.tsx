@@ -7,6 +7,7 @@ import { useUser } from '@/components/auth/UserProvider'
 import { getObservabilitySummary, getObservabilityRuns, type ObservabilitySummary, type ObservabilityRun } from '@/lib/admin-api'
 import { Activity, CheckCircle2, AlertTriangle, XCircle, Loader2, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/page-header'
 
 const GRADE_STYLES = {
   pass: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
@@ -59,10 +60,7 @@ export default function ObservabilityPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-heading-lg text-foreground tracking-tight">Observability</h1>
-        <p className="text-body text-foreground-tertiary mt-1">Evaluation traces, benchmark gates, and system evidence.</p>
-      </div>
+      <PageHeader title="Observability" />
 
       {/* System evidence */}
       {summary && (

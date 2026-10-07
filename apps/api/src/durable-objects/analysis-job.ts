@@ -16,6 +16,7 @@ import { ChunkedJobState } from './chunked-job-state'
 
 import { fetchMarketContext, type MarketContext } from '../services/market-context'
 import { type EvaluationParams } from '../services/evaluation'
+import { permitsReceived, permitsRequested } from '../services/evaluation/permit-progress'
 import { performAnalysis } from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
@@ -445,6 +446,12 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
+    // The permit stages go out on the progress channel as they happen, so the dashboard can show them
+    // beside the comp stages. Sending never changes the lookup: a failed send is ignored.
+    const sendProgress = (p: { message: string; data: Record<string, unknown> }) => {
+      void this.pushEvent('eval_progress', { message: p.message, ...p.data }).catch(() => {})
+    }
+    if (config.enrichment?.permits !== false) sendProgress(permitsRequested())
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       // Permits: fetched on every run (KV-cached) — the permit-age
@@ -453,6 +460,7 @@ export class AnalysisJobDO {
       // property has no permits on file (that's 'empty').
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
+            .then((result) => { sendProgress(permitsReceived(result)); return result })
         : Promise.resolve(null),
       // Flood zone: OPT-IN only — the First Street signal is scraped from the
       // Redfin listing during photo fetch instead (free via Firecrawl).

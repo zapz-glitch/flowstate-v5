@@ -11,6 +11,7 @@ import {
   type Pagination,
 } from '@/lib/admin-api'
 import { Search, ChevronLeft, ChevronRight, Crown, Shield } from 'lucide-react'
+import { PageHeader } from '@/components/ui/page-header'
 
 const PLAN_COLORS: Record<string, string> = {
   free: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
@@ -70,12 +71,10 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-heading-lg font-bold">User Management</h1>
-        <p className="text-foreground-secondary mt-1">
-          {pagination ? `${pagination.total} total users` : 'Loading...'}
-        </p>
-      </div>
+      <PageHeader
+        title="User Management"
+        actions={<span className="text-body-sm text-foreground-tertiary">{pagination ? `${pagination.total} total users` : ''}</span>}
+      />
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -180,7 +179,7 @@ export default function AdminUsersPage() {
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/dashboard/admin/users/${u.id}`}
-                        className="text-caption text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 font-medium transition-colors"
+                        className="text-caption text-foreground-secondary hover:text-foreground hover:bg-secondary font-medium transition-colors"
                       >
                         View Details
                       </Link>
@@ -203,14 +202,14 @@ export default function AdminUsersPage() {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="p-2 rounded-lg border border-border hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="p-2 rounded-lg border border-border hover:text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
               disabled={page === pagination.totalPages}
-              className="p-2 rounded-lg border border-border hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="p-2 rounded-lg border border-border hover:text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronRight className="w-4 h-4" />
             </button>

@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { submitBatchAnalysis, retryFailedAddresses, getBatchStreamToken, resumeBatch, stopBatch, cancelBatch, type BatchResult } from './actions'
 
 import { getBatchStatus, getBatchJobs } from '@/lib/batch-client'
+import { PageHeader } from '@/components/ui/page-header'
 
 type Phase = 'upload' | 'processing' | 'complete'
 type ConfBucket = 'high' | 'medium' | 'low' | 'unrated'
@@ -599,13 +600,7 @@ export default function BatchPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Batch Import</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Upload a CSV with addresses to generate analysis reports in bulk.
-        </p>
-      </div>
+      <PageHeader title="Batch Import" />
 
       {/* Error */}
       {error && (
@@ -630,7 +625,7 @@ export default function BatchPage() {
             <button
               type="button"
               onClick={() => setShowUpload(false)}
-              className="text-xs text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+              className="text-xs text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
             >
               ← Back to lists
             </button>
@@ -704,7 +699,7 @@ export default function BatchPage() {
                 onClick={selectAllLists}
                 className={cn(
                   'text-[11px] px-2.5 py-1 rounded transition-colors inline-flex items-center gap-1',
-                  viewAll ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 '
+                  viewAll ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary '
                 )}
               >
                 All lists
@@ -718,7 +713,7 @@ export default function BatchPage() {
                   title={`Uploaded ${new Date(j.createdAt).toLocaleString()}`}
                   className={cn(
                     'text-[11px] px-2.5 py-1 rounded transition-colors inline-flex items-center gap-1',
-                    !viewAll && batchId === j.id ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 ',
+                    !viewAll && batchId === j.id ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary ',
                     loadingListId === j.id && 'opacity-60'
                   )}
                 >

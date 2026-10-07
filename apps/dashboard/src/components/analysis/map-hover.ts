@@ -2,7 +2,13 @@
  * Tiny channel between the map markers and the page: which comp the pointer
  * is resting on, and where. The page shows that comp beside the subject.
  */
-export interface MarkerHover { compKey: string; x: number; y: number }
+export interface MarkerHover {
+  compKey: string
+  x: number
+  y: number
+  /** A click or tap: the card stays until the pointer leaves it, the person taps elsewhere, or Escape */
+  pinned?: boolean
+}
 
 type Listener = (hover: MarkerHover | null) => void
 const listeners = new Set<Listener>()

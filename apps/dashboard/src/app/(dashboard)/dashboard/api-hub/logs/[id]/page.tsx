@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { getUsageLogDetail } from '@/lib/api'
 import { ArrowLeft, Clock, Globe, Monitor, Key } from 'lucide-react'
 import { JsonViewer } from '@/components/JsonViewer'
+import { PageHeader } from '@/components/ui/page-header'
 
 async function getLogDetail(logId: string) {
   try {
@@ -55,12 +56,10 @@ export default async function LogDetailPage({
         </Link>
       </div>
 
-      <div>
-        <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Request Details</h1>
-        <p className="text-neutral-600 dark:text-neutral-400 mt-1">
-          {new Date(log.createdAt).toLocaleString()}
-        </p>
-      </div>
+      <PageHeader
+        title="Request Details"
+        actions={<span className="text-body-sm text-foreground-tertiary">{new Date(log.createdAt).toLocaleString()}</span>}
+      />
 
       {/* Summary card */}
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">

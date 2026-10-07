@@ -37,7 +37,7 @@ function NoteLine({ text }: { text: string }) {
   // Entries arrive as `YYYY-MM-DD <content>` — split the date chip from text.
   const m = /^(\d{4}-\d{2}-\d{2})\s+(.+)$/.exec(text)
   return (
-    <li className="flex items-start gap-2 text-[11px] leading-relaxed">
+    <li className="flex items-start gap-2 text-[11px] leading-snug">
       {m ? (
         <>
           <span className="text-foreground-tertiary tabular-nums flex-shrink-0 pt-px">{m[1]}</span>
@@ -70,15 +70,17 @@ export function RealtorNotesCard({
     : null
 
   return (
-    <section className="border border-border rounded-sm px-4 py-3 space-y-2 text-foreground break-words">
+    // Quiet by design: no box and no bold title. A left hairline marks it as quoted notes; the words
+    // stay readable (secondary text), only the frame steps back.
+    <section aria-label="Realtor notes" className="border-l-2 border-border pl-3 pr-1 py-0.5 space-y-1 text-foreground break-words">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-body-sm font-semibold">Realtor notes</h3>
+        <h3 className="text-[11px] font-medium text-foreground-tertiary">Realtor notes</h3>
         <div className="flex items-center gap-2">
           {notes.length > 5 && (
             <button
               type="button"
               onClick={() => setShowAll((v) => !v)}
-              className="flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10"
+              className="flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary"
             >
               {showAll ? 'Show fewer' : `All ${notes.length} notes`}
               <ChevronDown className={`w-3 h-3 transition-transform ${showAll ? 'rotate-180' : ''}`} />
@@ -91,7 +93,7 @@ export function RealtorNotesCard({
       </div>
 
       {notes.length > 0 && (
-        <ul className="space-y-1.5">
+        <ul className="space-y-1">
           {visible.map((n, i) => (
             <NoteLine key={`${n.id}-${i}`} text={n.text} />
           ))}
@@ -101,7 +103,7 @@ export function RealtorNotesCard({
       {additions && additions.length > 0 && (
         <div className="space-y-1 pt-1 border-t border-border/30">
           {additions.map((a, i) => (
-            <p key={i} className="flex items-start gap-1.5 text-[11px] text-emerald-500">
+            <p key={i} className="flex items-start gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
               <PlusCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
               <span>
                 Added {a.item} +{fmtMoney(a.estimatedCost)} to renovation
@@ -115,7 +117,7 @@ export function RealtorNotesCard({
       {advisories && advisories.length > 0 && (
         <div className="space-y-1 pt-1 border-t border-border/30">
           {advisories.map((a, i) => (
-            <p key={i} className="flex items-start gap-1.5 text-[11px] text-amber-500">
+            <p key={i} className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
               <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
               <span>
                 {a.suggestion === 'consider_removing'

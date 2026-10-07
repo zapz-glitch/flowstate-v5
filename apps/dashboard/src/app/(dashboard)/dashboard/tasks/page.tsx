@@ -1,9 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2, Check, Calendar, Folder, ListTodo } from 'lucide-react'
+import { Plus, Trash2, Check, Calendar, Folder } from 'lucide-react'
 import { getTasks, createTask, updateTask, deleteTask, type TaskItem } from '@/lib/client-api'
 import { cn } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/states'
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([])
@@ -71,20 +74,9 @@ export default function TasksPage() {
   const isOverdue = (t: TaskItem) =>
     !t.done && t.dueDate && new Date(t.dueDate).getTime() < Date.now()
 
-  const openCount = tasks.filter((t) => !t.done).length
-
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <ListTodo className="w-6 h-6" /> Tasks
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {openCount} open · {tasks.length} total
-          </p>
-        </div>
-      </div>
+      <PageHeader title="Tasks" />
 
       {/* Add task */}
       <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -126,9 +118,9 @@ export default function TasksPage() {
 
       {/* List */}
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <SkeletonRows label="Loading tasks" rows={4} />
       ) : tasks.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No tasks yet.</p>
+        <EmptyState title="No tasks yet" description="Add a task above to start your list." />
       ) : (
         <ul className="rounded-xl border border-border divide-y divide-border overflow-hidden">
           {tasks.map((t) => (

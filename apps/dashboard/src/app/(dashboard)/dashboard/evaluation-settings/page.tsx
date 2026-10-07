@@ -13,7 +13,6 @@ import {
   Check,
   Save,
   RotateCcw,
-  Settings2,
   Hammer,
   DollarSign,
   MapPin,
@@ -33,6 +32,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DraftNumberInput } from '@/components/ui/number-input'
 import { Badge } from '@/components/ui/badge'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -978,9 +979,7 @@ function AppraisalRulesTab() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-        </div>
+        <SkeletonRows label="Loading settings" rows={4} />
       ) : defaults && (
         <>
           {/* ── Filter Rules ── */}
@@ -1829,7 +1828,7 @@ function RenovationLevelsTab() {
         <div className="px-4 py-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-sm text-green-700 dark:text-green-400">{successMessage}</div>
       )}
 
-      {loading && <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}
+      {loading && <SkeletonRows label="Loading settings" rows={4} />}
 
       {!loading && table && (
         <>
@@ -2346,7 +2345,7 @@ function DealParamsTab() {
         <div className="px-4 py-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-sm text-green-700 dark:text-green-400">{successMessage}</div>
       )}
 
-      {loading && <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}
+      {loading && <SkeletonRows label="Loading settings" rows={4} />}
 
       {!loading && (
         <>
@@ -2820,12 +2819,7 @@ function MajorItemCostsTab() {
   const autoSaveState = useAutoSave(dirty, handleSave, [pending, items])
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        <span className="text-sm">Loading…</span>
-      </div>
-    )
+    return <SkeletonRows label="Loading settings" rows={4} />
   }
 
   return (
@@ -3315,7 +3309,7 @@ function ArvThresholdTab() {
       {error && <div className="px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">{error}</div>}
       {successMessage && !error && <div className="px-4 py-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-sm text-green-700 dark:text-green-400">{successMessage}</div>}
 
-      {loading && <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}
+      {loading && <SkeletonRows label="Loading settings" rows={4} />}
 
       {!loading && (
         <div className="space-y-5">
@@ -3735,18 +3729,7 @@ export default function EvaluationSettingsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-primary/10">
-          <Settings2 className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Evaluation Settings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Configure appraisal rules, renovation pricing, deal parameters, and market-specific overrides.
-          </p>
-        </div>
-      </div>
+      <PageHeader title="Evaluation Settings" />
 
       {/* Tabs */}
       <Tabs defaultValue={defaultTab} key={defaultTab}>

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Loader2 } from 'lucide-react'
 import {
   getApiKeys,
   getUsageSummary,
@@ -13,6 +12,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { SkeletonRows, SkeletonStat } from '@/components/ui/skeleton'
 
 interface UsageData {
   keys: ApiKey[]
@@ -79,8 +79,9 @@ export default function UsageTab() {
 
   if (loading || !data) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <SkeletonStat label="Loading usage" count={3} />
+        <SkeletonRows label="Loading usage" rows={5} />
       </div>
     )
   }

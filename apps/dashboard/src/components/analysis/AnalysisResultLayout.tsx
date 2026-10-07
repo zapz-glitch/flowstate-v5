@@ -2,26 +2,18 @@
 
 import type { OfferWorkflow } from '@/lib/client-api'
 import { Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
-import { ComparablesSection } from './ComparablesSection'
+import { ComparablesSection, type CompSelectionStats } from './ComparablesSection'
 import { DecisionTrail } from './DecisionTrail'
 import { DealSummaryHero } from './DealSummaryHero'
+import { DealActions } from './DealActions'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
-
-const compactConcession = (text: string): string => {
-  const value = text.match(/(?:to|of)\s+±?\$?([\d,.]+)/)?.[1]?.replace(/,/g, '')
-  const n = value ? Number(value) : null
-  if (text.includes('sale age') && n != null) return `Age ≤${Math.round(n)}d`
-  if (text.includes('sqft tolerance') && n != null) return `Size ±${Math.round(n).toLocaleString()}sf`
-  if (text.includes('year built') && n != null) return `Year ±${Math.round(n)}y`
-  if (text.includes('distance') && n != null) return `Dist ≤${Math.round(n * 10) / 10}mi`
-  if (text.includes('lot size') && n != null) return `Lot ±${Math.round(n).toLocaleString()}sf`
-  return text.split(' (was ')[0]
-}
 
 export interface AnalysisResultLayoutProps {
   /** Map-list hover sync (local to map view, not in atoms) */
@@ -47,6 +39,12 @@ export interface AnalysisResultLayoutProps {
   valuationPlacement?: 'inline' | 'left'
   /** Extra lines for the subject card (flood and location risks) */
   subjectExtras?: React.ReactNode
+  /** What to draw instead of the live evaluation · the page holds the previous results steady during a rerun */
+  evaluation?: ReturnType<typeof useEvaluation>
+  /** A rerun is streaming in: the held results are dimmed and not clickable */
+  refreshing?: boolean
+  /** Goes up each time a held rerun finishes · the fresh results animate in on it */
+  enterKey?: number
 }
 
 export function AnalysisResultLayout({
@@ -61,7 +59,11 @@ export function AnalysisResultLayout({
   disposition,
   valuationPlacement = 'inline',
   subjectExtras,
+  evaluation,
+  refreshing = false,
+  enterKey = 0,
 }: AnalysisResultLayoutProps) {
+  const live = useEvaluation()
   const {
     subject,
     displayValuation: valuation,
@@ -76,36 +78,64 @@ export function AnalysisResultLayout({
     onOpenSettings,
     onCompClick,
     onFeedbackSubmitted,
-  } = useEvaluation()
+  } = evaluation ?? live
 
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
 
-  // The comp rules this run used, on one line inside the subject card. The
-  // server's grade sentence stays server-side; only the rules are shown.
-  const concessions = comps?.retrieval?.paramFlex?.concessions ?? []
-  const rulesLine = subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null ? (
-    <div className="mt-2 text-[11px] text-foreground-secondary tabular-nums" aria-label="Comp rules used">
-      {concessions.length > 0 ? concessions.map(compactConcession).join(' · ') : 'Strict rules'}
+  // The comp selection stats ("5 selected · 25 excluded · $241/sf avg · $320k to $410k") are
+  // calculated by the comps section for the tier on screen and drawn at the foot of the subject card.
+  const [compStats, setCompStats] = useState<CompSelectionStats | null>(null)
+  const priceRange = compStats && compStats.priceMin != null && compStats.priceMax != null && compStats.priceMin !== compStats.priceMax
+    ? `$${(compStats.priceMin / 1000).toFixed(0)}k to $${(compStats.priceMax / 1000).toFixed(0)}k`
+    : null
+  const statsNode = compStats ? (
+    <div className="whitespace-nowrap text-[11px] tabular-nums text-foreground-tertiary">
+      {compStats.selected} selected
+      {compStats.excluded > 0 && ` · ${compStats.excluded} excluded`}
+      {compStats.avgPsf != null && ` · $${compStats.avgPsf}/sf avg`}
+      {priceRange && ` · ${priceRange}`}
     </div>
   ) : null
-  const subjectFooter = (rulesLine || subjectExtras) ? <>{rulesLine}{subjectExtras}</> : null
 
   return (
     <>
       {/* Subject property */}
-      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} footer={subjectFooter} />}
+      {subject && (
+        <SubjectGridCard
+          subject={subject}
+          isLoading={isStreaming}
+          footer={subjectExtras}
+          stats={statsNode}
+          actions={valuation ? (
+            <DealActions
+              bare
+              offerPrice={valuation.wholesalePrice ?? valuation.buyPrice}
+              onOfferWorkflow={onOfferWorkflow}
+              onRerun={onRerun}
+              rerunning={rerunning}
+              onOpenSettings={onOpenSettings}
+            />
+          ) : null}
+        />
+      )}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
       {valuationPlacement === 'left' ? null : valuation ? (
-        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} data-pane-sticky className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
+        <div
+          key={enterKey}
+          ref={valuationCardRef as React.RefObject<HTMLDivElement>}
+          data-pane-sticky
+          aria-busy={refreshing}
+          className={cn(
+            'sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0 transition-opacity duration-300',
+            refreshing && 'opacity-60 pointer-events-none select-none',
+            enterKey > 0 && !refreshing && 'animate-in fade-in duration-300',
+          )}
+        >
           <DealSummaryHero
             valuation={valuation}
             isRecalculated={isRecalculated}
-            onOpenSettings={onOpenSettings}
-            onRerun={onRerun}
-            rerunning={rerunning}
-            onOfferWorkflow={onOfferWorkflow}
             disposition={disposition}
           />
         </div>
@@ -127,24 +157,16 @@ export function AnalysisResultLayout({
         </div>
       ) : null}
 
-      {/* Insufficient-comps disclosure — renders whether or not a valuation
-          exists (AVM-anchored runs show the hero AND this note). */}
-      {subject && !isStreaming && comps?.insufficientComps === true ? (() => {
-        /* Thin-pocket disclosure — the param-flex ladder stretched numeric
-           tolerances (geo stayed required) hunting ARV evidence. Green =
-           strict pass, yellow = extended once or twice, red = deeper. */
+      {/* Widened-rules warning · shown only when the search had to stretch its rules to look for ARV
+          evidence and still found none (amber: once or twice, red: further). The plain "no ARV evidence
+          in the verified pool" note, with no widening, was removed: it warned about nothing. */}
+      {subject && !isStreaming && comps?.insufficientComps === true && (comps?.retrieval?.paramFlex?.extensions ?? 0) > 0 ? (() => {
         const extensions = comps?.retrieval?.paramFlex?.extensions ?? 0
-        const factor = comps?.retrieval?.paramFlex?.factor ?? 1
-        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/5'
-          : extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
+        const tone = extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
           : 'text-red-400 border-red-400/30 bg-red-400/5'
         return (
-          <div className={`border rounded-sm px-4 py-3 ${tone}`}>
-            <div className="text-sm font-semibold">
-              {extensions === 0
-                ? 'No ARV evidence in the verified pool'
-                : 'No ARV evidence — rules had to be widened'}
-            </div>
+          <div data-notice className={`border rounded-sm px-4 py-3 ${tone}`}>
+            <div className="text-sm font-semibold">No ARV evidence — rules had to be widened</div>
             <p className="text-xs text-foreground-secondary mt-0.5">
               {comps?.retrieval?.paramFlex?.concessions?.length
                 ? `To reach comps we extended ${comps.retrieval.paramFlex.concessions.join(', ')}. `
@@ -173,7 +195,7 @@ export function AnalysisResultLayout({
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
 
       {/* Streaming status — lives near the comps section, not the search bar */}
-      {statusLabel && isStreaming && (
+      {statusLabel && !refreshing && (isStreaming || live.isStreaming) && (
         <div className="flex items-center gap-2 px-1">
           <Loader2 className="w-3 h-3 text-primary animate-spin" />
           <span className="text-caption text-foreground-tertiary">{statusLabel}</span>
@@ -182,7 +204,21 @@ export function AnalysisResultLayout({
 
       {/* Properties grid (subject + comps) */}
       {comps ? (
+        <div className="relative">
+        {/* During a rerun the step label floats over the held comps instead of pushing them down */}
+        {refreshing && statusLabel && (
+          <div role="status" className="absolute left-1/2 top-12 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sm border border-border bg-background px-3 py-1.5 shadow-sm animate-in fade-in duration-300">
+            <Loader2 className="w-3 h-3 text-primary animate-spin" />
+            <span className="text-caption text-foreground-secondary whitespace-nowrap">{statusLabel}</span>
+          </div>
+        )}
+        <div
+          aria-busy={refreshing}
+          className={cn('transition-opacity duration-300', refreshing && 'opacity-60 pointer-events-none select-none')}
+        >
         <ComparablesSection
+          enterKey={enterKey}
+          onSelectionStats={setCompStats}
           comps={comps}
           subject={subject}
           subjectSubdivision={subject?.subdivision}
@@ -198,6 +234,8 @@ export function AnalysisResultLayout({
           feedbackContext={feedbackContext}
           onFeedbackSubmitted={onFeedbackSubmitted}
         />
+        </div>
+        </div>
       ) : null}
 
       {/* Appraisal decision trail — per-comp rule audit */}

@@ -1,12 +1,13 @@
 'use client'
 
-import { memo, useMemo, type ReactNode } from 'react'
+import { memo, useMemo } from 'react'
 import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
+import { Fact, Pair, STAMP } from './property-card-parts'
 import {
   MATCH_TEXT,
   PRICE_STAMP_CLASS,
@@ -16,6 +17,7 @@ import {
   conflictNote,
   fmtDeltaWords,
   formatAddressCasing,
+  formatAreaLine,
   formatLotSize,
   formatShortDate,
   lotMatchColor,
@@ -47,42 +49,6 @@ export interface CompGridCardProps {
   /** Called with the card's comp key on enter, null on leave */
   onHover?: (key: string | null) => void
   isHighlighted?: boolean
-}
-
-/** Photo stamp · opaque colored chip with white text so it reads on any photo */
-const STAMP = 'h-[22px] px-1.5 rounded-sm flex items-center text-[11px] font-bold tracking-wide shadow-sm'
-
-/** "Label value" pair on one line · gray label, strong value */
-function Pair({ label, value, title }: { label: string; value: string; title?: string }) {
-  return (
-    <span className="whitespace-nowrap" title={title}>
-      <span className="text-foreground-tertiary">{label}</span>{' '}
-      <span className="font-medium text-foreground">{value}</span>
-    </span>
-  )
-}
-
-/** One property fact · the difference from the subject sits on its own line
- *  under the value so it never truncates in a narrow card. */
-function Fact({ label, value, valueClass, title, delta, deltaClass }: {
-  label: string
-  value: ReactNode
-  valueClass?: string
-  title?: string
-  delta?: string | null
-  deltaClass?: string | null
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-foreground-tertiary flex-shrink-0">{label}</span>
-        <span className={cn('font-medium tabular-nums truncate', valueClass)} title={title}>{value}</span>
-      </div>
-      {delta && (
-        <div className={cn('text-right whitespace-nowrap leading-tight', deltaClass ?? 'text-foreground-tertiary')}>{delta}</div>
-      )}
-    </div>
-  )
 }
 
 function CompGridCardInner({
@@ -148,6 +114,7 @@ function CompGridCardInner({
     <div
       data-card-key={cardKey}
       data-verdict={verdict}
+      data-in-arv={isEnabled ? 'true' : 'false'}
       onMouseEnter={() => onHover?.(cardKey)}
       onMouseLeave={() => onHover?.(null)}
       className={cn(
@@ -178,14 +145,15 @@ function CompGridCardInner({
         {/* Stamps · number, role, flip, price class. Kept clear of the checkbox. */}
         <div className="absolute top-2 left-2.5 flex flex-wrap items-center gap-1 max-w-[calc(100%-3.25rem)] pointer-events-none">
           {/* Number · green when the comp is in the ARV, gray when it is not */}
-          <div className={cn(STAMP, 'w-[22px] px-0 justify-center tabular-nums', isEnabled ? 'bg-emerald-600 text-white' : 'bg-neutral-600 text-white')}>
+          <div data-stamp="number" className={cn(STAMP, 'w-[22px] px-0 justify-center tabular-nums', isEnabled ? 'bg-emerald-600 text-white' : 'bg-neutral-600 text-white')}>
             {index + 1}
           </div>
           {role && comp.bRole && (
-            <div className={cn(STAMP, ROLE_STAMP_CLASS[comp.bRole])} title={roleTitle(comp.bRole)}>{role}</div>
+            <div data-stamp={comp.bRole} className={cn(STAMP, ROLE_STAMP_CLASS[comp.bRole])} title={roleTitle(comp.bRole)}>{role}</div>
           )}
           {comp.flip && (
             <div
+              data-stamp="flip"
               className={cn(STAMP, 'bg-violet-600 text-white')}
               title={`Verified flip · bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`}
             >
@@ -194,6 +162,7 @@ function CompGridCardInner({
           )}
           {comp.badges?.price && priceClass && (
             <div
+              data-stamp={comp.badges.price}
               className={cn(STAMP, PRICE_STAMP_CLASS[comp.badges.price])}
               title={comp.classification?.reasoning || `Price class ${priceClass}`}
             >
@@ -236,7 +205,7 @@ function CompGridCardInner({
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                className="text-body-sm font-semibold text-foreground truncate rounded px-0.5 -mx-0.5 transition-colors hover:text-emerald-600 hover:bg-emerald-500/10 active:scale-[0.98] dark:hover:text-emerald-400"
+                className="text-body-sm font-semibold text-foreground truncate rounded px-0.5 -mx-0.5 transition-colors hover:text-foreground hover:bg-secondary active:scale-[0.98]"
                 title={`${formatAddressCasing(comp.address)} · open on Zillow`}
               >
                 {formatAddressCasing(comp.address)}
@@ -255,7 +224,7 @@ function CompGridCardInner({
 
         {/* Scope · matching name left, tightest scope word right */}
         <div className="flex items-center justify-between gap-2 mt-0.5">
-          <span className="text-foreground-tertiary truncate">{scope.matchedName ?? ''}</span>
+          <span className="text-foreground-tertiary truncate">{formatAreaLine(comp.censusBlockGroup, scope.matchedName?.replace(/ Block \d$/, '')) ?? ''}</span>
           <span className={cn('font-medium flex-shrink-0', scopeToneClass(scope.tone))} title={scope.title}>
             {scope.word}
           </span>

@@ -5,6 +5,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { AltitudeMode, Map3D, MapMode, Marker3D, Pin, useMap3D } from '@vis.gl/react-google-maps'
 import { distanceMeters, nextCounterclockwiseHeading, type MapCoordinate } from '@/lib/property-map-geometry'
 import type { MapMarker } from './PropertyMap'
+import { MAP_COLORS, markerNumberColor } from './map-colors'
 
 export interface SubjectAerialMapHandle {
   /** Positive zooms in, negative zooms out. */
@@ -300,10 +301,10 @@ export const SubjectAerialMap = forwardRef<SubjectAerialMapHandle, SubjectAerial
           const isSubject = marker.type === 'subject'
           if (!isSubject) compNumber++
           const active = activeMarkerKey === (isSubject ? 'subject' : marker.compKey)
-          const color = active ? '#f59e0b' : isSubject ? '#3b82f6' : marker.type === 'comp-disabled' ? '#a3a3a3' : '#404040'
+          const color = active ? MAP_COLORS.active : isSubject ? MAP_COLORS.subject : marker.type === 'comp-disabled' ? MAP_COLORS.excluded : MAP_COLORS.included
           return (
             <Marker3D key={isSubject ? 'subject' : marker.compKey ?? `${marker.lat},${marker.lng}`} position={{ lat: marker.lat, lng: marker.lng, altitude: 0 }} altitudeMode={AltitudeMode.CLAMP_TO_GROUND} drawsWhenOccluded collisionBehavior="REQUIRED" sizePreserved zIndex={isSubject ? 100 : active ? 50 : 10} title={marker.label} onClick={() => onMarkerClick?.(marker)}>
-              <Pin background={color} borderColor="#fff" glyphColor="#fff" glyph={isSubject ? 'S' : String(compNumber)} scale={1.1} />
+              <Pin background={color} borderColor="#fff" glyphColor={active ? '#fff' : markerNumberColor(marker.type)} glyph={isSubject ? 'S' : String(compNumber)} scale={1.1} />
             </Marker3D>
           )
         })}

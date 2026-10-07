@@ -1,14 +1,11 @@
-import Link from 'next/link'
 import { AnalysisPageSkeleton } from '@/components/analysis/AnalysisSkeletons'
 
+// The report view draws its own header once loaded, so this is only the body.
+// (It is also shown under the Offers queue bar, so it carries no title or links of its own.)
 export default function ReportLoading() {
   return (
-    <div className="space-y-6" aria-busy="true">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-heading-lg">Property report</h1>
-        <Link href="/dashboard/batch" className="text-body-sm text-primary hover:underline">Back to Batch Import</Link>
-      </div>
-      <p role="status" className="text-body-sm text-foreground-tertiary">Loading report…</p>
+    <div aria-busy="true">
+      <p role="status" className="sr-only">Loading report…</p>
       <AnalysisPageSkeleton />
     </div>
   )

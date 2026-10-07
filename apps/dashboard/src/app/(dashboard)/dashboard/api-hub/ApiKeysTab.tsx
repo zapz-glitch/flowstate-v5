@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Copy, Trash2, ToggleLeft, ToggleRight, Check, Loader2 } from 'lucide-react'
+import { Plus, Copy, Trash2, ToggleLeft, ToggleRight, Check } from 'lucide-react'
 import {
   getApiKeys,
   createApiKey,
@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { SkeletonTable } from '@/components/ui/skeleton'
 
 export default function ApiKeysTab() {
   const [keys, setKeys] = useState<ApiKey[]>([])
@@ -96,11 +97,7 @@ export default function ApiKeysTab() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <SkeletonTable label="Loading API keys" columns={['w-32', 'w-28', 'w-20', 'w-16', 'w-12']} rows={4} />
   }
 
   return (
@@ -275,7 +272,7 @@ export default function ApiKeysTab() {
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => handleToggle(key.id, key.isActive)}
-                          className="p-2 text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors rounded-lg"
+                          className="p-2 text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors rounded-lg"
                           title={key.isActive ? 'Disable' : 'Enable'}
                         >
                           {key.isActive ? (

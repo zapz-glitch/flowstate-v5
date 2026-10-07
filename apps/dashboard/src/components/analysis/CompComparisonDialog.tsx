@@ -338,9 +338,12 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               <StatCell label="Carport" value={comp.carport ? 'Yes' : null} highlight={fm('garage')} />
               <StatCell capitalize label="Stories" value={comp.storiesType || (comp.stories != null ? String(comp.stories) : null)} highlight={fm('stories')} />
               <StatCell capitalize label="Heat / AC" value={[comp.heating, comp.cooling].filter(Boolean).join(' / ') || null} highlight={fm('hvac')} />
-              {/* Names live here in full · the card preview only shows one that matches */}
-              <StatCell label="Subdivision" value={comp.subdivision ? titleCaseWords(comp.subdivision) : null} highlight={fm('subdivision')} />
-              <StatCell label="Neighborhood" value={comp.neighborhoodName ? titleCaseWords(comp.neighborhoodName) : null} highlight={fm('neighborhood')} />
+              {/* One name for the area, as on the card: the neighborhood, or the subdivision when the neighborhood is missing */}
+              <StatCell
+                label="Neighborhood"
+                value={comp.neighborhoodName ? titleCaseWords(comp.neighborhoodName) : comp.subdivision ? titleCaseWords(comp.subdivision) : null}
+                highlight={comp.neighborhoodName ? fm('neighborhood') : fm('subdivision')}
+              />
             </div>
           </div>
 
@@ -357,8 +360,9 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                 <div className="divide-y divide-border/20">
                   {evaluatedFilters.map((f) => {
                     const passed = filterStatus(f) === 'passed'
+                    // The server's words for the area rule say "block group"; on comp surfaces it is "block"
                     const detail = f.actualValue != null && f.threshold != null
-                      ? `${fmtRuleValue(f.actualValue)} / ${fmtRuleValue(f.threshold)}`
+                      ? `${fmtRuleValue(f.actualValue)} / ${fmtRuleValue(f.threshold)}`.replace(/\bblock group\b/gi, 'block').replace(/\bsubdivision\b/gi, 'neighborhood')
                       : null
                     return (
                       <div

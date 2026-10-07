@@ -1,8 +1,10 @@
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { getSavedReports } from '@/lib/api'
-import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Card } from '@/components/ui/card'
+import { PageHeader } from '@/components/ui/page-header'
+import { EmptyState, ErrorState } from '@/components/ui/states'
 import { ReportSearchInput } from './search-input'
 import { DeleteReportButton } from './delete-report-button'
 import { formatAddressCasing, formatCityState } from '@/components/analysis/format-helpers'
@@ -52,16 +54,27 @@ export default async function ReportsPage({
   const data = await getReportsData(params)
 
   if (!data) {
-    return <div>Loading...</div>
+    // A failed fetch is an error, not a loading state: say so, and offer a retry on the same page
+    const retry = new URLSearchParams()
+    if (params.search) retry.set('search', params.search)
+    if (params.page) retry.set('page', params.page)
+    const query = retry.toString()
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Property Reports" />
+        <ErrorState
+          title="Couldn't load your reports"
+          detail="Your saved reports didn't come back. Try again. If it keeps failing, check your connection or sign in again."
+          action={{ label: 'Try again', href: `/dashboard/reports${query ? `?${query}` : ''}` }}
+        />
+      </div>
+    )
   }
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500">
-      {/* Header — same headline block as Property Search */}
       <div className="space-y-4">
-        <div className="space-y-1">
-          <h1 className="text-heading-lg text-foreground tracking-[-0.03em] font-medium">Property Reports</h1>
-        </div>
+        <PageHeader title="Property Reports" />
         <div className="flex items-center gap-3">
           <div className="max-w-sm flex-1">
             <Suspense>
@@ -76,16 +89,12 @@ export default async function ReportsPage({
 
       {/* Empty state */}
       {data.reports.length === 0 ? (
-        <Card className="px-6 py-12 text-center">
-          <FileText className="w-12 h-12 mx-auto mb-3 text-foreground-tertiary opacity-50" />
-          <p className="text-body text-foreground-secondary">
-            {params.search ? 'No matching reports' : 'No reports yet'}
-          </p>
-          <p className="text-body-sm text-foreground-tertiary mt-1">
-            {params.search
-              ? `No reports found for "${params.search}"`
-              : 'Run an analysis to generate your first report'}
-          </p>
+        <Card className="overflow-hidden">
+          <EmptyState
+            title={params.search ? 'No matching reports' : 'No reports yet'}
+            description={params.search ? `No reports found for "${params.search}".` : 'Run an analysis to create your first report.'}
+            action={params.search ? { label: 'Clear search', href: '/dashboard/reports' } : { label: 'Run an analysis', href: '/dashboard/analyze' }}
+          />
         </Card>
       ) : (
         <>
@@ -226,7 +235,7 @@ export default async function ReportsPage({
                 {data.pagination.hasPrev ? (
                   <Link
                     href={`/dashboard/reports?page=${data.pagination.page - 1}${params.search ? `&search=${encodeURIComponent(params.search)}` : ''}`}
-                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
                   >
                     <ChevronLeft className="w-4 h-4" />
                     <span className="hidden sm:inline">Previous</span>
@@ -240,7 +249,7 @@ export default async function ReportsPage({
                 {data.pagination.hasNext ? (
                   <Link
                     href={`/dashboard/reports?page=${data.pagination.page + 1}${params.search ? `&search=${encodeURIComponent(params.search)}` : ''}`}
-                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
                   >
                     <span className="hidden sm:inline">Next</span>
                     <ChevronRight className="w-4 h-4" />

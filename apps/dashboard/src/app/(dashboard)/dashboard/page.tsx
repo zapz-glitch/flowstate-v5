@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
 
 interface DashboardData {
   user: User
@@ -77,29 +79,22 @@ export default function DashboardPage() {
     ? Math.round((recentLogs.filter((l) => l.statusCode >= 200 && l.statusCode < 300).length / recentLogs.length) * 100)
     : null
   const pendingLabel = (...sections: (keyof DashboardData)[]) =>
-    sections.some((section) => errors[section]) ? 'Unavailable' : 'Loading…'
+    sections.some((section) => errors[section]) ? 'Unavailable' : '\u00a0'
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-heading-lg text-foreground tracking-tight">Dashboard</h1>
-          <p className="text-body text-foreground-tertiary">
-            {user ? `${user.plan.charAt(0).toUpperCase()}${user.plan.slice(1)} plan` : 'Your account overview'}
-            {usage ? ` — ${usage.remaining.toLocaleString()} requests remaining` : ''}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      <PageHeader
+        title="Overview"
+        actions={
           <Link
             href="/dashboard/api-hub"
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-border text-foreground font-medium text-body hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-border text-foreground font-medium text-body hover:text-foreground hover:bg-secondary transition-colors"
           >
             <Key className="w-4 h-4" />
             API Hub
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       {Object.keys(errors).length > 0 && (
         <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-border p-4 text-body-sm">
@@ -308,7 +303,7 @@ export default function DashboardPage() {
                 <span className="text-caption text-foreground-tertiary font-mono">terminal</span>
                 <button
                   onClick={copyCode}
-                  className="flex items-center gap-1.5 text-caption text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                  className="flex items-center gap-1.5 text-caption text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
                 >
                   {copied ? (
                     <>
@@ -366,12 +361,14 @@ export default function DashboardPage() {
           </div>
 
           {/* Recent Activity */}
-          {!recentLogs && (
-            <div className="rounded-2xl border border-border p-5" role="status">
+          {!recentLogs && (errors.recentLogs ? (
+            <div className="rounded-2xl border border-border p-5">
               <h2 className="text-heading font-semibold text-foreground">Recent Requests</h2>
-              <p className="text-body-sm text-foreground-tertiary mt-2">{pendingLabel('recentLogs')}</p>
+              <p className="text-body-sm text-foreground-tertiary mt-2">Unavailable</p>
             </div>
-          )}
+          ) : (
+            <SkeletonRows label="Loading recent requests" rows={3} />
+          ))}
           {recentLogs && recentLogs.length > 0 && (
             <div className="rounded-2xl border border-border overflow-hidden">
               <div className="px-6 py-4 border-b border-border flex items-center justify-between">

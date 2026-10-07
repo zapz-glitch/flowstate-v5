@@ -51,6 +51,19 @@ export interface ComparablesSectionProps {
   feedbackContext?: FeedbackContext | null
   /** Called after a feedback stamp is submitted — batch review uses it to advance */
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
+  /** The selection stats for the tier being viewed · the page draws them (the subject card's foot) */
+  onSelectionStats?: (stats: CompSelectionStats) => void
+  /** Goes up each time a held rerun finishes · the new cards fade in one after another on it */
+  enterKey?: number
+}
+
+/** "5 selected · 25 excluded · $241/sf avg · $320k to $410k", as numbers */
+export interface CompSelectionStats {
+  selected: number
+  excluded: number
+  avgPsf: number | null
+  priceMin: number | null
+  priceMax: number | null
 }
 
 /** 'default' = what the rules selected · 'price' = a tier, highest sale first */
@@ -78,6 +91,8 @@ export function ComparablesSection({
   onCompHover,
   feedbackContext,
   onFeedbackSubmitted,
+  onSelectionStats,
+  enterKey = 0,
 }: ComparablesSectionProps) {
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [tierFilter, setTierFilter] = useState<Tier>('all')
@@ -282,9 +297,15 @@ export function ComparablesSection({
     return psfs.length > 0 ? Math.round(psfs.reduce((s, p) => s + p, 0) / psfs.length) : null
   })()
 
+  // Tell the page the stats for the tier on screen (it draws them in the subject card)
+  const excludedCount = excludedComps.length
+  useEffect(() => {
+    onSelectionStats?.({ selected: selectedCount, excluded: excludedCount, avgPsf, priceMin, priceMax })
+  }, [onSelectionStats, selectedCount, excludedCount, avgPsf, priceMin, priceMax])
+
   return (
     <div>
-      {/* Stats + tiers stay pinned under the valuation box while the list scrolls,
+      {/* Tiers stay pinned under the valuation box while the list scrolls,
           so the selection count and the tier switches are always in reach. */}
       <div
         ref={tierBarRef}
@@ -292,16 +313,6 @@ export function ComparablesSection({
         className="sticky z-[9] bg-background pb-2 mb-2 space-y-2 border-b border-border/60"
         style={{ top: stickyTop }}
       >
-        {/* Selection stats */}
-        <div className="text-[11px] text-foreground-tertiary tabular-nums">
-          {selectedCount} selected
-          {excludedComps.length > 0 && ` · ${excludedComps.length} excluded`}
-          {avgPsf != null && ` · $${avgPsf}/sf avg`}
-          {priceMin != null && priceMax != null && priceMin !== priceMax && (
-            <span className="hidden sm:inline"> · ${(priceMin / 1000).toFixed(0)}k to ${(priceMax / 1000).toFixed(0)}k</span>
-          )}
-        </div>
-
         {/* Evidence tiers · ARV evidence / median / investor floor */}
         <div ref={tierRowRef} className="flex items-center gap-1 no-print flex-wrap scroll-mt-24">
           {/* A thin line between every tier */}
@@ -433,7 +444,7 @@ export function ComparablesSection({
           </div>
         )}
         {sortedItems.length > 0 && (
-          <div className="comps-grid">
+          <div key={enterKey} className={cn('comps-grid', enterKey > 0 && 'comps-enter')}>
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
               const isSelected = hasInteractiveSelection
@@ -486,7 +497,7 @@ export function ComparablesSection({
                 size="sm"
                 onClick={() => submitReport('validate')}
                 disabled={reportSubmitting !== null}
-                className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-secondary"
               >
                 {reportSubmitting === 'validate' ? 'Saving…' : 'Validate'}
               </Button>

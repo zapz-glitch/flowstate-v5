@@ -6,6 +6,7 @@ import { isValidCoordinate } from '@/lib/property-map-geometry'
 import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { useEvaluation } from '@/hooks/use-evaluation'
+import { useHeldDuringRerun } from '@/hooks/use-held-during-rerun'
 import { ResizableLayout } from '@/components/ui/resizable'
 import { RiskLine } from './MapOverlay'
 import { CompHoverPanel } from './CompHoverPanel'
@@ -47,6 +48,13 @@ export interface AnalysisPageLayoutProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
+  /**
+   * True from the click of a run until its last result has landed · the page's own run state, which
+   * moves in the same step as the results. The steady hold keys on this: the evaluation atom's
+   * streaming flag lags a render behind, and that one-render gap used to release the hold and
+   * re-freeze half-loaded data.
+   */
+  busy?: boolean
   /** Fire an offer workflow — returns the outcome the hero flashes */
   onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
@@ -70,10 +78,16 @@ export function AnalysisPageLayout({
   notesSlot,
   onRerun,
   rerunning,
+  busy,
   onOfferWorkflow,
   disposition,
 }: AnalysisPageLayoutProps) {
-  const { subject, displayComps: comps, compOverride, displayValuation: valuation, isRecalculated, onOpenSettings } = useEvaluation()
+  // While a rerun streams in, keep what is on screen steady (dimmed, not clickable) and bring the
+  // fresh results in together at the end · a first run, with nothing on screen yet, still builds up live.
+  const live = useEvaluation()
+  const held = useHeldDuringRerun(live, busy ?? (!!rerunning || live.isStreaming), !!live.displayValuation)
+  const refreshing = held.holding
+  const { subject, displayComps: comps, compOverride, displayValuation: valuation, isRecalculated } = held.value
   const selectedCompKeys = compOverride?.selectedCompKeys
   const hasMapData = isValidCoordinate({ lat: subject?.latitude, lng: subject?.longitude })
 
@@ -119,6 +133,9 @@ export function AnalysisPageLayout({
     rerunning,
     onOfferWorkflow,
     disposition,
+    evaluation: held.value,
+    refreshing,
+    enterKey: held.generation,
   }
 
   const loadingSkeleton = (
@@ -138,7 +155,7 @@ export function AnalysisPageLayout({
           <div className="relative flex-1 min-h-0 flex flex-col">
             <PropertyMap
               subject={subject!}
-              comps={mapComps ?? comps}
+              comps={refreshing ? comps : (mapComps ?? comps)}
               selectedCompKeys={selectedCompKeys}
               onMarkerSelect={onMarkerSelect}
               activeMarkerKey={mapActiveKey}
@@ -156,20 +173,22 @@ export function AnalysisPageLayout({
                 onDoubleClick={() => { setValuationHeight(null); try { localStorage.removeItem(VALUATION_HEIGHT_KEY) } catch { /* private mode */ } }}
                 className="hidden lg:flex flex-shrink-0 h-2 cursor-row-resize items-center justify-center group no-print"
               >
-                <span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-emerald-500/60 transition-colors" />
+                <span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-foreground/30 transition-colors" />
               </div>
               <div
+                key={held.generation}
                 ref={valuationCardRef as React.RefObject<HTMLDivElement>}
-                className="flex-shrink-0 overflow-y-auto max-h-[60%]"
+                aria-busy={refreshing}
+                className={cn(
+                  'flex-shrink-0 overflow-y-auto max-h-[60%] transition-opacity duration-300',
+                  refreshing && 'opacity-60 pointer-events-none select-none',
+                  held.generation > 0 && !refreshing && 'animate-in fade-in duration-300',
+                )}
                 style={{ containerType: 'inline-size', height: valuationHeight ?? undefined }}
               >
                 <DealSummaryHero
                   valuation={valuation}
                   isRecalculated={isRecalculated}
-                  onOpenSettings={onOpenSettings}
-                  onRerun={onRerun}
-                  rerunning={rerunning}
-                  onOfferWorkflow={onOfferWorkflow}
                   disposition={disposition}
                 />
               </div>

@@ -60,6 +60,7 @@ import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, unavailableAssessment, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
+import { permitsAssessed } from './permit-progress'
 import { buildEvaluationReport } from './report'
 import {
   fetchSellerNotes,
@@ -873,6 +874,8 @@ export async function performAnalysis(
     'completed',
     `${derivedBuybox.majorItems.filter((m) => m.enabled).length} major items charged`
   )
+  const permitsStage = permitsAssessed(bundle.enrichment.permits?.items?.length ?? 0, derivedBuybox.majorItems.filter((m) => m.enabled).length)
+  if (permitsStage) onProgress?.(permitsStage.message, permitsStage.data)
 
   // ── 5b. Seller notes → rehab intel ─────────────────────────────────────────
   // Notes can only ADD to the renovation ledger — a realtor mentioning work

@@ -143,7 +143,7 @@ function TerminalJson({ data, animate = false, delay = 0, collapsed = false }: T
         {lines.length > 5 && (
           <button
             onClick={() => setIsExpanded(true)}
-            className="mt-2 text-xs text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+            className="mt-2 text-xs text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors"
           >
             Show all ({lines.length} lines)
           </button>
@@ -160,7 +160,7 @@ function TerminalJson({ data, animate = false, delay = 0, collapsed = false }: T
       {collapsed && isExpanded && (
         <button
           onClick={() => setIsExpanded(false)}
-          className="mt-2 text-xs text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+          className="mt-2 text-xs text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors"
         >
           Collapse
         </button>
