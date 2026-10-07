@@ -61,10 +61,15 @@ type GradeComp = HarnessEvidence['comps'][number]
 const priceable = (c: GradeComp) =>
   c.isEnabled !== false && c.salePrice != null && c.salePrice > 0 && c.squareFeet != null && c.squareFeet > 0
 
-const inPocket = (c: GradeComp, subjectTract: string | null | undefined): boolean =>
+/** Block-group membership — the priority geography match. */
+const inBg = (c: GradeComp): boolean =>
   c.sameBlockGroup === true ||
-  ['block_group', 'same_pocket'].includes(digestField(c, 'B', 'geoFit') ?? '') ||
-  (subjectTract != null && c.censusTract === subjectTract)
+  ['block_group', 'same_pocket'].includes(digestField(c, 'B', 'geoFit') ?? '')
+
+/** Loose pocket (BG or same tract) — only counts when the pool offers no
+ *  BG candidates at all; block-group discipline is the priority. */
+const inPocket = (c: GradeComp, subjectTract: string | null | undefined): boolean =>
+  inBg(c) || (subjectTract != null && c.censusTract === subjectTract)
 
 const flaggedOutlier = (c: GradeComp): boolean =>
   c.isEnabled === false ||
@@ -129,12 +134,17 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
 
   const bands = computeEvidenceBands(evidence.comps, evidence.subject)
 
-  // ── d1: right neighborhood ────────────────────────────────────────────────
-  const distantPicks = picks.filter((c) => !inPocket(c, subjectTract))
-  if (distantPicks.length > 0 && enabledUnpicked.some((c) => inPocket(c, subjectTract))) {
+  // ── d1: right neighborhood — block group first ───────────────────────────
+  // The operative pocket is the block group whenever the pool offers BG
+  // candidates; tract-only matches only count on a BG-empty pool.
+  const bgPool = new Set(evidence.comps.filter((c) => priceable(c) && inBg(c)).map((c) => c.id))
+  const tractPool = new Set(evidence.comps.filter((c) => priceable(c) && inPocket(c, subjectTract)).map((c) => c.id))
+  const pocketIds = bgPool.size > 0 ? bgPool : tractPool
+  const offPocketPicks = picks.filter((c) => !pocketIds.has(c.id))
+  if (offPocketPicks.length > 0 && enabledUnpicked.some((c) => pocketIds.has(c.id))) {
     checks.d1 = 'fail'
-    failures.push('d1_neighborhood_miss')
-  } else if (distantPicks.length > picks.length / 3) {
+    failures.push(bgPool.size > 0 ? 'd1_neighborhood_miss' : 'd1_off_tract_pick')
+  } else if (offPocketPicks.length > picks.length / 3) {
     checks.d1 = 'warn'
     failures.push('d1_thin_pocket_anchor')
   }
