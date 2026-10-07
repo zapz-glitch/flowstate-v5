@@ -34,12 +34,11 @@ import { EmptyState } from '@/components/ui/states'
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
 const POLL_MS = 5000
 
-type Cat = 'waiting' | 'ready' | 'deadline' | 'hot' | 'prep_offer' | 'no_margin' | 'no_offer' | 'failed'
+type Cat = 'waiting' | 'ready' | 'hot' | 'prep_offer' | 'no_margin' | 'no_offer' | 'failed'
 
 const CAT_LABELS: Record<Cat, string> = {
   waiting: 'Evaluating',
   ready: 'Ready',
-  deadline: 'Deadline Today',
   hot: 'Hot leads',
   prep_offer: 'Prep offers',
   no_margin: 'No margin',
@@ -119,12 +118,15 @@ interface RowData {
   jobId: string | null
   icon?: React.ReactNode
   oppId?: string | null
+  itemKey?: string
   needsEval?: boolean
   urgent?: boolean
   deadlineAt?: string | null
   deadlineNote?: string | null
   section?: string
   evalElapsedMs?: number
+  pocketScore?: number | null
+  pocketName?: string | null
 }
 
 export default function GiveOfferPage() {
@@ -198,10 +200,10 @@ export default function GiveOfferPage() {
     [queueItems])
   // waiting = queued/evaluating (no report yet); ready = report landed.
   const waitingItems = useMemo(() =>
-    queueItems.filter((i) => i.offer_stage !== 'deadline_today' && !jobIdForItem(i)),
+    queueItems.filter((i) => !jobIdForItem(i)),
     [queueItems])
   const readyItems = useMemo(() =>
-    queueItems.filter((i) => i.offer_stage !== 'deadline_today' && jobIdForItem(i)),
+    queueItems.filter((i) => jobIdForItem(i)),
     [queueItems])
   const hotItems = useMemo(() => queueItems.filter((i) => hotIds.has(i.leadId)), [queueItems, hotIds])
   const prepDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'prep_offer'), [decided])
@@ -212,7 +214,7 @@ export default function GiveOfferPage() {
   const counts: Record<Cat, number> = {
     waiting: waitingItems.length,
     ready: readyItems.length,
-    deadline: dueItems.length,
+
     hot: hotItems.length,
     prep_offer: prepDecided.length,
     no_margin: marginDecided.length,
@@ -238,11 +240,14 @@ export default function GiveOfferPage() {
         ].filter(Boolean).join(' · '),
         jobId,
         oppId: item.opportunityId,
+        itemKey: item.opportunityId ?? item.leadId,
         needsEval: !jobId,
         evalElapsedMs: jobId ? undefined : Math.max(0, now - parseQueuedAt(item.queuedAt)),
         urgent: item.offer_stage === 'deadline_today',
         deadlineAt: item.deadline_at,
         deadlineNote: item.deadline_note,
+        pocketScore: item.pocketScore,
+        pocketName: item.pocketName,
         icon: item.offer_stage === 'deadline_today'
           ? <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
           : jobId
@@ -272,8 +277,27 @@ export default function GiveOfferPage() {
 
     switch (cat) {
       case 'waiting': return waitingItems.map((i) => queueRow(i))
-      case 'ready': return readyItems.map((i) => queueRow(i))
-      case 'deadline': return dueItems.map((i) => ({ ...queueRow(i), urgent: true }))
+      case 'ready': {
+        const byMetro = new Map<string, PipelineItem[]>()
+        for (const i of readyItems) {
+          const m = i.metro ?? 'Other'
+          if (!byMetro.has(m)) byMetro.set(m, [])
+          byMetro.get(m)!.push(i)
+        }
+        const metros = [...byMetro.entries()].sort((a, b) => {
+          const top = (arr: [string, PipelineItem[]]) => Math.max(...arr[1].map((i) => i.pocketScore ?? -1), -1)
+          return top(b) - top(a)
+        })
+        const out: RowData[] = []
+        for (const [metro, metroItems] of metros) {
+          out.push({ key: `metro:${metro}`, section: metro, jobId: null } as RowData)
+          metroItems
+            .sort((a, b) => (b.pocketScore ?? -1) - (a.pocketScore ?? -1))
+            .forEach((i) => out.push({ ...queueRow(i), urgent: i.offer_stage === 'deadline_today' }))
+        }
+        return out
+      }
+
       case 'hot': return hotItems.map((i) => queueRow(i, 'hot lead'))
       case 'prep_offer': return prepDecided.map(decidedRow)
       case 'no_margin': return marginDecided.map(decidedRow)
@@ -282,14 +306,14 @@ export default function GiveOfferPage() {
     }
   }, [cat, query, queueItems, hotItems, prepDecided, marginDecided, failedDecided, decided, now])
 
-  const dismiss = async (oppId: string | null | undefined) => {
-    if (!oppId) return
+  const dismiss = async (key: string | null | undefined) => {
+    if (!key) return
     setRaw((prev) => {
-      const next = prev.filter((i) => i.opportunityId !== oppId)
+      const next = prev.filter((i) => (i.opportunityId ?? i.leadId) !== key)
       setCachedQueue(next)
       return next
     })
-    await hideQueueItem(oppId).catch(() => null)
+    await hideQueueItem(key).catch(() => null)
   }
   const evaluate = (address: string) => {
     router.push(`/dashboard/analyze?address=${encodeURIComponent(address)}`)
@@ -302,16 +326,15 @@ export default function GiveOfferPage() {
   const catIcons: Record<Cat, React.ReactNode> = {
     waiting: <Clock size={14} />,
     ready: <Inbox size={14} />,
-    deadline: <AlertTriangle size={14} />,
     hot: <Flame size={14} />,
     prep_offer: <FileSignature size={14} />,
     no_margin: <CircleSlash size={14} />,
     no_offer: <Ban size={14} />,
     failed: <AlertTriangle size={14} />,
   }
-  const visibleCats: Cat[] = (['deadline', 'waiting', 'ready', 'hot', 'prep_offer', 'no_margin', 'no_offer', 'failed'] as Cat[])
+  const visibleCats: Cat[] = (['waiting', 'ready', 'hot', 'prep_offer', 'no_margin', 'no_offer', 'failed'] as Cat[])
     .filter((c) => c !== 'hot' || counts.hot > 0)
-    .filter((c) => c !== 'deadline' || counts.deadline > 0)
+
 
   return (
     <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden">
@@ -423,12 +446,12 @@ export default function GiveOfferPage() {
                           Evaluate
                         </button>
                       )}
-                      {row.oppId && (
+                      {row.itemKey && (
                         <button
                           type="button"
                           title="Remove from waiting queue"
                           className="p-1 rounded text-foreground-tertiary hover:text-red-400 hover:bg-red-400/10"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismiss(row.oppId) }}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismiss(row.itemKey) }}
                         >
                           <Trash2 size={12} />
                         </button>
@@ -437,10 +460,20 @@ export default function GiveOfferPage() {
                   )
                   const inner = (
                     <>
-                      {row.icon}
+                      {row.pocketScore != null && (
+                        <span
+                          title={row.pocketName ? `Pocket: ${row.pocketName}` : 'Pocket score'}
+                          className={`text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded flex-shrink-0 ${
+                            row.pocketScore >= 7 ? 'text-emerald-400 bg-emerald-400/10'
+                            : row.pocketScore >= 4 ? 'text-foreground-secondary bg-foreground-tertiary/10'
+                            : 'text-foreground-tertiary bg-foreground-tertiary/10'}`}
+                        >
+                          {row.pocketScore.toFixed(1)}
+                        </span>
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className={`text-xs truncate ${row.urgent ? 'text-red-500 font-medium' : 'text-foreground'}`}>{row.address}</div>
-                        <div className={`text-[10px] ${row.urgent ? 'text-red-400' : 'text-foreground-tertiary'}`}>{row.meta}</div>
+                        <div className={`text-[10px] ${row.urgent ? 'text-red-400' : 'text-foreground-tertiary'}`}>{row.meta}{row.pocketName ? ` · ${row.pocketName}` : ''}</div>
                         {row.deadlineNote && <div className="text-[10px] text-foreground-secondary truncate mt-0.5">{row.deadlineNote}</div>}
                       </div>
                       <CopyAddr text={row.address ?? ''} />

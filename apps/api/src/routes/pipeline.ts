@@ -8,6 +8,7 @@
  */
 
 import { Hono } from 'hono'
+import { pocketFromPayload, deterministicInputs, provisionalScore, scorePocket, metroGuess } from '../services/pocket-score'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
 
@@ -164,20 +165,183 @@ async function hiddenOpps(env: Env): Promise<Set<string>> {
   return new Set(Array.isArray(list) ? (list as string[]) : [])
 }
 
+/** Loose street-level dedupe key — engine items and saved reports spell the
+ * same address differently ("800 40th St S" vs "800 40TH ST S …"). */
+function addrKey(a?: string | null): string {
+  return (a ?? '').toLowerCase().split(',')[0].replace(/[^a-z0-9]/g, '')
+}
+
+/** In-flight evals for this user — KV markers written by AnalysisJobDO at
+ * run start and cleared on finish. These render as "Evaluating" rows. */
+async function inflightEvalItems(env: Env, userId: string | undefined): Promise<Array<Record<string, unknown>>> {
+  if (!userId) return []
+  const list = await env.API_CACHE.list({ prefix: `eval-active:${userId}:` }).catch(() => null)
+  const items: Array<Record<string, unknown>> = []
+  for (const k of list?.keys ?? []) {
+    const v = await env.API_CACHE.get(k.name, 'json').catch(() => null) as
+      { jobId?: string; address?: string; startedAt?: string } | null
+    if (!v?.jobId) continue
+    items.push({
+      leadId: `inflight_${v.jobId}`,
+      opportunityId: null,
+      displayName: v.address ?? v.jobId,
+      address: v.address ?? 'Evaluating…',
+      wholesalePrice: null,
+      listPrice: null,
+      fullAddress: v.address ?? null,
+      evalReportUrl: null,
+      evalSummary: null,
+      conditionNotes: [],
+      draft: null,
+      queuedAt: v.startedAt ?? new Date().toISOString(),
+      offer_stage: 'evaluating',
+      source: 'api',
+    })
+  }
+  return items
+}
+
+/** Today's completed evals as synthetic queue items — the engine queue only
+ * carries engine-tracked leads; direct /v1/analyze runs land here. */
+async function apiEvalQueueItems(env: Env, userId: string | undefined): Promise<Array<Record<string, unknown>>> {
+  if (!userId) return []
+  const rows = await env.DB.prepare(
+    `SELECT r.job_id, r.property_address, r.property_city, r.property_state,
+            r.property_zip, r.status, r.arv, r.created_at, r.report_id
+       FROM run_records r
+      WHERE r.user_id = ? AND r.created_at >= datetime('now', '-24 hours')
+      ORDER BY r.created_at DESC`,
+  ).bind(userId).all<{
+    job_id: string; property_address: string | null; property_city: string | null
+    property_state: string | null; property_zip: string | null
+    status: string; arv: number | null; created_at: string; report_id: string | null
+  }>().catch((e) => {
+    console.error('[Pipeline] api-eval merge failed:', e)
+    return null
+  })
+
+  const items: Array<Record<string, unknown>> = []
+  for (const r of rows?.results ?? []) {
+    if (!r.job_id || r.status === 'error') continue
+    const address = [r.property_address, r.property_city, r.property_state]
+      .filter(Boolean).join(', ') || r.job_id
+    items.push({
+      leadId: `eval_${r.job_id}`,
+      opportunityId: null,
+      displayName: address,
+      address,
+      wholesalePrice: r.arv ?? null,
+      listPrice: null,
+      fullAddress: [r.property_address, r.property_city, r.property_state, r.property_zip].filter(Boolean).join(', '),
+      evalReportUrl: `/dashboard/reports/${r.job_id}`,
+      evalSummary: r.arv ? { arv: r.arv } : null,
+      conditionNotes: [],
+      draft: null,
+      queuedAt: r.created_at,
+      offer_stage: 'waiting_for_offers',
+      source: 'api',
+    })
+  }
+  return items
+}
+
 // GET /v1/pipeline/queue → GET /engine/queue (KV-cached, SWR, listPrice-enriched,
-// hidden items filtered)
+// hidden items filtered) + today's API evals merged in
 pipelineReads.get('/queue', async (c) => {
   const r = await engineJsonCached(c, '/engine/queue', enrichQueueListPrices)
   if (!r) return c.json({ ok: false, error: 'Engine unavailable' }, 502)
   if (!r.ok) return c.json({ ok: false, error: 'Engine fetch failed' }, 502)
   const hidden = await hiddenOpps(c.env)
-  const body = r.body as { items?: Array<{ opportunityId?: string }>; count?: number }
+  const body = r.body as { items?: Array<{ opportunityId?: string; address?: string }>; count?: number }
   if (Array.isArray(body?.items) && hidden.size) {
-    body.items = body.items.filter((i) => !i.opportunityId || !hidden.has(i.opportunityId))
-    body.count = body.items.length
+    body.items = body.items.filter((i) =>
+      (!i.opportunityId || !hidden.has(i.opportunityId)) && !hidden.has((i as { leadId?: string }).leadId ?? ''))
   }
+  const auth = c.get('auth') as AuthContext | undefined
+  const [apiItems, inflight] = await Promise.all([
+    apiEvalQueueItems(c.env, auth?.userId),
+    inflightEvalItems(c.env, auth?.userId),
+  ])
+  if (apiItems.length || inflight.length) {
+    const seen = new Set((body.items ?? []).flatMap((i) => [addrKey(i.address)]).filter(Boolean))
+    const fresh = [...apiItems, ...inflight].filter((i) => !seen.has(addrKey(i.address as string)))
+    body.items = [...(body.items ?? []), ...fresh]
+  }
+  await attachPockets(c, body.items ?? [])
+  body.count = body.items?.length ?? 0
   return c.json(body)
 })
+
+/** Resolve each item's pocket from its run_records payload → join
+ *  pocket_scores → attach metro/pocketScore/pocketName. Misses get a
+ *  provisional score now and a full Serper+Luna scoring job in waitUntil. */
+async function attachPockets(
+  c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } },
+  items: Array<Record<string, unknown>>,
+): Promise<void> {
+  if (!items.length) return
+  const jobIdOf = (i: Record<string, unknown>) =>
+    (i.evalReportUrl as string | undefined)?.match(/\/reports\/(job_[^/?#]+)/)?.[1] ?? null
+  const jobIds = [...new Set(items.map(jobIdOf).filter((x): x is string => x != null))]
+  if (!jobIds.length) return
+
+  // D1 caps ~100 binds per query — chunk; and pull only the subtrees
+  // scoring reads (evidence + report), not the full payload.
+  const payloadByJob = new Map<string, string>()
+  for (let i = 0; i < jobIds.length; i += 90) {
+    const chunk = jobIds.slice(i, i + 90)
+    const rows = await c.env.DB.prepare(
+      `SELECT job_id,
+              json_extract(payload_json, '$.evidence') AS evidence,
+              json_extract(payload_json, '$.result.response.report') AS report
+         FROM run_records WHERE job_id IN (${chunk.map(() => '?').join(',')})`,
+    ).bind(...chunk).all<{ job_id: string; evidence: string | null; report: string | null }>().catch(() => null)
+    for (const r of rows?.results ?? []) {
+      payloadByJob.set(r.job_id, JSON.stringify({ evidence: JSON.parse(r.evidence ?? 'null'), result: { response: { report: JSON.parse(r.report ?? 'null') } } }))
+    }
+  }
+
+  // Pass 1 — derive pocket identity + deterministic inputs per item.
+  const resolved = new Map<string, { id: ReturnType<typeof pocketFromPayload> & object; inputs: ReturnType<typeof deterministicInputs> }>()
+  const pockets = new Map<string, { id: NonNullable<ReturnType<typeof pocketFromPayload>>; inputs: ReturnType<typeof deterministicInputs> }>()
+  for (const item of items) {
+    const jobId = jobIdOf(item)
+    const payloadRaw = jobId ? payloadByJob.get(jobId) : undefined
+    if (!payloadRaw) continue
+    let payload: unknown = null
+    try { payload = JSON.parse(payloadRaw) } catch { continue }
+    const id = pocketFromPayload(payload)
+    if (!id) continue
+    item.pocketKey = id.pocketKey
+    item.pocketName = id.displayName
+    const inputs = deterministicInputs(payload, item.listPrice as number | null)
+    resolved.set(jobId as string, { id, inputs })
+    if (!pockets.has(id.pocketKey)) pockets.set(id.pocketKey, { id, inputs })
+  }
+  if (!pockets.size) return
+
+  // Pass 2 — one batch fetch for cached pocket scores.
+  const keys = [...pockets.keys()]
+  const cached = await c.env.DB.prepare(
+    `SELECT pocket_key, score, metro FROM pocket_scores WHERE pocket_key IN (${keys.map(() => '?').join(',')})`,
+  ).bind(...keys).all<{ pocket_key: string; score: number | null; metro: string | null }>().catch(() => null)
+  const scoreByPocket = new Map((cached?.results ?? []).map((r) => [r.pocket_key, r]))
+
+  // Pass 3 — attach; queue one scoring job per uncached pocket.
+  const pending: Promise<unknown>[] = []
+  for (const [jobId, { id, inputs }] of resolved) {
+    const item = items.find((i) => jobIdOf(i) === jobId)
+    if (!item) continue
+    const hit = scoreByPocket.get(id.pocketKey)
+    item.pocketScore = hit?.score ?? provisionalScore(inputs)
+    item.metro = hit?.metro ?? metroGuess(id.state)
+  }
+  for (const [key, { id, inputs }] of pockets) {
+    if (scoreByPocket.has(key)) continue
+    pending.push(scorePocket(c.env, id, inputs, null))
+  }
+  if (pending.length) c.executionCtx.waitUntil(Promise.allSettled(pending))
+}
 
 // DELETE /v1/pipeline/queue/:opportunityId — hide a stale item from the
 // waiting queue. Reversible via POST .../unhide; Close untouched.
