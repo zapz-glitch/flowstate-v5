@@ -40,9 +40,21 @@ export interface CompConditionInput {
   squareFeet?: number
   /** Embedded curb-appeal/listing photos (max 4, ≤4MiB each) */
   images?: ClefImage[]
+  /** Subject context for the anchor-quality question — the agent reads the
+   *  answer as a pre-digested hint, never as a verdict. */
+  subject?: { squareFeet?: number; address?: string }
 }
 
 export type CompTier = 'investor' | 'median' | 'arv'
+
+export interface CompHint {
+  priceSanity: 'plausible' | 'suspicious' | 'data_error' | null
+  anchorQuality: 'strong_anchor' | 'supporting' | 'weak' | 'reject' | null
+  probabilities: {
+    price_sanity?: Record<string, number>
+    anchor_quality?: Record<string, number>
+  }
+}
 
 export interface CompConditionResult {
   /** The model's answer set, verbatim — useful for calibration forensics */
@@ -62,6 +74,9 @@ export interface CompConditionResult {
   conditionLabel: string
   /** Clef's reported confidence in the score answer, when present */
   confidence?: number
+  /** Agent-assist digest — advisory pre-read the Evaluation Agent weighs
+   *  next to the raw data; never a verdict by itself. */
+  hint?: CompHint
   model: ClefModel
   modelVersion: string
   durationMs: number
@@ -124,6 +139,35 @@ const CONDITION_QUESTIONS: Record<string, Question> = {
       arv: 'After-repair-value evidence — genuinely renovated sale at or near the top of the market',
     },
   },
+  // Agent-assist digests — pre-reasoned hints the Evaluation Agent weighs
+  // alongside the raw data. Advisory only: the agent owns the verdict.
+  price_sanity: {
+    type: 'choice',
+    instructions:
+      'Is the recorded sale price plausible for THIS property given the ' +
+      'listing facts (size, condition, description)? Flag obvious data ' +
+      'errors — a stray digit, a price-per-sqft wildly out of band, or a ' +
+      'price inconsistent with the described property.',
+    criteria: {
+      plausible: 'Price consistent with the property\'s size, condition, and marketed features',
+      suspicious: 'Price looks high or low for the described property — possibly a non-arm\'s-length or unusual sale',
+      data_error: 'Price is almost certainly wrong — a typo or feed artifact (e.g. $2,000+/sqft, missing digit)',
+    },
+  },
+  anchor_quality: {
+    type: 'choice',
+    instructions:
+      'As ARV evidence for a similar nearby subject property, how strong is ' +
+      'this sale? Weigh size similarity (the subject\'s square footage is in ' +
+      'the state context), sale recency, condition tier, and how close the ' +
+      'sale price-per-sqft sits to a realistic renovated-market ceiling.',
+    criteria: {
+      strong_anchor: 'Excellent ARV evidence — comparable size, recent sale, appropriate tier',
+      supporting: 'Usable supporting evidence — some size/date/condition gaps but same market band',
+      weak: 'Marginal — meaningful size mismatch, stale sale, or uncertain tier',
+      reject: 'Do not anchor on this — non-arm\'s-length, data error, extreme size mismatch, or wrong market band',
+    },
+  },
 }
 
 // Answer shapes (observed on the wire, clef-flash 2026-10-02):
@@ -155,6 +199,22 @@ function parseTier(v: unknown): { tier: CompTier; probabilities: Record<CompTier
     for (const [k, p] of Object.entries(out)) if (p > best) { best = p; tier = k as CompTier }
   }
   return { tier, probabilities: out }
+}
+
+/** Argmax over a choice question's probabilities → chosen key. */
+function choicePick<T extends string>(v: unknown, keys: readonly T[]): { pick: T | null; probabilities: Record<string, number> } {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  const probs = (o.probabilities ?? {}) as Record<string, number>
+  let pick = typeof o.choice === 'string' ? o.choice : null
+  if (!pick || !(keys as readonly string[]).includes(pick)) {
+    let best = -1
+    pick = null
+    for (const k of keys) {
+      const p = probs[k]
+      if (typeof p === 'number' && p > best) { best = p; pick = k }
+    }
+  }
+  return { pick: pick as T | null, probabilities: probs }
 }
 
 /** Argmax over a score question's per-option probabilities → scale index. */
@@ -197,6 +257,7 @@ export async function classifyCompCondition(
       yearBuilt: input.yearBuilt,
       squareFeet: input.squareFeet,
     },
+    appraisalSubject: input.subject ?? null,
     listingDescription: input.description ?? null,
     listingHighlights: input.whatsSpecial ?? [],
     listedFeatures: input.features ?? [],
@@ -217,6 +278,19 @@ export async function classifyCompCondition(
   const asisP = prob(answers.as_is)
   const conf = (answers.condition as Record<string, unknown> | undefined)?.confidence
   const tier = parseTier(answers.tier)
+  const priceSanity = choicePick(answers.price_sanity, ['plausible', 'suspicious', 'data_error'] as const)
+  const anchorQuality = choicePick(answers.anchor_quality, ['strong_anchor', 'supporting', 'weak', 'reject'] as const)
+  const hint: CompHint | undefined =
+    priceSanity.pick || anchorQuality.pick
+      ? {
+          priceSanity: priceSanity.pick,
+          anchorQuality: anchorQuality.pick,
+          probabilities: {
+            price_sanity: priceSanity.probabilities,
+            anchor_quality: anchorQuality.probabilities,
+          },
+        }
+      : undefined
 
   return {
     raw: answers,
@@ -230,6 +304,7 @@ export async function classifyCompCondition(
     conditionScore: score,
     conditionLabel: CONDITION_SCALE[clamped].split(' — ')[0],
     confidence: typeof conf === 'number' ? conf : undefined,
+    hint,
     model,
     modelVersion: res?.model ?? model,
     durationMs: Date.now() - started,

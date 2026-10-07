@@ -539,7 +539,9 @@ export class AnalysisJobDO {
           yearBuilt: c.yearBuilt ?? undefined,
           squareFeet: c.squareFeet ?? undefined,
         }))
-        return await startCompEvidenceBatch(this.env, inputs)
+        return await startCompEvidenceBatch(this.env, inputs, {
+          subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
+        })
       } catch { return null }
     }).catch(() => null)
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([

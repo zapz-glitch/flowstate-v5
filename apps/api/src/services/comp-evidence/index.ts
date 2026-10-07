@@ -77,6 +77,10 @@ export interface CompConditionEvidence {
     }
   } | null
   condition: CompConditionResult | null
+  /** Agent-assist digest riding the same Clef call — advisory hints
+   *  (price sanity, anchor quality) the Evaluation Agent weighs next to
+   *  the raw comp data. Absent on cached/Luna-fallback evidence. */
+  hint?: CompConditionResult['hint']
   /** Investor-marketed listing — deterministic keyword hit OR Clef agrees.
    *  Per owner rule: investor language disqualifies the 'updated'/'renovated'
    *  ARV stamp — these are median/lower-tier sales, whatever they look like. */
@@ -266,6 +270,7 @@ async function classifyCompConditionLuna(
 export async function gatherCompConditionEvidence(
   env: Env,
   comp: CompEvidenceInput,
+  subject?: { squareFeet?: number; address?: string },
 ): Promise<CompConditionEvidence> {
   const key = evidenceKey(comp)
   const cached = await env.API_CACHE.get(key, 'json').catch(() => null) as CompConditionEvidence | null
@@ -412,6 +417,7 @@ export async function gatherCompConditionEvidence(
       yearBuilt: comp.yearBuilt ?? photos.yearBuilt,
       squareFeet: comp.squareFeet ?? photos.squareFeet,
       images,
+      subject,
     })
   } catch { /* Clef failed — Luna tries next */ }
 
@@ -439,6 +445,7 @@ export async function gatherCompConditionEvidence(
   } else {
     evidence.skippedReason = clefReady ? 'clef+luna failed' : 'no condition reader'
   }
+  if (evidence.condition?.hint) evidence.hint = evidence.condition.hint
 
   // Pin the stamp — only persist meaningful evidence (a listing or a
   // classification); 'no_listing'/'clef_unavailable' partials stay
@@ -460,7 +467,7 @@ export async function gatherCompConditionEvidence(
 export async function startCompEvidenceBatch(
   env: Env,
   comps: CompEvidenceInput[],
-  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number },
+  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string } },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
   const perComp = opts?.perCompTimeoutMs ?? 45_000
@@ -471,7 +478,7 @@ export async function startCompEvidenceBatch(
     while (next < comps.length) {
       const comp = comps[next++]
       const ev = await Promise.race([
-        gatherCompConditionEvidence(env, comp),
+        gatherCompConditionEvidence(env, comp, opts?.subject),
         new Promise<null>((r) => setTimeout(() => r(null), perComp)),
       ]).catch(() => null)
       out.set(comp.propertyId, ev)

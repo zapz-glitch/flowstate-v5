@@ -86,6 +86,9 @@ export type CompCurbAppealMap = Record<string, {
   confidence: number | null
   summary: string | null
   photosExamined: number
+  /** Agent-assist digest — Clef's advisory price-sanity + anchor-quality
+   *  reads for the Evaluation Agent. Advisory only, never a verdict. */
+  hint?: { priceSanity: string | null; anchorQuality: string | null }
 }>
 
 export interface EvaluationParams {
@@ -805,7 +808,9 @@ export async function performAnalysisPhase1(
           const early = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
           const missing = early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs
           const filled = missing.length
-            ? await startCompEvidenceBatch(env, missing)
+            ? await startCompEvidenceBatch(env, missing, {
+                subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+              })
             : new Map<string, CompConditionEvidence | null>()
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
@@ -1068,6 +1073,7 @@ export async function performAnalysisPhase1(
         if (ev.investorSignal && condition === 'renovated') condition = 'dated'
         map[ev.propertyId] = {
           condition,
+          hint: ev.hint ? { priceSanity: ev.hint.priceSanity, anchorQuality: ev.hint.anchorQuality } : undefined,
           source: 'vision',
           confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
           summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${c.model === 'openai/gpt-6-luna' ? ' · luna' : ''}${ev.listing.description ? ' · listing text available' : ''}`,
