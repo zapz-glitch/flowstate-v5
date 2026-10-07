@@ -165,6 +165,15 @@ per-comp assignment), every selection must state band edges:
   couldn't form clean edges (stale, bimodal, extreme variance) still
   carry an `implied` envelope from their members — your stated edges
   can disagree with it, but be ready to say why.
+- The bundle's `geoBands` field repeats the band computation three times
+  by geography — `block_group`, then `neighborhood`, then `tract` —
+  tightest first. Use the tightest tier that produced edges; widen only
+  when the tighter tier has none, and say why in `notes`.
+- `bandAdjudication` records the reasoning model's pass over the draft
+  band membership (include / exclude / move per
+  docs/BAND-FIRST-PRINCIPLES.md). Comps it excluded carry `band: null`;
+  moved comps carry their new label. Do not re-band an adjudicated comp
+  in your own head — the band labels in the payload are final.
 
 ### The revision gate — principle over position
 
