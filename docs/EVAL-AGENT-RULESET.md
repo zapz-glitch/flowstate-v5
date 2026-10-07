@@ -378,9 +378,9 @@ human underwriter reads plus the pricing context:
   `softRepairCost` is the standard allowance), `past_threshold` (permit
   on record but past the window → mandatory full charge),
   `assumed_past` (Tier 3 — unverified and home age exceeds design life →
-  mandatory full charge — universal budgeted systems only: roof, HVAC,
-  water heater), `unknown` (within design life, or a system without an
-  age-baseline trigger → advisory).
+  mandatory full charge — age-triggered systems only: roof, HVAC, water
+  heater, electric panel), `unknown` (within design life, or a system
+  without an age-baseline trigger → advisory).
 - `sellerNoteClaims` — realtor notes parsed into additions and
   advisories. Notes only ever add scope.
 - `finishParity` — finish keywords the pocket's ARV comps advertise vs
@@ -432,9 +432,9 @@ Rules:
   permits are the only $0 credit; a dated claim prices the item at the
   soft-repair allowance (`softRepairCost`, ≤20% of schedule) — not $0,
   not full; an undated claim earns nothing; a defect note forces a full
-  mandatory line. Unverified roof/HVAC/water heater on a home older
-  than their design life are `assumed_past` — charge them like
-  `past_threshold`. Panel, replumb, rewire, pool, septic, and foundation
+  mandatory line. Unverified roof/HVAC/water heater/electric panel on a
+  home older than their design life are `assumed_past` — charge them
+  like `past_threshold`. Replumb, rewire, pool, septic, and foundation
   carry no age baseline: they charge only when a permit, dated claim,
   or seller note evidences them — age alone is not a charge.
 - **Recondition ≠ replace** — a serviced or recently repaired system
