@@ -155,12 +155,16 @@ per-comp assignment), every selection must state band edges:
   primary band — no dual membership, and an AS-IS-classified comp never
   appears in the ARV band.
 - Self-check before submitting: `low ≤ mid ≤ high` inside each band.
-- A band the evidence cannot support (fewer than two real members) is
-  simply omitted — `INSUFFICIENT_DATA`, not an error. Never fabricate a
-  band to look complete.
+- A band with **one real member still forms a band** — a degenerate
+  point band (`low = mid = high` = that member's scaled price). If that
+  lone comp is all the pocket produced, it IS the evidence: state it.
+  Only omit a band with zero plausible members — never fabricate one.
 - The bundle's `evidenceBands` field shows the harness's own edges. They
   are advisory: state what the evidence argues, then defend it — the
-  grade records agreement, it never overturns your verdict.
+  grade records agreement, it never overturns your verdict. Bands that
+  couldn't form clean edges (stale, bimodal, extreme variance) still
+  carry an `implied` envelope from their members — your stated edges
+  can disagree with it, but be ready to say why.
 
 ### The revision gate — principle over position
 
@@ -171,14 +175,29 @@ verified — comp side and renovation side alike:
 - **d1 (micro-geo):** ANY comp carrying pricing weight outside the
   operative pocket (block group first) while in-pocket comps go
   unpicked. Weight follows your `drivers` field — position doesn't
-  matter; if you name no drivers, every pick carries weight. Supporting
-  picks off-BG pass with a `SUPPORTING_COMP_GEO_BLEED` telemetry flag.
+  matter; if you name no drivers, every pick carries weight.
+  **Doctrine: pick every usable in-pocket comp, or keep every driver
+  in-pocket.** In-pocket comps may ride as supporting without pricing
+  weight — unpicked is what fails. Supporting picks off-BG pass with a
+  `SUPPORTING_COMP_GEO_BLEED` telemetry flag. When EVERY unpicked
+  in-pocket comp is as_is-band, d1 warns instead of failing
+  (`d1_all_asis_pocket`) — as-is stock can't carry ARV weight, so
+  reaching outside the pocket for drivers is honest.
 - **d2:** a pick flagged as not market evidence (outlier, nominal, data error).
 - **d3:** band membership violations (unknown member, dual membership,
   as-is comp in the ARV band).
-- **d4:** an as-is-classified comp driving the ARV verdict.
+- **d4:** an as-is comp driving the ARV verdict. The authoritative
+  classification is the comp row's **`band` field** — the gate's own
+  assignment — NOT the pool's `cls` listing-class label, which can
+  disagree (a `transitional`-labeled comp can band as_is on condition
+  evidence). Read `band`, not `cls`. As-is evidence may support a
+  verdict as context or floor — it never drives the ARV number.
 - **d5:** a pick the IQR trim already rejected as a band outlier.
-- **d7:** ARV outside the verified ARV evidence edge when a band exists.
+- **d7:** ARV outside the verified ARV evidence edge when a clean band
+  exists; when only an `implied` envelope exists (stale/bimodal/extreme
+  variance band), an out-of-envelope ARV warns
+  (`d7_outside_implied_edge`) instead of failing — flag your reason in
+  notes.
 - **reno:** a scope line the permit/claim ledger contradicts (T1-T4
   clamps) or a mandatory charge omitted — the ledger's evidence, priced
   or sent back, never silently both.
@@ -337,11 +356,17 @@ When the usable pool is thin — no renovated comp, fewer than ~3 usable
 comps, or no size bracket for an above-ceiling projection — ask for more
 evidence before producing a number:
 
-- **deepen** enriches the comps already fetched (classification, photos,
-  listing evidence). It cannot rescue a comp whose sale data is missing —
-  use it when the pool exists but is unclassified, not when it is empty.
+- **deepen** enriches the comps already fetched — now restricted to
+  **in-pocket comps only** (block group, then neighborhood/subdivision,
+  then tract), up to the 8 thinnest-read ones. It also attempts a
+  best-effort sale-date fill on undated comps via the listing sale
+  history — an undated comp stays usable either way (ATTOM included it
+  in the response; the lookup only fills a missing field, never
+  disqualifies one). Use deepen when the pool exists but its own-pocket
+  evidence is thin or unread, never on empty geography.
 - **widen** goes back in TIME first — a longer sale window inside the
-  SAME geography. It does not leave the block group or the subdivision;
+  SAME geography, up to 365 days to find block-group or neighborhood
+  matches. It does not leave the block group or the subdivision;
   a bigger radius does not help when what we want is block matches and
   neighborhood matches. Only when the block group is literally empty may
   the search step slowly outward into ADJACENT block groups of similar
@@ -353,6 +378,13 @@ evidence before producing a number:
 Cap the rounds. If widening once or twice still cannot produce a
 renovated comp or a size bracket, report the honest floor-only answer
 with low confidence — never inflate a thin pool into a confident number.
+
+**The trust floor.** The harness grades every posted verdict before
+pricing; a verdict the gate scores below 0.7 posted at `conf: 'low'`
+routes to the hold list (`trustFloor: 'hold'` on the result) instead of
+auto-clearing to offers. That is the honest outcome on a thin pocket —
+report the number with its warnings and let the floor catch it; do not
+post inflated confidence to dodge the hold list.
 
 ## 9. Discipline
 
@@ -388,6 +420,16 @@ The harness also owns the classification that used to render server-side
   like.
 
 ## 11. The renovation scope — the second verdict
+
+**How the subject tier is called.** Clef reads every subject photo in
+4-image chunks (as many calls as the photo set needs) — its zone reads,
+level votes, and concern probabilities are evidence, not the verdict.
+GPT-6-luna reasons over that structured evidence (plus the photos that
+fit its budget) and makes the final condition-tier call. The merged Clef
+vote is the fallback when luna can't answer; a Clef outage falls back to
+the legacy luna photo read. The shipped tier drives the deterministic
+cost math — the agent's posted scope below is the override, not the
+default.
 
 The evidence bundle carries `renovationEvidence` — the four data points a
 human underwriter reads plus the pricing context:

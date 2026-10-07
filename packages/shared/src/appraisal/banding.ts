@@ -35,6 +35,10 @@ export interface BandResult {
   edgeExcludedIds: string[]
   /** 'ok' | disregard reasons from the §6 ladder. */
   method: 'ok' | 'insufficient_data' | 'extreme_variance' | 'stale' | 'bimodal'
+  /** When method != 'ok' the edges are an implied envelope over surviving
+   *  members — weaker than a verified band but still evidence: usable for
+   *  context and soft checks, never as a verified-band gate. */
+  implied: boolean
 }
 
 export interface EvidenceBands {
@@ -109,6 +113,14 @@ const isDistressFlagged = (c: CompRow): boolean => {
   return false
 }
 
+/** Single-comp band assignment — the label the gate/band module actually
+ *  assigns (condition class + vision read + distress override), as opposed
+ *  to the raw listing `classification.type` shown on pool rows. Stamp this
+ *  on evidence comps so the two labels can't diverge silently. */
+export function bandForComp(c: CompRow): BandName | null {
+  return isDistressFlagged(c) ? 'as_is' : classifyBand(c)
+}
+
 export function computeEvidenceBands(
   comps: CompRow[],
   subject: BandSubject,
@@ -138,9 +150,23 @@ export function computeEvidenceBands(
     const pool = members[band]
     const empty: BandResult = {
       band, low: null, high: null, mid: null, n: 0,
-      memberIds: [], trimmedIds: [], edgeExcludedIds: [], method: 'insufficient_data',
+      memberIds: [], trimmedIds: [], edgeExcludedIds: [], method: 'insufficient_data', implied: false,
     }
     if (pool.length === 0) return empty
+
+    // Scaled-to-subject price for one comp — needed before the early-return
+    // branches so implied envelopes can be emitted on non-'ok' methods.
+    const scale = (c: CompRow): number => {
+      if (aSub == null || aSub <= 0) return c.salePrice!
+      const ai = c.squareFeet!
+      const ratio = Math.abs(ai - aSub) / aSub
+      if (ratio <= LINEAR_GLA_WINDOW) return (c.salePrice! / ai) * aSub
+      return c.salePrice! * Math.pow(aSub / ai, beta[band])
+    }
+    const impliedEnvelope = (cs: CompRow[]): Pick<BandResult, 'low' | 'high' | 'mid'> => {
+      const xs = cs.map(scale).sort((a, b) => a - b)
+      return { low: xs[0] ?? null, high: xs[xs.length - 1] ?? null, mid: median(xs) }
+    }
 
     // Stale-market rule — ARV band only (spec §6).
     if (band === 'arv') {
@@ -149,7 +175,7 @@ export function computeEvidenceBands(
         return Math.max(acc, t)
       }, 0)
       if (newest > 0 && (Date.now() - newest) / 86_400_000 > staleDays) {
-        return { ...empty, n: pool.length, memberIds: pool.map((c) => c.id), method: 'stale' }
+        return { ...empty, ...impliedEnvelope(pool), n: pool.length, memberIds: pool.map((c) => c.id), method: 'stale', implied: true }
       }
     }
 
@@ -184,25 +210,18 @@ export function computeEvidenceBands(
     const cv = (stdev(keptRates) ?? 0) / (mean(keptRates) ?? 1)
     if (cv > 0.25) {
       return {
-        ...empty, n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
-        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'extreme_variance',
+        ...empty, ...impliedEnvelope(edgePool), n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
+        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'extreme_variance', implied: true,
       }
     }
 
     // Bimodal check — sorted scaled prices with a >20% interior gap.
-    const scale = (c: CompRow): number => {
-      if (aSub == null || aSub <= 0) return c.salePrice!
-      const ai = c.squareFeet!
-      const ratio = Math.abs(ai - aSub) / aSub
-      if (ratio <= LINEAR_GLA_WINDOW) return unitRate(c) * aSub
-      return c.salePrice! * Math.pow(aSub / ai, beta[band])
-    }
     const scaled = edgePool.map(scale).sort((a, b) => a - b)
     const gaps = scaled.slice(1).map((v, i) => (v - scaled[i]!) / scaled[i]!)
     if (gaps.some((g) => g > 0.2)) {
       return {
-        ...empty, n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
-        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'bimodal',
+        ...empty, ...impliedEnvelope(edgePool), n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
+        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'bimodal', implied: true,
       }
     }
 
@@ -216,6 +235,7 @@ export function computeEvidenceBands(
       trimmedIds,
       edgeExcludedIds: edgeExcluded.map((c) => c.id),
       method: 'ok',
+      implied: false,
     }
   }
 
@@ -236,7 +256,11 @@ export function bandEdgeCheck(
   const epsHigh = Math.abs(agentHigh - evidenceHigh) / evidenceHigh
   const inter = Math.max(0, Math.min(agentHigh, evidenceHigh) - Math.max(agentLow, evidenceLow))
   const union = Math.max(agentHigh, evidenceHigh) - Math.min(agentLow, evidenceLow)
-  // Degenerate point band (n=1): zero-width edges agree iff they coincide.
-  const iou = union > 0 ? inter / union : (agentLow === agentHigh && epsLow === 0 && epsHigh === 0 ? 1 : 0)
+  // Degenerate/narrow bands: a union smaller than 5% of the band value
+  // means the edges nearly coincide — the IoU ratio divides by noise and
+  // the eps tolerance carries the agreement test instead.
+  const iou = union <= evidenceHigh * 0.05
+    ? (epsLow <= 0.1 && epsHigh <= 0.1 ? 1 : 0)
+    : inter / union
   return { epsLow, epsHigh, iou }
 }

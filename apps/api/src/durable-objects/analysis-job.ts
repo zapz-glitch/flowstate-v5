@@ -28,6 +28,7 @@ import {
   type Phase1Context,
 } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
+import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
@@ -1634,7 +1635,24 @@ export class AnalysisJobDO {
           bundle: ctx.bundle,
           enrichComparables: (comps: NormalizedComparable[]) =>
             propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
-        })
+        },
+        // Sale-date fill for undated in-pocket comps — MLS sale history via
+        // the listing-details fetch (best-effort; an undated comp ATTOM
+        // included stays usable either way, in disclosure states or not).
+        this.env.FIRECRAWL_API_KEY && this.env.OPENROUTER_API_KEY
+          ? async (comp: NormalizedComparable) => {
+              const r = await fetchRedfinPropertyDetails(this.env, {
+                propertyId: comp.id, address: comp.address,
+                city: comp.city, state: comp.state, zipCode: comp.zipCode,
+              }, this.env.API_CACHE).catch(() => null)
+              const sold = (r?.details?.saleHistory ?? [])
+                .filter((h) => /sold/i.test(h.event ?? '') && h.date)
+                .map((h) => new Date(h.date!).getTime())
+                .filter((t) => Number.isFinite(t))
+                .sort((a, b) => b - a)[0]
+              return sold != null ? { saleDate: new Date(sold).toISOString().slice(0, 10) } : null
+            }
+          : undefined)
       } else {
         // Time-widen: same radius and filters as the initial fetch,
         // monthsBack stepped +12 per round (12→24→36…). New candidates go
@@ -1870,6 +1888,23 @@ export class AnalysisJobDO {
       await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: code ?? 'EVALUATION_ERROR', errorMessage: msg, compCount: bundle.comparables?.length })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
+    }
+
+    // Trust floor — a verdict the gate graded weak (<0.7 composite) posted
+    // at low confidence is honest about what it doesn't know, so it routes
+    // to the hold list (human review) instead of auto-clearing to offers.
+    // 'clear' on every other accepted verdict is the explicit auto-clear.
+    const accepted = ctx.selectionAttempts?.at(-1)
+    const valuation = evalResult.response.valuation
+    if (accepted && valuation) {
+      const weak = accepted.grade.score < 0.7
+      const hold = weak && accepted.selection.conf === 'low'
+      valuation.trustFloor = hold ? 'hold' : 'clear'
+      if (hold) {
+        valuation.requiresHumanReview = true
+        valuation.recommendationReason =
+          `${valuation.recommendationReason ?? ''} — TRUST FLOOR: gate grade ${accepted.grade.score.toFixed(2)} + low confidence — routed to hold list`.trim()
+      }
     }
     await this.finishEvaluation(config, evalResult, ctx.bundle.property, evalStart, startTime)
   }

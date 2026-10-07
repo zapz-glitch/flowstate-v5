@@ -57,7 +57,7 @@ import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 import { gradeVerdict } from './verdict-grade'
 import { buildRenovationEvidence, priceAgentRenovation } from './renovation'
-import { computeEvidenceBands, type EvidenceBands } from '@flowstate-api/shared/appraisal'
+import { computeEvidenceBands, bandForComp, type EvidenceBands, type BandName } from '@flowstate-api/shared/appraisal'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
 import { persistReportAssets } from '../report-assets'
@@ -1204,12 +1204,17 @@ export async function performAnalysisPhase1(
       }
     }
     // Same supplement on the subject — the provider misses beds entirely
-    // for some parcels; the listing carries them.
+    // for some parcels; the listing carries them. Sqft and year built fill
+    // the same way: ATTOM stays authoritative when present, the MLS read
+    // only lands where the provider has nothing (a missing subject GLA
+    // breaks band scaling, so the fill matters here).
     if (subjectRes?.details) {
       bundle.property.bedrooms ??= subjectRes.details.beds ?? null
       bundle.property.bathrooms ??= subjectRes.details.bathsFull != null
         ? subjectRes.details.bathsFull + (subjectRes.details.bathsHalf ?? 0) * 0.5
         : null
+      bundle.property.squareFeet ??= subjectRes.details.squareFeet ?? null
+      bundle.property.yearBuilt ??= subjectRes.details.yearBuilt ?? null
     }
     step(
       'listing_details',
@@ -2143,7 +2148,7 @@ export interface HarnessEvidence {
   /** Renovation evidence — zone grades, description claims, permit ledger,
    *  seller notes, finish parity, flip-delta + cost schedule (advisory). */
   renovationEvidence?: import('./renovation').RenovationEvidence
-  comps: Array<BComp & { id: string; salePriceFormatted?: string }>
+  comps: Array<BComp & { id: string; salePriceFormatted?: string; band?: BandName | null }>
   suggestedSelection: string[]
   classifications: Record<string, ClassificationResult>
   classificationSummary: ReturnType<typeof summarizeClassifications> | null
@@ -2216,7 +2221,14 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
       address: ctx.bundle.property.address,
       id: ctx.bundle.property.id,
     },
-    comps: ctx.appraisalResult.comparables.map((comp, i) => ({ id: comp.id, ...bcomps[i]! })),
+    comps: ctx.appraisalResult.comparables.map((comp, i) => {
+      const row = { id: comp.id, ...bcomps[i]! }
+      // Band-class label — what the band module assigns, which can differ
+      // from the listing `classification.type` (e.g. transitional listing
+      // landing in the as_is band). Surfaced so the agent reads the same
+      // label the gate enforces.
+      return { ...row, band: bandForComp(row) }
+    }),
     renovationEvidence: buildRenoEvidence(ctx, compClassifications),
     suggestedSelection: ctx.appraisalResult.selectedCompIds ?? [],
     classifications: Object.fromEntries(compClassifications),
@@ -2233,26 +2245,46 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   }
 }
 
-/** Agent retry round — deepen enrichment on thin pool members and restamp
- *  verification, mirroring the B ladder's third attempt. Returns the number
- *  of fields filled so the caller can decide whether to re-offer the bundle. */
-export async function harnessDeepen(ctx: Phase1Context, params: EvaluationParams): Promise<number> {
-  if (!params.enrichComparables) return 0
+/** Agent retry round — deepen enrichment on thin IN-POCKET pool members
+ *  (block group / neighborhood / same tract only — out-of-pocket comps are
+ *  never deepened) and restamp verification, mirroring the B ladder's third
+ *  attempt. `detailsFetcher` is the caller's listing-details lookup (Redfin
+ *  MLS details); its sale history fills undated comps — a comp ATTOM
+ *  included stays usable whether or not a date ever lands. Returns the
+ *  number of fields filled so the caller can decide whether to re-offer
+ *  the bundle. */
+export async function harnessDeepen(
+  ctx: Phase1Context,
+  params: EvaluationParams,
+  detailsFetcher?: (comp: NormalizedComparable) => Promise<{ saleDate?: string | null } | null>,
+): Promise<number> {
+  const subject = ctx.bundle.property
+  const inPocket = (c: AppraisedComparable): boolean => compGeoPriority(subject, c) != null
   const thin = ctx.appraisalResult.comparables
-    .filter((c) => c.avmValue == null || c.landAssessedValue == null)
+    .filter((c) => inPocket(c) && (c.avmValue == null || c.landAssessedValue == null || (c.salePrice != null && c.saleDate == null)))
     .sort((a, b) =>
-      Number((b.censusTract != null && b.censusTract === ctx.bundle.property.censusTract) || b.sameBlockGroup === true)
-      - Number((a.censusTract != null && a.censusTract === ctx.bundle.property.censusTract) || a.sameBlockGroup === true)
+      (compGeoPriority(subject, a) ?? 9) - (compGeoPriority(subject, b) ?? 9)
       || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
     .slice(0, 8)
-  const enriched = await params.enrichComparables(thin).catch(() => null)
-  const byId = new Map((enriched ?? []).map((c) => [c.id, c]))
   let deepened = 0
-  for (const comp of ctx.appraisalResult.comparables) {
-    const e = byId.get(comp.id)
-    if (!e) continue
-    if (comp.avmValue == null && e.avmValue != null) { comp.avmValue = e.avmValue; deepened++ }
-    if (comp.landAssessedValue == null && e.landAssessedValue != null) { comp.landAssessedValue = e.landAssessedValue; deepened++ }
+  if (params.enrichComparables && thin.length > 0) {
+    const enriched = await params.enrichComparables(thin).catch(() => null)
+    const byId = new Map((enriched ?? []).map((c) => [c.id, c]))
+    for (const comp of ctx.appraisalResult.comparables) {
+      const e = byId.get(comp.id)
+      if (!e) continue
+      if (comp.avmValue == null && e.avmValue != null) { comp.avmValue = e.avmValue; deepened++ }
+      if (comp.landAssessedValue == null && e.landAssessedValue != null) { comp.landAssessedValue = e.landAssessedValue; deepened++ }
+    }
+  }
+  // Listing-history date fill — undated in-pocket comps only. Best-effort:
+  // an undated comp is never dropped, the fill just upgrades its conf tier.
+  if (detailsFetcher) {
+    const undated = thin.filter((c) => c.saleDate == null && c.salePrice != null)
+    const fills = await Promise.all(undated.map(async (c) => ({ c, d: await detailsFetcher(c).catch(() => null) })))
+    for (const { c, d } of fills) {
+      if (d?.saleDate) { c.saleDate = d.saleDate; deepened++ }
+    }
   }
   if (deepened > 0) {
     stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays, new Map(ctx.compClassifications))

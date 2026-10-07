@@ -108,9 +108,15 @@ function gradeBand(
 ): BandEdgeGrade {
   const method = evidenceBand.method
   if (method !== 'ok') {
-    // Valid disregard — skipped, omitted from the denominator.
+    // Valid disregard — skipped, omitted from the denominator. When the
+    // band produced an implied envelope (stale/bimodal/extreme_variance),
+    // surface it as evidence context even though it can't verify a stated
+    // band — an unstated implied band stays a valid disregard.
+    const implied = evidenceBand.implied && evidenceBand.low != null && evidenceBand.high != null && evidenceBand.mid != null
+      ? { low: evidenceBand.low, high: evidenceBand.high, mid: evidenceBand.mid }
+      : null
     return {
-      stated, evidence: null, epsLow: null, epsHigh: null, iou: null,
+      stated, evidence: implied, epsLow: null, epsHigh: null, iou: null,
       result: stated ? 'warn' : 'skipped', // agent claimed a band evidence can't support → warn
       method,
     }
@@ -163,7 +169,13 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const offPocketDrivers = drivers.filter((c) => !pocketIds.has(c.id))
   const offPocketSupporting = picks.filter((c) => !weightedIds.has(c.id) && !pocketIds.has(c.id))
   const unpickedPocket = enabledUnpicked.filter((c) => pocketIds.has(c.id))
-  if (offPocketDrivers.length > 0 && unpickedPocket.length > 0) {
+  // All-as_is pocket paradox: when every unpicked in-pocket comp sits in the
+  // as_is band, picking it can't satisfy d4 (as-is can't drive ARV) — so d1
+  // must not hard-fail for leaving it unpicked. Warn instead of creating an
+  // unsatisfiable d1+d4 contradiction.
+  const asIsMembers = new Set(bands.as_is.memberIds)
+  const pocketAllAsIs = unpickedPocket.length > 0 && unpickedPocket.every((c) => asIsMembers.has(c.id))
+  if (offPocketDrivers.length > 0 && unpickedPocket.length > 0 && !pocketAllAsIs) {
     checks.d1 = 'fail'
     failures.push(bgPool.size > 0 ? 'd1_neighborhood_miss' : 'd1_off_tract_pick')
     for (const c of offPocketDrivers) {
@@ -172,6 +184,13 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
         `replace with an unpicked in-pocket comp (${unpickedPocket.length} remain: ${unpickedPocket.slice(0, 5).map((u) => u.id).join(', ')}${unpickedPocket.length > 5 ? ', …' : ''})`,
       )
     }
+  } else if (pocketAllAsIs && offPocketDrivers.length > 0) {
+    checks.d1 = 'warn'
+    failures.push('d1_all_asis_pocket')
+    gateFeedback.push(
+      `d1: every unpicked in-pocket comp is as_is-band — it cannot carry ARV weight, so off-${pocketLabel} ` +
+      `drivers are acceptable here; pick the in-pocket comps as supporting context if useful`,
+    )
   } else if (offPocketDrivers.length > drivers.length / 3) {
     checks.d1 = 'warn'
     failures.push('d1_thin_pocket_anchor')
@@ -266,13 +285,24 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
 
   // ── d7: final value inside the ARV evidence edge ─────────────────────────
   const arvBand = bands.arv
-  if (arvBand.method === 'ok') {
+  const hasEdges = arvBand.low != null && arvBand.high != null
+  if (arvBand.method === 'ok' && hasEdges) {
     const lo = arvBand.low! * 0.9
     const hi = arvBand.high! * 1.1
     if (selection.arv < lo || selection.arv > hi) {
       checks.d7 = 'fail'
       failures.push('d7_outside_evidence_edge')
       gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the ARV evidence edge $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%) — re-anchor inside the verified band`)
+    }
+  } else if (hasEdges) {
+    // Implied envelope (stale/bimodal/extreme_variance) — softer check: a
+    // verdict outside it is a warning, not a gateable contradiction.
+    const lo = arvBand.low! * 0.9
+    const hi = arvBand.high! * 1.1
+    if (selection.arv < lo || selection.arv > hi) {
+      checks.d7 = 'warn'
+      failures.push('d7_outside_implied_edge')
+      gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the implied ARV envelope $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%, ${arvBand.method} band — weaker evidence); flag why or re-anchor`)
     }
   } else {
     checks.d7 = 'skipped'

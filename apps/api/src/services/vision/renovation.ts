@@ -260,13 +260,24 @@ const ZONE_CRITERIA: Record<string, Record<string, string>> = {
   },
 }
 
-async function assessViaClef(
+/**
+ * Clef's role is evidence collection, not the verdict — it reads every
+ * photo in 4-image chunks (as many calls as the photo set needs) and the
+ * raw per-chunk answers go to Luna as the evidence block. The merged
+ * assessment below is the fallback when Luna can't be reached.
+ */
+interface ClefChunkRead {
+  answers: ClefAnswerMap[]
+  chunksRead: number
+}
+
+async function runClefChunkReads(
   env: RenovationEnv,
   live: FetchedImage[],
   propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
-): Promise<RenovationAssessment | null> {
+): Promise<ClefChunkRead> {
   const ai = env.AI
-  if (!ai) return null
+  if (!ai) return { answers: [], chunksRead: 0 }
   const model = '@cf/cloudflare/clef-flash'
   const questions = {
     renovation_level: {
@@ -351,6 +362,42 @@ async function assessViaClef(
     }).then((r) => r as { answers?: ClefAnswerMap }).catch(() => null),
   ))
   const answers = calls.map((c) => c?.answers).filter((a): a is ClefAnswerMap => !!a)
+  return { answers, chunksRead: chunks.length }
+}
+
+/** Serialize the Clef chunk reads into the evidence block Luna reasons over. */
+function clefEvidenceBlock(clef: ClefChunkRead): string {
+  const zoneKeys = [
+    'kitchen_condition', 'bathroom_condition', 'flooring_condition',
+    'wall_ceiling_condition', 'exterior_condition',
+  ] as const
+  const perChunk = clef.answers.map((a, i) => {
+    const zones: Record<string, unknown> = {}
+    for (const zk of zoneKeys) {
+      const q = a[zk]
+      if (q?.choice) zones[zk] = { choice: q.choice, probability: q.probabilities?.[q.choice] ?? null }
+    }
+    return {
+      chunk: i + 1,
+      renovation_level: a.renovation_level?.choice ?? null,
+      renovation_level_probabilities: a.renovation_level?.probabilities ?? null,
+      curb_appeal: a.curb_appeal?.choice ?? null,
+      zones,
+      major_system_concern_probability: a.major_system_concern?.noul ?? a.major_system_concern?.probability ?? null,
+      structural_concern_probability: a.structural_concern?.noul ?? a.structural_concern?.probability ?? null,
+    }
+  })
+  return JSON.stringify({
+    photo_chunks_read: clef.chunksRead,
+    chunks_answered: clef.answers.length,
+    per_chunk_reads: perChunk,
+  }, null, 2)
+}
+
+function mergedClefAssessment(
+  answers: ClefAnswerMap[],
+  live: FetchedImage[],
+): RenovationAssessment | null {
   if (!answers.length) return null
 
   // Merge chunk probabilities — majority vote weighted by confidence.
@@ -450,6 +497,59 @@ async function assessViaClef(
         }
       : null,
   }
+}
+
+const LUNA_EVIDENCE_PREAMBLE = `You are the final renovation assessor for a fix-and-flip investor.
+
+A fast vision evidence reader has already examined EVERY listing photo of this property in 4-image chunks and produced the structured reads below — zone conditions per chunk, per-chunk renovation-level votes with probabilities, and major-system/structural concern probabilities. The photos themselves are also attached where the image budget allowed (the evidence covers photos you may not see).
+
+Your job is to reason over that evidence and make the FINAL call on the property's condition tier. The evidence reader's level votes are input, not verdict — you may land on a different level when the zone evidence supports it (e.g. votes split across levels, or a single chunk's 'failed' zone read that changes the whole-property call). Explain any divergence in the rationale.
+
+CLEF CHUNKED ZONE EVIDENCE:
+`
+
+/**
+ * Luna's verdict call — reasons over the Clef chunk evidence (plus the
+ * photos that fit the image budget) and returns the final tier call.
+ * Returns null when the provider call can't produce a parseable verdict;
+ * the caller then ships the merged Clef assessment instead.
+ */
+async function assessViaLunaEvidence(
+  provider: { name: string; model: string; execute: (req: any) => Promise<any> },
+  clef: ClefChunkRead,
+  live: FetchedImage[],
+  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
+): Promise<RenovationAssessment | null> {
+  let prompt = ''
+  if (propertyContext.address) prompt += `Address: ${propertyContext.address}\n`
+  if (propertyContext.squareFeet) prompt += `Square Feet: ${propertyContext.squareFeet}\n`
+  if (propertyContext.yearBuilt) prompt += `Year Built: ${propertyContext.yearBuilt}\n`
+  prompt += '\n'
+  prompt += LUNA_EVIDENCE_PREAMBLE + clefEvidenceBlock(clef) + '\n\n' + RENOVATION_PROMPT
+
+  const imagePayload = live.slice(0, LLM_MAX_IMAGES).map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
+
+  let parsed: Record<string, unknown> | null = null
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    const result = await provider.execute({
+      prompt,
+      images: imagePayload,
+      responseFormat: 'json',
+      jsonSchema: { name: 'renovation_assessment', schema: RENOVATION_SCHEMA },
+      reasoning: { enabled: true, effort: 'medium' as const },
+      maxTokens: 8192,
+    }).catch(() => null)
+    if (!result?.success || !result.data?.content) continue
+    parsed = parseVisionJson(result.data.content)
+  }
+  if (!parsed) return null
+
+  const assessment = assessmentFromParsed(parsed, provider.name, provider.model, live.length)
+  assessment.limitations = [
+    ...assessment.limitations,
+    `Tier call reasoned over Clef chunk evidence — ${clef.chunksRead} chunk read(s) covering ${live.length} photo(s)`,
+  ]
+  return assessment
 }
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -590,11 +690,23 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  // Clef first — Workers AI reads the subject the same way it reads comps.
-  // Level granularity only; when it can't answer, Luna takes the full
-  // schema read below. Clef failures fall through silently to Luna.
-  const clef = await assessViaClef(env, live, propertyContext ?? {}).catch(() => null)
-  if (clef) return clef
+  // Clef reads every photo in 4-image chunks — its answers are evidence,
+  // not the verdict. Luna reasons over that evidence (plus the photos that
+  // fit its image budget) for the final tier call; the merged Clef verdict
+  // is the fallback when Luna can't answer. No Clef answers → the legacy
+  // Luna photo read below.
+  const clef = await runClefChunkReads(env, live, propertyContext ?? {})
+    .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
+  const mergedClef = mergedClefAssessment(clef.answers, live)
+  if (mergedClef) {
+    const luna = await assessViaLunaEvidence(provider, clef, live, propertyContext ?? {})
+      .catch(() => null)
+    if (luna) {
+      if (!luna.curbAppeal && mergedClef.curbAppeal) luna.curbAppeal = mergedClef.curbAppeal
+      return luna
+    }
+    return mergedClef
+  }
 
   let prompt = ''
   if (propertyContext) {
@@ -650,6 +762,19 @@ export async function assessRenovationFromPhotos(
     }
   }
 
+  return assessmentFromParsed(parsed, provider.name, provider.model, photos.length)
+}
+
+/**
+ * Map the strict-schema JSON (either from the photo-reading call or the
+ * Clef-evidence reasoning call) into a RenovationAssessment.
+ */
+function assessmentFromParsed(
+  parsed: Record<string, unknown>,
+  providerName: string,
+  modelName: string,
+  photosExamined: number,
+): RenovationAssessment {
   const levelIndex = renovationLevelToIndex(parsed.renovation_level as string)
   const confidence =
     typeof parsed.confidence === 'number'
@@ -670,7 +795,7 @@ export async function assessRenovationFromPhotos(
     renovationLevelIndex: levelIndex,
     renovationLevel: levelIndex !== null ? REHAB_LEVELS[levelIndex] : 'NA',
     confidence,
-    photosExamined: photos.length,
+    photosExamined,
     majorObservations: list(parsed.major_observations),
     kitchenCondition: str(parsed.kitchen_condition),
     bathroomCondition: str(parsed.bathroom_condition),
@@ -684,15 +809,15 @@ export async function assessRenovationFromPhotos(
     evidenceAgainstMoreSevereLevel: list(parsed.evidence_against_more_severe_level),
     evidenceAgainstLessSevereLevel: list(parsed.evidence_against_less_severe_level),
     limitations: list(parsed.limitations),
-    provider: provider.name,
-    model: provider.model,
+    provider: providerName,
+    model: modelName,
     curbAppeal: (() => {
       const raw = String(parsed.curb_appeal_condition ?? '').toLowerCase()
       const condition = raw === 'renovated' || raw === 'dated' || raw === 'distressed' ? raw : 'unknown'
       const caConf = typeof parsed.curb_appeal_confidence === 'number' ? Math.min(100, Math.max(0, parsed.curb_appeal_confidence)) : null
       const summary = typeof parsed.curb_appeal_summary === 'string' ? parsed.curb_appeal_summary : null
       return condition !== 'unknown' || summary
-        ? { condition: condition as CurbAppealCheck['condition'], source: 'vision' as const, confidence: caConf, summary, photosExamined: photos.length }
+        ? { condition: condition as CurbAppealCheck['condition'], source: 'vision' as const, confidence: caConf, summary, photosExamined }
         : null
     })(),
   }
