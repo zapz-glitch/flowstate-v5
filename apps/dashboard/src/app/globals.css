@@ -751,6 +751,234 @@ textarea:-webkit-autofill {
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   PROTOTYPE LOOK · "America" · html[data-skin="america"], every dashboard page.
+   Our impression of america.gov, for a dense underwriting tool: a soft off-white
+   page, white cards with generous round corners and almost no border, deep navy
+   ink (#000C1F), a serif voice for titles and headline figures (Source Serif 4,
+   already shipped), a royal navy for the one filled action, pill buttons, pale
+   hairlines (#E5E7E9), red (#D80007) only for danger. Dark: night navy.
+   Never write a bare .border-border / .bg-background / .text-foreground selector
+   here (see the rule in the Studio block below).
+   ───────────────────────────────────────────────────────────────────────────── */
+html[data-skin="america"][data-skin="america"].light,
+html[data-skin="america"][data-skin="america"]:not(.dark) {
+  --background: 216 14% 96%;
+  --foreground: 217 100% 6%;
+  --foreground-secondary: 217 28% 24%;
+  --foreground-tertiary: 217 13% 38%;
+  --card: 0 0% 100%;
+  --card-hover: 216 20% 98%;
+  --card-foreground: 217 100% 6%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 217 100% 6%;
+  --primary: 222 72% 28%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 216 16% 92%;
+  --secondary-foreground: 217 100% 6%;
+  --muted: 216 16% 92%;
+  --muted-foreground: 217 13% 38%;
+  --accent: 216 18% 90%;
+  --accent-secondary: 217 13% 38%;
+  --accent-foreground: 217 100% 6%;
+  --border: 210 8% 90%;
+  --input: 214 12% 80%;
+  --input-fill: 0 0% 100%;
+  --ring: 222 72% 28%;
+  --destructive: 358 100% 42%;
+}
+html[data-skin="america"][data-skin="america"].dark {
+  --background: 218 58% 6%;
+  --foreground: 214 40% 96%;
+  --foreground-secondary: 214 22% 78%;
+  --foreground-tertiary: 215 16% 62%;
+  --card: 218 46% 10%;
+  --card-hover: 218 40% 13%;
+  --card-foreground: 214 40% 96%;
+  --popover: 218 46% 10%;
+  --popover-foreground: 214 40% 96%;
+  --primary: 218 92% 76%;
+  --primary-foreground: 218 70% 9%;
+  --secondary: 218 36% 15%;
+  --secondary-foreground: 214 40% 96%;
+  --muted: 218 36% 15%;
+  --muted-foreground: 215 16% 62%;
+  --accent: 218 32% 18%;
+  --accent-secondary: 215 16% 62%;
+  --accent-foreground: 214 40% 96%;
+  --border: 218 28% 19%;
+  --input: 218 22% 30%;
+  --input-fill: 218 46% 9%;
+  --ring: 218 92% 76%;
+}
+/* Titles and headline figures speak in the serif; everything else stays in Inter */
+html[data-skin="america"] :is(h1, h2),
+html[data-skin="america"] .hero-stats .font-bold,
+html[data-skin="america"] [data-card-key] .text-sm.font-bold,
+html[data-skin="america"] [role="dialog"] .text-base.font-bold {
+  font-family: var(--font-serif), Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+html[data-skin="america"] h1 {
+  font-size: 1.75rem;
+  line-height: 1.15;
+  font-weight: 400;
+}
+html[data-skin="america"] .hero-stats .font-bold {
+  font-size: 1.125rem;
+}
+/* Flat page; cards are white, round, and nearly borderless */
+html[data-skin="america"] .playground-bg {
+  background: hsl(var(--background));
+}
+html[data-skin="america"] :is(.corner-accents, .corner-accents-bottom)::before,
+html[data-skin="america"] :is(.corner-accents, .corner-accents-bottom)::after {
+  content: none;
+}
+html[data-skin="america"] [data-card-key],
+html[data-skin="america"] [data-surface="card"],
+html[data-skin="america"] [role="dialog"][aria-label="Comp beside the subject property"] > .isolate {
+  background-color: hsl(var(--card));
+}
+html[data-skin="america"] :is([data-card-key], [data-surface="card"], [data-notice], main [class~="bg-card"], main [class~="rounded-xl"], main [class~="rounded-lg"][class~="border"]) {
+  border-radius: 14px;
+}
+html[data-skin="america"] [data-surface="card"],
+html[data-skin="america"] [data-card-key] {
+  box-shadow: 0 1px 2px hsl(217 100% 6% / 0.04);
+}
+html[data-skin="america"] [role="dialog"][class~="sm:rounded-2xl"],
+html[data-skin="america"] [role="dialog"][aria-label="Comp beside the subject property"] {
+  border-radius: 20px;
+}
+html[data-skin="america"] .hero-stats {
+  margin-right: -1px;
+}
+/* Fields: white, round, a visible edge */
+html[data-skin="america"] main :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select),
+html[data-skin="america"] [role="dialog"] :is(input:not([type="checkbox"]):not([type="radio"]), textarea) {
+  background-color: hsl(var(--input-fill));
+  border-color: hsl(var(--input));
+  border-radius: 12px;
+}
+html[data-skin="america"] .hero-stats input {
+  background-color: transparent;
+  outline: none;
+  border-radius: 0;
+}
+/* Buttons are pills: one royal navy fill, navy outlines, quiet text */
+html[data-skin="america"] :is([data-deal], [data-comps-anchor] button) {
+  min-height: 26px;
+  border-radius: 9999px;
+  padding-inline: 12px;
+}
+html[data-skin="america"] :is([data-deal="prep"], [data-action="run"]),
+html[data-skin="america"] main button[class~="bg-foreground"],
+html[data-skin="america"] main :is(button, a)[class~="bg-primary"] {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 9999px;
+  font-weight: 500;
+}
+html[data-skin="america"] :is([data-deal="prep"], [data-action="run"]):hover:not(:disabled) {
+  background-color: hsl(222 72% 22%);
+}
+html[data-skin="america"].dark :is([data-deal="prep"], [data-action="run"]):hover:not(:disabled) {
+  background-color: hsl(218 92% 84%);
+}
+html[data-skin="america"] :is([data-deal="prep"], [data-action="run"]):disabled {
+  background-color: hsl(var(--foreground) / 0.08);
+  color: hsl(var(--foreground-tertiary));
+  opacity: 1;
+  cursor: not-allowed;
+}
+html[data-skin="america"] [data-deal="decline"],
+html[data-skin="america"] button[class~="border"][class~="border-border"]:not([role="switch"]) {
+  border: 1px solid hsl(var(--primary) / 0.45);
+  color: hsl(var(--primary));
+  border-radius: 9999px;
+  font-weight: 500;
+}
+html[data-skin="america"] [data-deal="decline"]:hover {
+  background: hsl(var(--primary) / 0.07);
+  border-color: hsl(var(--primary));
+}
+html[data-skin="america"] [data-comps-anchor] button[aria-pressed="true"] {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-weight: 500;
+}
+/* Sidebar: the current page is a navy pill, like the site's Menu button */
+html[data-skin="america"] nav a[class~="bg-primary/10"] {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 9999px;
+}
+html[data-skin="america"] nav a {
+  border-radius: 9999px;
+}
+html[data-skin="america"] nav a[class~="bg-primary/10"] :is(svg, span, div) {
+  color: inherit;
+}
+/* Panels on every menu page: white, like the cards on Property Search */
+html[data-skin="america"] main :is(div, section, a, article)[class~="border"][class~="border-border"]:is([class~="rounded-2xl"], [class~="rounded-xl"], [class~="rounded-lg"]) {
+  background-color: hsl(var(--card));
+  border-radius: 16px;
+}
+/* Comp cards: same care as the Studio look */
+html[data-skin="america"] [data-in-arv="false"] {
+  opacity: 1;
+}
+html[data-skin="america"] [data-in-arv="false"] img {
+  opacity: 0.6;
+}
+html[data-skin="america"] [data-in-arv="false"]:is(:hover, :focus-within) img,
+html[data-skin="america"] [role="dialog"][aria-label="Comp beside the subject property"] [data-in-arv="false"] img {
+  opacity: 1;
+}
+html[data-skin="america"] [data-card-key] button[aria-pressed="false"] > span > svg {
+  opacity: 0;
+}
+html[data-skin="america"] [data-stamp] {
+  border-radius: 9999px;
+  padding-inline: 8px;
+}
+html[data-skin="america"] [data-stamp="number"] {
+  padding-inline: 0;
+}
+html[data-skin="america"] :is([data-stamp="anchor"], [data-stamp="as_is"]) {
+  color: #170404;
+}
+html[data-skin="america"] [data-stamp="median"] {
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.14);
+}
+html[data-skin="america"] [data-in-arv="true"] [data-stamp="number"],
+html[data-skin="america"] :is([data-stamp="driver"], [data-stamp="renovated"]),
+html[data-skin="america"] [data-card-key] button[aria-pressed="true"] > span {
+  background-color: #047857;
+  border-color: #047857;
+}
+/* Meaning colors, readable on white */
+html[data-skin="america"] [class~="text-foreground-tertiary/70"] {
+  color: hsl(var(--foreground-tertiary));
+}
+html[data-skin="america"]:not(.dark) :is(.text-emerald-600, .text-emerald-500) {
+  color: #047857;
+}
+html[data-skin="america"]:not(.dark) :is(.text-amber-600, .text-amber-500) {
+  color: #a34a05;
+}
+html[data-skin="america"]:not(.dark) :is(.text-red-600, .text-red-500) {
+  color: #d80007;
+}
+html[data-skin="america"] [data-card-key="subject"] [class~="bg-primary/90"] :is(span, svg) {
+  color: hsl(var(--primary-foreground));
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
    PROTOTYPE SKIN · "Studio" · set on <html data-skin="nds"> by SkinPreview, only
    while Property Search is open. The real theme tokens above are not edited.
 
