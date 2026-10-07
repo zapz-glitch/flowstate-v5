@@ -1923,7 +1923,7 @@ export interface Phase1Context {
    *  buildHarnessEvidence applies them to band labels + evidenceBands
    *  identically at evidence-serve and selection-grade time. */
   bandOverrides?: Record<string, BandName | null>
-  bandAdjudication?: { adjustments: import('./band-adjudicate').BandAdjustment[]; model: string; ambiguous?: string[] }
+  bandAdjudication?: { adjustments: import('./band-adjudicate').BandAdjustment[]; model: string; ambiguous?: string[]; confidence?: number }
 }
 
 /** Park-path helper — runs the reasoning-model adjudication over the
@@ -1945,7 +1945,7 @@ export async function adjudicatePhase1Bands(ctx: Phase1Context, env: Env): Promi
   }).catch(() => null)
   if (!res) return
   ctx.bandOverrides = res.overrides
-  ctx.bandAdjudication = { adjustments: res.adjustments, model: res.model, ambiguous: res.ambiguous }
+  ctx.bandAdjudication = { adjustments: res.adjustments, model: res.model, ambiguous: res.ambiguous, confidence: res.confidence }
 }
 
 export interface SelectionAttempt {
@@ -2248,7 +2248,7 @@ export interface HarnessEvidence {
   /** Reasoning-model adjudication applied to band membership — the arm's
    *  reasoning provider's include/exclude/move verdicts + which comps it
    *  changed. Present only when a provider is configured and it answered. */
-  bandAdjudication?: { model: string; adjustments: import('./band-adjudicate').BandAdjustment[]; ambiguous?: string[] }
+  bandAdjudication?: { model: string; adjustments: import('./band-adjudicate').BandAdjustment[]; ambiguous?: string[]; confidence?: number }
   rules: {
     filters: AppraisalFilter[]
     adjustments: AppraisalAdjustment[]
@@ -2337,7 +2337,7 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
     evidenceBands: computeEvidenceBands(rows, ctx.bundle.property, { bandOverrides: overrides }),
     geoBands: computeGeoTieredBands(rows, ctx.bundle.property, { bandOverrides: overrides }),
     bandAdjudication: ctx.bandAdjudication
-      ? { model: ctx.bandAdjudication.model, adjustments: ctx.bandAdjudication.adjustments, ambiguous: ctx.bandAdjudication.ambiguous }
+      ? { model: ctx.bandAdjudication.model, adjustments: ctx.bandAdjudication.adjustments, ambiguous: ctx.bandAdjudication.ambiguous, confidence: ctx.bandAdjudication.confidence }
       : undefined,
     rules: {
       filters: ctx.filters,
