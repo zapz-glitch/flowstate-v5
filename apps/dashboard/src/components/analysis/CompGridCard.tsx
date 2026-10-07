@@ -224,7 +224,7 @@ function CompGridCardInner({
 
         {/* Scope · matching name left, tightest scope word right */}
         <div className="flex items-center justify-between gap-2 mt-0.5">
-          <span className="text-foreground-tertiary truncate">{formatAreaLine(comp.censusBlockGroup, scope.matchedName?.replace(/ BG \d$/, '')) ?? ''}</span>
+          <span className="text-foreground-tertiary truncate">{formatAreaLine(comp.censusBlockGroup, scope.matchedName?.replace(/ Block \d$/, '')) ?? ''}</span>
           <span className={cn('font-medium flex-shrink-0', scopeToneClass(scope.tone))} title={scope.title}>
             {scope.word}
           </span>

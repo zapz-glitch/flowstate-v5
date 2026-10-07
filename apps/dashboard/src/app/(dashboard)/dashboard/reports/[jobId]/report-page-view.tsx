@@ -241,9 +241,9 @@ export function ReportPageView({ params, queue }: {
       // Offers context gets an explicit empty state — otherwise a lead
       // with no conversation intel looks identical to a broken fetch.
       return queue ? (
-        <section className="border border-border rounded-sm px-4 py-3">
+        <section aria-label="Realtor notes" className="border-l-2 border-border pl-3 pr-1 py-0.5">
           <div className="flex items-baseline justify-between gap-2">
-            <h3 className="text-body-sm font-semibold">Realtor notes</h3>
+            <h3 className="text-[11px] font-medium text-foreground-tertiary">Realtor notes</h3>
             <span className="text-[10px] text-foreground-tertiary">none on file</span>
           </div>
           <p className="text-[11px] text-foreground-tertiary">

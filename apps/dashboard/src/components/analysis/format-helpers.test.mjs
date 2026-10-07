@@ -64,11 +64,11 @@ test('the subject uses the same Street View rule as a comp', () => {
 
 test('the area line puts the block group first, then " - ", then the neighborhood', () => {
   // 12-digit census id · the block group is its last digit
-  assert.equal(formatAreaLine('130670312034', 'MEADOW BROOK'), 'Group 4 - Meadow Brook')
+  assert.equal(formatAreaLine('130670312034', 'MEADOW BROOK'), 'Block 4 - Meadow Brook')
 })
 
 test('the area line shows whichever half it has, and nothing when it has neither', () => {
-  assert.equal(formatAreaLine('130670312034', null), 'Group 4')
+  assert.equal(formatAreaLine('130670312034', null), 'Block 4')
   assert.equal(formatAreaLine(null, 'CAVALIER GARDENS'), 'Cavalier Gardens')
   assert.equal(formatAreaLine(undefined, ''), null)
   assert.equal(formatAreaLine('', null), null)
@@ -99,5 +99,5 @@ test('the server\'s own match flags count, and unknown geography is no match', (
 })
 
 test('the map tag words are plain', () => {
-  assert.deepEqual(JSON.parse(JSON.stringify(AREA_MATCH_WORDS)), { both: 'Group + Neighborhood', block: 'Block group', neighborhood: 'Neighborhood', none: 'Outside' })
+  assert.deepEqual(JSON.parse(JSON.stringify(AREA_MATCH_WORDS)), { both: 'Block + Neighborhood', block: 'Block', neighborhood: 'Neighborhood', none: 'Outside' })
 })

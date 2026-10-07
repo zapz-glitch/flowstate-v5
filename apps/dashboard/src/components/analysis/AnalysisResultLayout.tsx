@@ -157,25 +157,16 @@ export function AnalysisResultLayout({
         </div>
       ) : null}
 
-      {/* Insufficient-comps disclosure — renders whether or not a valuation
-          exists (AVM-anchored runs show the hero AND this note). */}
-      {subject && !isStreaming && comps?.insufficientComps === true ? (() => {
-        /* Thin-pocket disclosure — the param-flex ladder stretched numeric
-           tolerances (geo stayed required) hunting ARV evidence. Green =
-           strict pass, yellow = extended once or twice, red = deeper. */
+      {/* Widened-rules warning · shown only when the search had to stretch its rules to look for ARV
+          evidence and still found none (amber: once or twice, red: further). The plain "no ARV evidence
+          in the verified pool" note, with no widening, was removed: it warned about nothing. */}
+      {subject && !isStreaming && comps?.insufficientComps === true && (comps?.retrieval?.paramFlex?.extensions ?? 0) > 0 ? (() => {
         const extensions = comps?.retrieval?.paramFlex?.extensions ?? 0
-        const factor = comps?.retrieval?.paramFlex?.factor ?? 1
-        // No widening is not good news, just a plain fact: neutral silver, not green
-        const tone = extensions === 0 ? 'text-foreground-secondary border-border bg-secondary/50'
-          : extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
+        const tone = extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
           : 'text-red-400 border-red-400/30 bg-red-400/5'
         return (
           <div data-notice className={`border rounded-sm px-4 py-3 ${tone}`}>
-            <div className={cn('text-sm font-semibold', extensions === 0 && 'text-foreground')}>
-              {extensions === 0
-                ? 'No ARV evidence in the verified pool'
-                : 'No ARV evidence — rules had to be widened'}
-            </div>
+            <div className="text-sm font-semibold">No ARV evidence — rules had to be widened</div>
             <p className="text-xs text-foreground-secondary mt-0.5">
               {comps?.retrieval?.paramFlex?.concessions?.length
                 ? `To reach comps we extended ${comps.retrieval.paramFlex.concessions.join(', ')}. `

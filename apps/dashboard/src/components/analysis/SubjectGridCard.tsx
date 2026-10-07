@@ -102,7 +102,7 @@ export function SubjectGridCard({ subject, isLoading, footer, stats, actions }: 
             </div>
             {(areaLine || headlineLabel) && (
               <div className="flex items-center justify-between gap-2 mt-0.5 text-[11px]">
-                <span className="min-w-0 truncate text-foreground-secondary" title="Census block group - neighborhood">{areaLine ?? ''}</span>
+                <span className="min-w-0 truncate text-foreground-secondary" title="Census block group and neighborhood">{areaLine ?? ''}</span>
                 {headlineLabel && <span className="flex-shrink-0 text-foreground-tertiary tabular-nums">{headlineLabel}</span>}
               </div>
             )}

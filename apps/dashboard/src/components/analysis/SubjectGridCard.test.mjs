@@ -54,7 +54,7 @@ test('with no neighborhood, the subdivision fills the line instead', () => {
 
 test('with neither, no area line is drawn', () => {
   const out = render({ ...base, neighborhoodName: null, subdivision: null })
-  assert.doesNotMatch(out, /Meadow|Group/)
+  assert.doesNotMatch(out, /Meadow|Block \d/)
 })
 
 test('the address reads street, city, state: the ZIP is left off the text and kept for copy and the tooltip', () => {
@@ -144,9 +144,9 @@ test('with only the stats, the foot strip still shows them', () => {
 
 test('the area line reads block group, dash, neighborhood, once', () => {
   const out = render({ ...base, censusBlockGroup: '130670312034' })
-  assert.match(out, />Group 4 - Meadow Brook</)
+  assert.match(out, />Block 4 - Meadow Brook</)
   assert.equal(count(out, 'Meadow Brook'), 1)
-  assert.doesNotMatch(out, /Meadow Brook[^<]*Group 4/, 'the group is not after the name')
+  assert.doesNotMatch(out, /Meadow Brook[^<]*Block 4/, 'the block is not after the name')
 })
 
 test('with no block group the area line is just the name', () => {

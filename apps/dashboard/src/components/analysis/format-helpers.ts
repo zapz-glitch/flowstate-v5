@@ -5,7 +5,8 @@ import { compFeatureMatches, featureState, MATCH_TEXT, MISMATCH_TEXT, type Featu
 export { MATCH_TEXT, MISMATCH_TEXT }
 
 export const FILTER_TYPE_LABELS: Record<string, string> = {
-  subdivision_match: 'Subdivision Match',
+  // Shown on the comp detail's rule list · the area is called the neighborhood on every comp surface
+  subdivision_match: 'Neighborhood Match',
   neighborhood_match: 'Neighborhood',
   building_style_match: 'Building Style',
   foundation_match: 'Foundation Match',
@@ -199,7 +200,7 @@ export function zillowHref(comp: Pick<CompItem, 'zillowUrl' | 'address' | 'city'
 
 /** Where a comp's geography matched the subject · lower sorts first */
 export function scopeRank(scope: Pick<ScopeLabel, 'word'>): number {
-  return scope.word === 'Group' ? 0 : scope.word === 'Tract' ? 1 : scope.word === 'Tract/Group' ? 2 : scope.word === 'Neighborhood' ? 3 : 4
+  return scope.word === 'Block' ? 0 : scope.word === 'Tract' ? 1 : scope.word === 'Tract/Block' ? 2 : scope.word === 'Neighborhood' ? 3 : 4
 }
 
 /** Photo condition · missing evidence stays Unverified, never a guess */
@@ -242,7 +243,7 @@ export function conflictNote(comp: Pick<CompItem, 'classification' | 'badges'>):
 
 // ─── Geographic scope ───────────────────────────────────────────────────────
 
-export type ScopeWord = 'Group' | 'Tract' | 'Neighborhood' | 'Tract/Group' | 'Out =' | 'Out >' | 'Out <' | 'Unverified'
+export type ScopeWord = 'Block' | 'Tract' | 'Neighborhood' | 'Tract/Block' | 'Out =' | 'Out >' | 'Out <' | 'Unverified'
 export type ScopeTone = 'match' | 'out' | 'unverified'
 
 export interface ScopeLabel {
@@ -273,8 +274,8 @@ export function formatBlockGroup(value?: string | null): string | null {
 export function formatAreaLine(blockGroupGeoid?: string | null, name?: string | null): string | null {
   const group = formatBlockGroup(blockGroupGeoid)
   const area = name ? titleCaseWords(name) : null
-  if (group && area) return `Group ${group} - ${area}`
-  if (group) return `Group ${group}`
+  if (group && area) return `Block ${group} - ${area}`
+  if (group) return `Block ${group}`
   return area
 }
 
@@ -303,8 +304,8 @@ export function compAreaMatch(
 
 /** The plain words for an area match · what the map tag says under the price */
 export const AREA_MATCH_WORDS: Record<AreaMatch, string> = {
-  both: 'Group + Neighborhood',
-  block: 'Block group',
+  both: 'Block + Neighborhood',
+  block: 'Block',
   neighborhood: 'Neighborhood',
   none: 'Outside',
 }
@@ -346,8 +347,8 @@ export function scopeLabel(
   const name = sharedName ? titleCaseWords(sharedName) : ownName ? titleCaseWords(ownName) : null
 
   const group = (): ScopeLabel => ({
-    word: 'Group', tone: 'match', title: 'Same census block group as the subject',
-    matchedName: name ?? (tractCode ? `Tract ${tractCode}${groupCode ? ` BG ${groupCode}` : ''}` : null),
+    word: 'Block', tone: 'match', title: 'Same census block group as the subject',
+    matchedName: name ?? (tractCode ? `Tract ${tractCode}${groupCode ? ` Block ${groupCode}` : ''}` : null),
   })
   const tract = (): ScopeLabel => ({
     word: 'Tract', tone: 'match', title: 'Same census tract as the subject',
@@ -368,7 +369,7 @@ export function scopeLabel(
       // only ever a census match, so it is never labelled Neighborhood.
       if (comp.sameBlockGroup === true) return group()
       if (comp.censusTract && subject?.censusTract && comp.censusTract === subject.censusTract) return tract()
-      return { word: 'Tract/Group', tone: 'match', title: 'Inside the subject census area · match level not recorded', matchedName: name }
+      return { word: 'Tract/Block', tone: 'match', title: 'Inside the subject census area · match level not recorded', matchedName: name }
     case 'equal':
       return { word: 'Out =', tone: 'out', title: 'Outside the subject area · priced level with it', matchedName: name }
     case 'above':

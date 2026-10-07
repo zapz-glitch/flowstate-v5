@@ -444,6 +444,23 @@ describe('Property Search with a report loaded', () => {
     }
   })
 
+  test('wording: Block and Neighborhood everywhere on the map and cards, and no plain no-evidence notice', WEB, async (fx) => {
+    const { browser } = fx
+    await openLoadedSearch(fx)
+    await expect.poll(() => browser.evaluate(() => document.querySelectorAll('[data-testid="subject-map"] img[src^="data:image/svg+xml"]').length), { timeout: 30_000 }).toBeGreaterThan(0)
+    const page = (await browser.evaluate(() => {
+      const text = document.body.innerText
+      const lines = [...document.querySelectorAll('[data-card-key] span')].map((s) => (s.children.length === 0 ? (s.textContent ?? '').trim() : '')).filter((t) => /^(Block|Group) \d/.test(t))
+      return { blockGroup: /block group/i.test(text), groupNumber: /\bGroup \d/.test(text), subdivision: /subdivision/i.test(text), areaLines: [...new Set(lines)].slice(0, 8), notice: /No ARV evidence in the verified pool/.test(text) }
+    })) as { blockGroup: boolean; groupNumber: boolean; subdivision: boolean; areaLines: string[]; notice: boolean }
+    expect(page.blockGroup, 'never "block group"').toBe(false)
+    expect(page.groupNumber, 'never "Group 1"').toBe(false)
+    expect(page.subdivision, 'never "subdivision"').toBe(false)
+    expect(page.notice, 'the plain no-evidence note is gone').toBe(false)
+    // Where a card has a block, its area line reads "Block <id>" then the neighborhood name
+    for (const line of page.areaLines) expect(line).toMatch(/^Block \d( - .+)?$/)
+  })
+
   test('there is no comp rules line on the subject card', WEB, async (fx) => {
     const { screen } = fx
     await openLoadedSearch(fx)
@@ -644,7 +661,7 @@ describe('Property Search with a report loaded', () => {
       .map((img) => decodeURIComponent((img as HTMLImageElement).src.split(',')[1] ?? ''))
       .map((svg) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1])))) as string[][]
     expect(tags.length).toBeGreaterThan(0)
-    const words = ['Group + Neighborhood', 'Block group', 'Neighborhood', 'Outside']
+    const words = ['Block + Neighborhood', 'Block', 'Neighborhood', 'Outside']
     for (const lines of tags) {
       // [number, price, match word, and the condition when it is known] · no bullet, no price class
       expect(lines.length === 3 || lines.length === 4, 'number, price, match, optional condition').toBe(true)

@@ -53,7 +53,8 @@ test('priority evidence is visible independently of rule matching', () => {
     priorityRank: 1, compGroup: 'arv', rankingDetails: ['Subdivision: same', 'Year built difference: 3'],
   } }))
   assert.match(html, /Match rank #1/)
-  assert.match(html, /Subdivision: same/)
+  assert.match(html, /Neighborhood: same/)
+  assert.doesNotMatch(html, /Subdivision/i, 'the cards never say subdivision')
   assert.match(html, /Year built difference: 3/)
   assert.match(html, /ARV comparable/)
   assert.doesNotMatch(html, /100%|renovated/i)
@@ -66,7 +67,7 @@ test('raw ratios become readable whole percentages without changing evidence', (
   }
   const before = JSON.stringify(comp)
   assert.deepEqual(Array.from(helpers.formatComparisonDetails(comp)), [
-    'Same subdivision', 'Same year built', 'Size difference: 8%', 'Lot size difference: 15%',
+    'Same neighborhood', 'Same year built', 'Size difference: 8%', 'Lot size difference: 15%',
     'Subject style unavailable; style match cannot be verified',
   ])
   assert.equal(JSON.stringify(comp), before)

@@ -55,6 +55,14 @@ cd /tmp && LD_LIBRARY_PATH=$HOME/.local/lib/playwright-deps \
 ## Review template
 
 ```
+### 2026-10-06 — Block and Neighborhood wording, plain notice removed, quiet realtor notes
+Screenshots: `words-page`, `words-dialog`, `notes-plain-light`, `notes-plain-dark`, `notes-widened-light`
+Requirements: say "Block" (never "Block group" or "Group") on the map; comp cards say "Neighborhood" (never "Subdivision") and show the block id then the neighborhood name; remove the "No ARV evidence in the verified pool" section; realtor notes take that place, quieter.
+Done: map tags read Block / Neighborhood / Block + Neighborhood / Outside. Area lines read "Block 1 - Sunset Park" on the subject card, comp cards and the compare panel; the match word on a comp card is "Block". The comp detail has one Neighborhood cell (the neighborhood name, or the subdivision name when there is no neighborhood), its rule row reads "Neighborhood Match", and rule text says neighborhood and block. The plain no-evidence note is gone; the amber or red "rules had to be widened" warning still shows when the search really widened its rules. Realtor notes: no box, small gray title, a thin left rule, readable words.
+Measured on real pages: no "block group", "Group <n>" or "subdivision" anywhere on Property Search or in the comp detail; notes sit between the subject card and the tier tabs.
+Left as they are: the rule names in Evaluation Settings ("Subdivision Match") and the PDF report, which are not the map or comp cards.
+Tests: unit 27 files; e2e 39 of 39.
+
 ### 2026-10-06 — Studio skin, re-examined and rebuilt (two review rounds)
 Screenshots: `~/code/ui-shots/studio-review/` — `before-*` (first version), `after-*` (first rebuild), `final-*` (after the second round), each in light and dark at 1440, light at 1100 and 390, in every state: loaded, comp list, pinned compare panel, comp detail dialog, Evaluation Settings, empty, the four permit stages. Close-ups: `final-*-arv-edit`, `final-*-valuation`, `final-*-cards`.
 Requirement: have the new model look over the Studio prototype and improve it.
