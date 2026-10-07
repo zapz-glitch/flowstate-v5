@@ -229,3 +229,10 @@ Requirement: the "No ARV evidence — rules had to be widened" note uses a neutr
 Defects found: none. No saved report shows the note, so the screenshots fake the flag in the browser's copy of the report only.
 Fixed: note is a gray box with ink text (was amber/red). Hover state moved into the sidebar provider; rail and page padding go 72px → 256px together and back on leave.
 Gate: light and dark, desktop and narrow, no sideways scroll. Not screenshotted: Offers detail page (reads the same setting). Open: page content shifts on each hover.
+
+### 2026-10-07 — Hover-open account menu and search bar; clickable report address; Offers row hover
+Screenshots: `~/code/ui-shots/menu-hover-*` · `search-hover-*` · `reports-addr-*` (light 1440 full sidebar, dark 1440 mini sidebar)
+Requirement: account menu and the Property Search address bar open on hover; the address on Property Reports opens the report with no underline; Offers rows hover in every section.
+Defects found: none on the three screenshotted items.
+Fixed: account menu opens on hover and closes after the pointer leaves. Search form opens after a 200ms rest on the address side only (Download Report side does not trigger it), closes on leave unless clicked or typed in. Report address is a link with the gray-fill hover. Offers rows with no report yet (Evaluating) now share the row hover.
+Gate: light and dark, full and mini sidebar, no sideways scroll. Not screenshotted: the Offers Evaluating row hover (local queue is empty), narrow widths. Open: Evaluating rows have no report, so a click there still opens nothing.

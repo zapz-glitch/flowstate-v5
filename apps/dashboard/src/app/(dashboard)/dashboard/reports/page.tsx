@@ -185,7 +185,12 @@ export default async function ReportsPage({
                       className="hover:bg-secondary/30 transition-colors"
                     >
                       <td className="px-6 py-4 text-body-sm text-foreground max-w-[250px] truncate" title={report.propertyAddress}>
-                        {formatAddressCasing(report.propertyAddress)}
+                        <Link
+                          href={`/dashboard/reports/${report.jobId}`}
+                          className="rounded px-0.5 -mx-0.5 transition-colors hover:text-foreground hover:bg-secondary"
+                        >
+                          {formatAddressCasing(report.propertyAddress)}
+                        </Link>
                       </td>
                       <td className="px-6 py-4 text-body-sm text-foreground-secondary whitespace-nowrap">
                         {formatCityState(report.propertyCity, report.propertyState) || '-'}

@@ -173,6 +173,8 @@ export default function AnalyzePage() {
   // UI state
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
+  const searchHoverOpened = useRef(false)
+  const searchHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [durationMs, setDurationMs] = useState<number | null>(null)
 
   // Phase-based state machine
@@ -749,6 +751,21 @@ export default function AnalyzePage() {
   // ─── Layout Flags ────────────────────────────────────────────────────────
 
   const isSearchCollapsed = isActive && !searchExpanded
+  // Hover-open · resting on the address opens the search form; leaving closes it again,
+  // unless the user clicked or typed in it (then it stays until they close it).
+  const openSearchOnHover = () => {
+    if (searchHoverTimer.current) clearTimeout(searchHoverTimer.current)
+    searchHoverTimer.current = setTimeout(() => { searchHoverOpened.current = true; setSearchExpanded(true) }, 200)
+  }
+  const cancelSearchHover = () => {
+    if (searchHoverTimer.current) { clearTimeout(searchHoverTimer.current); searchHoverTimer.current = null }
+  }
+  const closeSearchOnLeave = () => {
+    if (!searchHoverOpened.current) return
+    cancelSearchHover()
+    searchHoverTimer.current = setTimeout(() => { searchHoverOpened.current = false; setSearchExpanded(false) }, 350)
+  }
+  const pinSearch = () => { searchHoverOpened.current = false; cancelSearchHover() }
   const hasMapData = isValidCoordinate({ lat: renderData?.subject?.latitude, lng: renderData?.subject?.longitude })
   const showTwoColumn = isActive && hasMapData
 
@@ -772,7 +789,9 @@ export default function AnalyzePage() {
       {/* Input Form — collapses to compact bar once active */}
       {isSearchCollapsed ? (
         <ReportToolbar
-          onClick={() => setSearchExpanded(true)}
+          onClick={() => { pinSearch(); setSearchExpanded(true) }}
+          onAddressEnter={openSearchOnHover}
+          onAddressLeave={cancelSearchHover}
           lead={
             <div className={REPORT_TOOLBAR_TILE}>
               <Search className="w-3.5 h-3.5 text-primary" />
@@ -824,7 +843,14 @@ export default function AnalyzePage() {
             )}
         </ReportToolbar>
       ) : (
-        <div data-surface="card" className="relative z-20 border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
+        <div
+          data-surface="card"
+          className="relative z-20 border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom"
+          onMouseEnter={cancelSearchHover}
+          onMouseLeave={closeSearchOnLeave}
+          onMouseDownCapture={pinSearch}
+          onKeyDownCapture={pinSearch}
+        >
           {/* Title and the collapse arrow · only while a property is loaded. With nothing
               loaded the page header above is the title. */}
           {isActive && (

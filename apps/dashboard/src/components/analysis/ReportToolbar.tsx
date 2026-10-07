@@ -9,7 +9,7 @@ export const REPORT_TOOLBAR_TILE = 'w-7 h-7 rounded-lg bg-primary/10 flex items-
  * report page and Property Search, so the two headers cannot drift apart.
  * Each page passes its own controls · no behaviour lives here.
  */
-export function ReportToolbar({ lead, title, tooltip, subline, children, onClick }: {
+export function ReportToolbar({ lead, title, tooltip, subline, children, onClick, onAddressEnter, onAddressLeave }: {
   /** Leading tile (use REPORT_TOOLBAR_TILE for its classes) */
   lead: ReactNode
   /** The address line */
@@ -21,6 +21,9 @@ export function ReportToolbar({ lead, title, tooltip, subline, children, onClick
   children?: ReactNode
   /** Makes the whole bar a button (Property Search expands its form) */
   onClick?: () => void
+  /** Pointer over the address side of the bar, never the right-hand controls */
+  onAddressEnter?: () => void
+  onAddressLeave?: () => void
 }) {
   return (
     <div
@@ -32,10 +35,12 @@ export function ReportToolbar({ lead, title, tooltip, subline, children, onClick
       onClick={onClick}
     >
       <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
-        {lead}
-        <div className="flex-1 min-w-0">
-          <div className="text-body-sm text-foreground-secondary truncate" title={tooltip}>{title}</div>
-          {subline}
+        <div className="flex-1 min-w-0 flex items-center gap-3" onMouseEnter={onAddressEnter} onMouseLeave={onAddressLeave}>
+          {lead}
+          <div className="flex-1 min-w-0">
+            <div className="text-body-sm text-foreground-secondary truncate" title={tooltip}>{title}</div>
+            {subline}
+          </div>
         </div>
         {children}
       </div>

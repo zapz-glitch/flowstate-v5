@@ -491,7 +491,7 @@ export default function GiveOfferPage() {
                       {inner}
                     </Link>
                   ) : (
-                    <div key={row.key} className="flex items-center gap-3 px-3 py-2">
+                    <div key={row.key} className="flex items-center gap-3 px-3 py-2 hover:bg-secondary/50 transition-colors">
                       {inner}
                     </div>
                   )

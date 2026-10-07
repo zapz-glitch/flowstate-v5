@@ -102,6 +102,19 @@ export default function Sidebar() {
   // leaving collapses back after a beat. The stored pref stays collapsed.
   const { collapsed, collapsedPref, setHoverExpanded, toggleCollapsed } = useSidebar()
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The account menu opens on hover and closes a beat after the pointer leaves it.
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const overUserMenu = useRef(false)
+  const userMenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const openUserMenu = () => {
+    if (userMenuTimer.current) { clearTimeout(userMenuTimer.current); userMenuTimer.current = null }
+    overUserMenu.current = true
+    setUserMenuOpen(true)
+  }
+  const closeUserMenuSoon = () => {
+    overUserMenu.current = false
+    userMenuTimer.current = setTimeout(() => setUserMenuOpen(false), 300)
+  }
   // Derived boolean atom — sidebar re-renders only when a run starts/ends,
   // not on every analysis atom write during a live run.
   const isAnalysisRunning = useAtomValue(isAnalysisRunningAtom)
@@ -352,9 +365,11 @@ export default function Sidebar() {
 
           {/* User Section with Dropdown */}
           <div className="p-3 border-t border-border">
-            <DropdownMenu>
+            <DropdownMenu open={userMenuOpen} onOpenChange={(open) => { if (open || !overUserMenu.current) setUserMenuOpen(open) }} modal={false}>
               <DropdownMenuTrigger asChild>
                 <button
+                  onMouseEnter={openUserMenu}
+                  onMouseLeave={closeUserMenuSoon}
                   className={cn(
 'flex items-center gap-3 w-full rounded-lg p-2 text-left transition-colors hover:text-foreground hover:bg-secondary',
                     collapsed && 'justify-center'
@@ -382,6 +397,8 @@ export default function Sidebar() {
                 side={collapsed ? 'right' : 'top'}
                 align={collapsed ? 'start' : 'center'}
                 className="w-56"
+                onMouseEnter={openUserMenu}
+                onMouseLeave={closeUserMenuSoon}
               >
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex flex-col space-y-1">
