@@ -165,6 +165,14 @@ export async function adjudicateBandMembership(
   } catch { return null }
 
   const validIds = new Set(input.comps.map((c) => c.id))
+  const byId = new Map(input.comps.map((c) => [c.id, c] as const))
+  // Doctrine hard rule — as-is evidence can never sit in the ARV band.
+  // The reasoning model may misread a distressed member as renovated; the
+  // gate forbids the agent from stating that membership, so strip it here.
+  const isAsIs = (c: BandAdjudicationInput['comps'][number]): boolean =>
+    c.classification?.type === 'as_is' ||
+    c.curbAppeal?.condition === 'distressed' ||
+    c.evidenceVerification?.transactionCheck === 'nominal_sale'
   const overrides: Record<string, BandName | null> = {}
   const adjustments: BandAdjustment[] = []
   for (const raw of Array.isArray(parsed.adjustments) ? parsed.adjustments : []) {
@@ -174,6 +182,7 @@ export async function adjudicateBandMembership(
     const action = a.action === 'include' || a.action === 'exclude' || a.action === 'move' ? a.action : null
     if (!action) continue
     const band = typeof a.band === 'string' && (BANDS as string[]).includes(a.band) ? (a.band as BandName) : null
+    if (band === 'arv' && isAsIs(byId.get(compId)!)) continue
     const adj: BandAdjustment = { compId, action, band, reason: typeof a.reason === 'string' ? a.reason.slice(0, 300) : undefined }
     adjustments.push(adj)
     // include/move require a named band; exclude unbands.
