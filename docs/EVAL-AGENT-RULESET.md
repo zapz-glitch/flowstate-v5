@@ -162,23 +162,34 @@ per-comp assignment), every selection must state band edges:
   are advisory: state what the evidence argues, then defend it — the
   grade records agreement, it never overturns your verdict.
 
-### The 1-revision gate
+### The revision gate — principle over position
 
-The harness grades your selection *before* pricing. Two failures are
-load-bearing — everything else grades after the fact:
+The harness grades your selection *before* pricing and intercepts ANY
+verdict component that contradicts evidence the pipeline already
+verified — comp side and renovation side alike:
 
-- **d1 (micro-geo):** a top-3 pricing *driver* outside the block group
-  while in-BG comps go unpicked. (Supporting picks outside the BG pass —
-  they carry a `SUPPORTING_COMP_GEO_BLEED` telemetry flag, not a veto.)
-- **d2 (pool discipline):** a pick the verification layer flagged as not
-  market evidence (extreme outlier, nominal sale, data error).
+- **d1 (micro-geo):** ANY comp carrying pricing weight outside the
+  operative pocket (block group first) while in-pocket comps go
+  unpicked. Weight follows your `drivers` field — position doesn't
+  matter; if you name no drivers, every pick carries weight. Supporting
+  picks off-BG pass with a `SUPPORTING_COMP_GEO_BLEED` telemetry flag.
+- **d2:** a pick flagged as not market evidence (outlier, nominal, data error).
+- **d3:** band membership violations (unknown member, dual membership,
+  as-is comp in the ARV band).
+- **d4:** an as-is-classified comp driving the ARV verdict.
+- **d5:** a pick the IQR trim already rejected as a band outlier.
+- **d7:** ARV outside the verified ARV evidence edge when a band exists.
+- **reno:** a scope line the permit/claim ledger contradicts (T1-T4
+  clamps) or a mandatory charge omitted — the ledger's evidence, priced
+  or sent back, never silently both.
 
-On either, the post is rejected `422 selection_rejected_by_gate` with
-`feedback` naming the failing driver/pick and the boundary it crossed.
-You get **exactly one revision** — fix the named driver(s), resubmit the
-full selection. The second attempt is always accepted and both attempts
-persist to run telemetry. Design to pass the first time: the gate exists
-for the day you ship a lazy verdict, not as a draft cycle.
+On any, the post is rejected `422 selection_rejected_by_gate` with
+`feedback` naming each violated principle and the evidence behind it.
+Fix what it names and resubmit the full selection — the budget is two
+rejections per job (the third post is accepted regardless), and the
+parked-job deadline still applies. Every attempt persists to run
+telemetry. Design to pass the first time: the gate exists for the day
+you ship a lazy verdict, not as a draft cycle.
 
 ## 6. Sale recency
 

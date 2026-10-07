@@ -28,6 +28,7 @@ import {
   type Phase1Context,
 } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
+import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
 import { createPropertyApi } from '../services/property-api'
@@ -88,8 +89,8 @@ interface JobState {
   harnessRounds?: number
   /** Epoch ms — the deterministic fallback fires when the deadline passes. */
   harnessDeadline?: number
-  /** 1-revision gate — every posted selection + its pre-pricing grade.
-   *  A hard d1/d2 fail on attempt 1 parks the job for one revision. */
+  /** Revision gate — every posted selection + its pre-pricing grade.
+   *  Any verified-evidence contradiction parks the job for a revision. */
   harnessAttempts?: import('../services/evaluation').SelectionAttempt[]
 }
 
@@ -1680,32 +1681,55 @@ export class AnalysisJobDO {
       return Response.json({ error: 'Selection rejected', fails }, { status: 422 })
     }
 
-    // Load-bearing 1-revision gate (locked spec): grade the selection
-    // BEFORE pricing. A hard d1 (pricing driver off-pocket while in-pocket
-    // comps remain unpicked) or d2 (outlier/data-error pick) fail on the
-    // first attempt rejects the selection with targeted feedback — the job
-    // stays parked for exactly one revision. Attempt 2 is always accepted
-    // (accepted_final); every attempt is recorded to run telemetry.
+    // Load-bearing revision gate — principle-first (locked spec): ANY
+    // verdict component that contradicts evidence the pipeline already
+    // verified is intercepted BEFORE pricing and handed back with the
+    // specific violation named. That covers every hard check fail (d1
+    // off-pocket pricing comps, d2 outlier picks, d3 band membership, d4
+    // as-is drivers, d5 IQR-trimmed picks, d7 ARV outside the evidence
+    // edge, d8 stated-band miss) AND renovation scope violations the
+    // pricer would otherwise silently clamp or auto-append. Warns never
+    // gate. Revisions are bounded — after REVISION_BUDGET rejections the
+    // next post is accepted_final and the deadline fallback still holds.
     const attempts = js.harnessAttempts ?? []
-    const gateGrade = gradeVerdict(buildHarnessEvidence(ctx), sel)
-    const gateFail = gateGrade.checks.d1 === 'fail' || gateGrade.checks.d2 === 'fail'
-    if (gateFail && attempts.length === 0) {
+    const evidence = buildHarnessEvidence(ctx)
+    const gateGrade = gradeVerdict(evidence, sel)
+    const checkFails = Object.entries(gateGrade.checks)
+      .filter(([, r]) => r === 'fail')
+      .map(([k]) => k)
+    const renoViolations: string[] = []
+    if (sel.renovation && evidence.renovationEvidence) {
+      const dry = priceAgentRenovation(sel.renovation, evidence.renovationEvidence)
+      for (const f of dry.flags) {
+        if (/auto_added|underbudget|overbudget|overcharge|cost_clamped/.test(f)) {
+          renoViolations.push(f)
+        }
+      }
+    }
+    const REVISION_BUDGET = 2
+    if ((checkFails.length > 0 || renoViolations.length > 0) && attempts.length < REVISION_BUDGET) {
+      const feedback = [
+        ...gateGrade.gateFeedback,
+        ...renoViolations.map((f) => `reno: ${f} — scope contradicts verified evidence; repost corrected line items`),
+      ]
       attempts.push({ selection: sel, grade: gateGrade, decision: 'rejected', at: new Date().toISOString() })
       js.harnessAttempts = attempts
       this.jobState = js
       await this.persistence.write(js)
       await this.pushEvent('harness_gate_rejected', {
         jobId: js.jobId,
-        checks: { d1: gateGrade.checks.d1, d2: gateGrade.checks.d2 },
+        checkFails,
+        renoViolations,
         failures: gateGrade.failures,
       })
       return Response.json({
         error: 'selection_rejected_by_gate',
         revisionAllowed: true,
-        attempt: 1,
-        checks: { d1: gateGrade.checks.d1, d2: gateGrade.checks.d2 },
+        attempt: attempts.length,
+        checkFails,
+        renoViolations,
         failures: gateGrade.failures,
-        feedback: gateGrade.gateFeedback,
+        feedback,
       }, { status: 422 })
     }
     attempts.push({

@@ -144,30 +144,29 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
 
   const bands = computeEvidenceBands(evidence.comps, evidence.subject)
 
-  // ── d1: right neighborhood — drivers-only, block group first ─────────────
-  // Hard fails belong to the top-3 pricing drivers only (the comps setting
-  // the evidence edges): an off-pocket driver fails while valid in-pocket
-  // comps go unpicked. Supporting picks (4+) off-pocket pass with a
-  // SUPPORTING_COMP_GEO_BLEED soft warning + a flat 0.1 score penalty.
+  // ── d1: right neighborhood — pricing weight, block group first ───────────
+  // Principle: ANY comp carrying pricing weight outside the operative
+  // pocket while in-pocket comps go unpicked is a violation — position in
+  // the list is irrelevant. Weight = the posted drivers (all of them);
+  // supporting picks off-pocket pass with a geo-bleed warning + penalty.
   const bgPool = new Set(evidence.comps.filter((c) => priceable(c) && inBg(c)).map((c) => c.id))
   const tractPool = new Set(evidence.comps.filter((c) => priceable(c) && inPocket(c, subjectTract)).map((c) => c.id))
   const pocketIds = bgPool.size > 0 ? bgPool : tractPool
   const pocketLabel = bgPool.size > 0 ? 'block group' : 'tract'
-  const topDrivers = drivers.slice(0, 3)
-  const topDriverIds = new Set(topDrivers.map((c) => c.id))
-  const offPocketDrivers = topDrivers.filter((c) => !pocketIds.has(c.id))
-  const offPocketSupporting = picks.filter((c) => !topDriverIds.has(c.id) && !pocketIds.has(c.id))
+  const weightedIds = new Set(drivers.map((c) => c.id))
+  const offPocketDrivers = drivers.filter((c) => !pocketIds.has(c.id))
+  const offPocketSupporting = picks.filter((c) => !weightedIds.has(c.id) && !pocketIds.has(c.id))
   const unpickedPocket = enabledUnpicked.filter((c) => pocketIds.has(c.id))
   if (offPocketDrivers.length > 0 && unpickedPocket.length > 0) {
     checks.d1 = 'fail'
     failures.push(bgPool.size > 0 ? 'd1_neighborhood_miss' : 'd1_off_tract_pick')
     for (const c of offPocketDrivers) {
       gateFeedback.push(
-        `d1: pricing driver ${c.id} (${c.address ?? 'unknown'}) is outside the subject ${pocketLabel} — ` +
+        `d1: pricing comp ${c.id} (${c.address ?? 'unknown'}) is outside the subject ${pocketLabel} — ` +
         `replace with an unpicked in-pocket comp (${unpickedPocket.length} remain: ${unpickedPocket.slice(0, 5).map((u) => u.id).join(', ')}${unpickedPocket.length > 5 ? ', …' : ''})`,
       )
     }
-  } else if (offPocketDrivers.length > topDrivers.length / 3) {
+  } else if (offPocketDrivers.length > drivers.length / 3) {
     checks.d1 = 'warn'
     failures.push('d1_thin_pocket_anchor')
   }
@@ -192,18 +191,36 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const statedMembers = new Map<string, BandName>()
   for (const bn of BAND_NAMES) {
     for (const id of statedEdges[bn]?.compIds ?? []) {
-      if (!byId.has(id)) { checks.d3 = 'fail'; failures.push(`d3_${bn}_unknown_member`); continue }
-      if (statedMembers.has(id)) { checks.d3 = 'fail'; failures.push(`d3_${id}_dual_membership`); continue }
+      if (!byId.has(id)) {
+        checks.d3 = 'fail'
+        failures.push(`d3_${bn}_unknown_member`)
+        gateFeedback.push(`d3: ${id} is in your ${bn} band compIds but is not in the evidence pool — remove it`)
+        continue
+      }
+      if (statedMembers.has(id)) {
+        checks.d3 = 'fail'
+        failures.push(`d3_${id}_dual_membership`)
+        gateFeedback.push(`d3: ${id} appears in two bands — every comp belongs to exactly one`)
+        continue
+      }
       statedMembers.set(id, bn)
       const c = byId.get(id)!
-      if (bn === 'arv' && asIsClassified(c)) { checks.d3 = 'fail'; failures.push('d3_as_is_in_arv_band') }
+      if (bn === 'arv' && asIsClassified(c)) {
+        checks.d3 = 'fail'
+        failures.push('d3_as_is_in_arv_band')
+        gateFeedback.push(`d3: ${id} (${c.address ?? 'unknown'}) is classified as-is — it cannot sit in the ARV band`)
+      }
     }
   }
 
   // ── d4: right ARV evidence ────────────────────────────────────────────────
-  if (drivers.some(asIsClassified)) {
+  const asIsDrivers = drivers.filter(asIsClassified)
+  if (asIsDrivers.length > 0) {
     checks.d4 = 'fail'
     failures.push('d4_as_is_driver')
+    for (const c of asIsDrivers) {
+      gateFeedback.push(`d4: pricing comp ${c.id} (${c.address ?? 'unknown'}) is classified as-is — as-is stock cannot drive an ARV verdict`)
+    }
   } else {
     const arvBandMembers = bands.arv.method === 'ok' ? new Set(bands.arv.memberIds) : new Set<string>()
     const driversWithEvidence = drivers.filter(carriesArvEvidence)
@@ -219,9 +236,13 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
 
   // ── d5: right rejections ─────────────────────────────────────────────────
   const trimmed = new Set(BAND_NAMES.flatMap((bn) => bands[bn].trimmedIds))
-  if (picks.some((c) => trimmed.has(c.id))) {
+  const trimmedPicks = picks.filter((c) => trimmed.has(c.id))
+  if (trimmedPicks.length > 0) {
     checks.d5 = 'fail'
     failures.push('d5_iqr_outlier_picked')
+    for (const c of trimmedPicks) {
+      gateFeedback.push(`d5: pick ${c.id} (${c.address ?? 'unknown'}) was IQR-trimmed from its band — its $/sf is a band outlier, remove it`)
+    }
   }
   const verifiedAnchors = enabledUnpicked.filter((c) =>
     carriesArvEvidence(c) && digestField(c, 'C', 'anchorQuality') === 'strong_anchor')
@@ -245,6 +266,7 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     if (selection.arv < lo || selection.arv > hi) {
       checks.d7 = 'fail'
       failures.push('d7_outside_evidence_edge')
+      gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the ARV evidence edge $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%) — re-anchor inside the verified band`)
     }
   } else {
     checks.d7 = 'skipped'
