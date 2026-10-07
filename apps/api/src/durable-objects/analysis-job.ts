@@ -35,7 +35,7 @@ import {
   resolveCandidateLimit,
   expansionRefetchRadius,
   isProvablyDeadComp,
-  rankEnrichmentCandidates,
+  enrichmentRankScore,
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
 import { bulkSaleIds, packageDeedIds } from '../services/appraisal/verification'
@@ -887,14 +887,16 @@ export class AnalysisJobDO {
       })
       // Stage-B digest — the moment geography resolves, Clef pre-reads the
       // block-group/neighborhood fit for every comp while the enrichment
-      // ladder runs beside it.
-      if (clefDigestsOn) {
+      // ladder runs beside it. The batch is ALSO awaited (bounded) below:
+      // its geo-fit/twin-fit/sanity reads rank the paid enrich queue.
+      const digestBPromise = clefDigestsOn
+        ? startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B')
+            .catch(() => new Map<string, CompDigest>())
+        : null
+      if (digestBPromise) {
         digestSubject.censusTract ??= subjectGeo.tract
         digestSubject.censusBlockGroup ??= subjectGeo.blockGroup
-        digestBPromiseParts.push(
-          startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B')
-            .catch(() => new Map()),
-        )
+        digestBPromiseParts.push(digestBPromise)
       }
       // ATTOM fallback for Census misses: geography-context ships censusTract
       // on the detail call anyway — spend one provider call on comps that
@@ -957,7 +959,41 @@ export class AnalysisJobDO {
         { name: 'neighborhood', comps: outside.filter(sameName) },
         { name: 'value_equivalent', comps: outside.filter((c) => !sameName(c) && isValueEquivalent(property, c)) },
       ]
+      // Clef-assisted enrich order — stage-B digest reads compose with the
+      // deterministic geo/distance/age rank before any provider spend. A
+      // slow or absent Clef keeps the deterministic order untouched.
+      let digestBMap: Map<string, CompDigest> | null = null
+      if (digestBPromise) {
+        digestBMap = await Promise.race([
+          digestBPromise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+        ])
+      }
+      const digestRankAdjust = (c: NormalizedComparable): number => {
+        const d = digestBMap?.get(String(c.id))
+        if (!d) return 0
+        if (d.priceSanity === 'data_error') return 10_000_000 // broken data sinks to the bottom
+        let adj = 0
+        if (d.priceSanity === 'suspicious') adj += 500_000
+        if (d.geoFit === 'distant') adj += 2_000_000
+        else if (d.geoFit === 'adjacent') adj += 400_000
+        else if (d.geoFit === 'block_group') adj -= 200_000
+        if (d.twinFit === 'poor') adj += 300_000
+        else if (d.twinFit === 'twin') adj -= 100_000
+        else if (d.twinFit === 'close') adj -= 50_000
+        return adj
+      }
+      const rankForEnrich = (list: NormalizedComparable[]) =>
+        list.slice().sort((a, b) =>
+          (enrichmentRankScore(property, a, nowMs) + digestRankAdjust(a))
+          - (enrichmentRankScore(property, b, nowMs) + digestRankAdjust(b))
+          || String(a.id).localeCompare(String(b.id)))
       const ENRICH_WAVE_SIZE = 6
+      // Sufficiency stop: enrich the ranked queue until the pool holds
+      // enough verified anchors (enriched comps carrying ARV evidence), not
+      // a fixed call count — thick markets spend less, scarce markets keep
+      // working to the spend backstop.
+      const MIN_VERIFIED_ANCHORS = 3
       const MAX_PAID_ENRICHMENTS = 25
       const enrichedById = new Map<string, NormalizedComparable>()
       let wonStep: number | null = null
@@ -986,7 +1022,7 @@ export class AnalysisJobDO {
           firstPasser ??= { step, scope: scope.name }
           // Enrich this step's passers closest-first, six at a time, and
           // check for ARV evidence after every wave.
-          let pending = rankEnrichmentCandidates(property, passers.filter((c) => !enrichedById.has(c.id)), nowMs)
+          let pending = rankForEnrich(passers.filter((c) => !enrichedById.has(c.id)))
           for (;;) {
             // Enrichment can reveal a hard-rule failure (style, foundation,
             // stories) the free data could not show — an enriched comp only
@@ -997,9 +1033,18 @@ export class AnalysisJobDO {
             const stillPassing = passers
               .map((c) => enrichedById.get(c.id) ?? c)
               .filter((c) => !evaluateComparable(property, c, stepFilters, []).shouldDisable)
-            const pocket = pocketPriceGroups(stillPassing, property)
-            const hit = stillPassing.some((c) => enrichedById.has(c.id) && arvEvidence(c, pocket) != null)
-            if (hit) { wonStep = step; wonScope = scope.name; break search }
+            // Anchors are counted across EVERYTHING enriched so far (any
+            // scope/step), judged against this step's pocket — an anchor
+            // found in a tighter scope still anchors the pool.
+            const poolForPocket = stillPassing.slice()
+            for (const c of enrichedById.values()) {
+              if (!poolForPocket.some((p) => p.id === c.id)) poolForPocket.push(c)
+            }
+            const pocket = pocketPriceGroups(poolForPocket, property)
+            const anchors = poolForPocket.filter((c) =>
+              enrichedById.has(c.id) && arvEvidence(c, pocket) != null)
+            if (anchors.length > 0 && wonStep == null) { wonStep = step; wonScope = scope.name }
+            if (anchors.length >= MIN_VERIFIED_ANCHORS) break search
             if (pending.length === 0 || enrichedById.size >= MAX_PAID_ENRICHMENTS) break
             const wave = pending.slice(0, Math.min(ENRICH_WAVE_SIZE, MAX_PAID_ENRICHMENTS - enrichedById.size))
             pending = pending.slice(wave.length)
