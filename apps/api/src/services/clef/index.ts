@@ -14,6 +14,7 @@
  */
 
 import type { Env } from '../../types'
+import { decisionsRun } from '../decisions'
 
 // Workers-AI reader names, the legacy OpenRouter lane, or whichever
 // reasoning model answered (e.g. 'claude-haiku-5-5' via Anthropic).
@@ -239,7 +240,8 @@ function scoreIdx(v: unknown): { idx: number; score: number } {
 }
 
 export function isClefAvailable(env: Env): boolean {
-  return typeof env.AI?.run === 'function'
+  return typeof env.AI?.run === 'function' ||
+    (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY)
 }
 
 export async function classifyCompCondition(
@@ -266,12 +268,20 @@ export async function classifyCompCondition(
   }
 
   const started = Date.now()
-  const res = (await env.AI.run(`@cf/cloudflare/${model}`, {
-    model,
-    state,
-    questions: CONDITION_QUESTIONS,
-    ...(input.images?.length ? { images: input.images.slice(0, 4) } : {}),
-  })) as { model?: string; answers?: Record<string, unknown> }
+  // 'decisions' lane — same questions through OpenAI's dedicated endpoint.
+  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  const res: { model?: string; answers?: Record<string, unknown> } = useDecisions
+    ? { ...(await decisionsRun(env, {
+        state,
+        questions: CONDITION_QUESTIONS,
+        images: input.images?.slice(0, 4) as Array<{ content_type?: string; base64: string }> | undefined,
+      })), model: env.DECISIONS_MODEL || 'gpt-6-luna' }
+    : ((await env.AI.run(`@cf/cloudflare/${model}`, {
+        model,
+        state,
+        questions: CONDITION_QUESTIONS,
+        ...(input.images?.length ? { images: input.images.slice(0, 4) } : {}),
+      })) as { model?: string; answers?: Record<string, unknown> })
 
   const answers = res?.answers ?? {}
   const { idx, score } = scoreIdx(answers.condition)
@@ -307,7 +317,7 @@ export async function classifyCompCondition(
     conditionLabel: CONDITION_SCALE[clamped].split(' — ')[0],
     confidence: typeof conf === 'number' ? conf : undefined,
     hint,
-    model,
+    model: (res?.model ?? model) as ClefModel,
     modelVersion: res?.model ?? model,
     durationMs: Date.now() - started,
   }

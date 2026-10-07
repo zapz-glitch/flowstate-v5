@@ -433,9 +433,10 @@ export async function gatherCompConditionEvidence(
     }).catch(() => null)
   }
   if (evidence.condition) {
-    // Clef models stamp 'clef_*'; the reasoning lane (luna or haiku,
-    // whichever provider answered) stamps 'reasoning_*'.
-    const source = evidence.condition.model?.startsWith('clef') ? 'clef' : 'reasoning'
+    // clef_* = Workers-AI reader · decisions_* = OpenAI Decisions lane ·
+    // reasoning_* = whichever reasoning model answered (luna/haiku).
+    const m = evidence.condition.model ?? ''
+    const source = m.startsWith('clef') ? 'clef' : m === 'gpt-6-luna' ? 'decisions' : 'reasoning'
     if (evidence.condition.investorLanguageProbability >= 0.5) {
       evidence.investorSignalSources.push(`${source}_noul`)
     }

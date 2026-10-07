@@ -100,6 +100,10 @@ export interface Env {
   ANTHROPIC_API_KEY?: string
   REASONING_PROVIDER?: string // 'anthropic' | 'openrouter' | unset → anthropic when ANTHROPIC_API_KEY set
   REASONING_MODEL?: string // default 'claude-haiku-5-5'
+  // ─── Condition-reader lane ───
+  /** 'decisions' routes Clef reads through the OpenAI Decisions API; unset → Workers AI Clef */
+  CONDITION_READER?: string
+  DECISIONS_MODEL?: string // default 'gpt-6-luna'
   /** Model for comp selection — stronger reasoning (e.g., 'anthropic/claude-sonnet-4', 'google/gemini-2.5-pro-preview') */
   COMP_SELECTION_MODEL?: string
   /** Model for market context web search — fast/cheap (e.g., 'google/gemini-2.0-flash-001') */

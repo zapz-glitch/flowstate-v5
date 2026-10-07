@@ -17,6 +17,7 @@
  */
 
 import { createReasoningProvider, isReasoningProviderAvailable } from '../llm'
+import { decisionsRun } from '../decisions'
 import { fetchImageAsBase64, type FetchedImage } from '../llm/image-utils'
 import { REHAB_LEVELS } from '../valuation/types'
 
@@ -155,6 +156,10 @@ export interface RenovationEnv {
   REASONING_MODEL?: string
   /** Workers AI binding — Clef is the subject's primary reader. */
   AI?: import('../../types').Env['AI']
+  /** 'decisions' routes subject reads through the OpenAI Decisions API. */
+  CONDITION_READER?: string
+  OPENAI_API_KEY?: string
+  DECISIONS_MODEL?: string
 }
 
 const ROOM_CONDITIONS = ['excellent', 'good', 'dated', 'poor', 'failed', 'not_visible']
@@ -281,7 +286,8 @@ async function runClefChunkReads(
   propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
 ): Promise<ClefChunkRead> {
   const ai = env.AI
-  if (!ai) return { answers: [], chunksRead: 0 }
+  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  if (!ai && !useDecisions) return { answers: [], chunksRead: 0 }
   const model = '@cf/cloudflare/clef-flash'
   const questions = {
     renovation_level: {
@@ -351,16 +357,27 @@ async function runClefChunkReads(
   // averaged across chunks into one verdict.
   const chunks: FetchedImage[][] = []
   for (let i = 0; i < live.length; i += CLEF_MAX_PHOTOS) chunks.push(live.slice(i, i + CLEF_MAX_PHOTOS))
+  const state = {
+    subject: 'Subject-property renovation assessment for a fix-and-flip appraisal.',
+    property: {
+      address: propertyContext.address ?? null,
+      squareFeet: propertyContext.squareFeet ?? null,
+      yearBuilt: propertyContext.yearBuilt ?? null,
+    },
+  }
+  // Decisions lane — one request for ALL photos (≤128) instead of per-chunk calls.
+  if (useDecisions) {
+    const res = await decisionsRun(env, {
+      state,
+      questions: questions as Parameters<typeof decisionsRun>[1]['questions'],
+      images: live.slice(0, 128).map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
+    }).catch(() => null)
+    const answers = res?.answers ? [res.answers as ClefAnswerMap] : []
+    return { answers, chunksRead: chunks.length }
+  }
   const calls = await Promise.all(chunks.map((chunk) =>
-    ai.run(model, {
-      state: {
-        subject: 'Subject-property renovation assessment for a fix-and-flip appraisal.',
-        property: {
-          address: propertyContext.address ?? null,
-          squareFeet: propertyContext.squareFeet ?? null,
-          yearBuilt: propertyContext.yearBuilt ?? null,
-        },
-      },
+    ai!.run(model, {
+      state,
       questions,
       images: chunk.map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
     }).then((r) => r as { answers?: ClefAnswerMap }).catch(() => null),
