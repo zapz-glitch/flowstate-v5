@@ -21,7 +21,7 @@
 import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, type ClefImage, type CompConditionResult } from '../clef'
-import { createLLMProvider } from '../llm'
+import { createReasoningProvider } from '../llm'
 
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // Clef per-image cap
@@ -241,13 +241,11 @@ async function classifyCompConditionLuna(
   env: Env,
   input: Parameters<typeof classifyCompCondition>[1],
 ): Promise<CompConditionResult | null> {
-  if (!env.OPENROUTER_API_KEY) return null
+  // Reasoning lane — Anthropic Haiku when configured, OpenRouter luna
+  // otherwise (this function remains the Clef fallback either way).
   const model = env.VISION_MODEL || env.OPENROUTER_MODEL || LUNA_COMP_MODEL
-  const provider = createLLMProvider({
-    provider: 'openrouter',
-    apiKey: env.OPENROUTER_API_KEY,
-    model,
-  })
+  const provider = createReasoningProvider(env, model)
+  if (!provider) return null
   const context =
     `Property: ${input.address ?? 'unknown'}${input.salePrice ? ` — sold $${input.salePrice.toLocaleString()}` : ''}` +
     `${input.yearBuilt ? `, built ${input.yearBuilt}` : ''}${input.squareFeet ? `, ${input.squareFeet}sf` : ''}\n` +
@@ -264,7 +262,7 @@ async function classifyCompConditionLuna(
   if (!res.success || !res.data?.content) return null
   const parsed = parseLunaCompCondition(res.data.content)
   if (!parsed) return null
-  return { ...parsed, model: LUNA_COMP_MODEL, modelVersion: model, durationMs: Date.now() - started }
+  return { ...parsed, model: provider.model, modelVersion: model, durationMs: Date.now() - started }
 }
 
 export async function gatherCompConditionEvidence(
@@ -435,15 +433,18 @@ export async function gatherCompConditionEvidence(
     }).catch(() => null)
   }
   if (evidence.condition) {
+    // Clef models stamp 'clef_*'; the reasoning lane (luna or haiku,
+    // whichever provider answered) stamps 'reasoning_*'.
+    const source = evidence.condition.model?.startsWith('clef') ? 'clef' : 'reasoning'
     if (evidence.condition.investorLanguageProbability >= 0.5) {
-      evidence.investorSignalSources.push(evidence.condition.model === 'openai/gpt-6-luna' ? 'luna_noul' : 'clef_noul')
+      evidence.investorSignalSources.push(`${source}_noul`)
     }
     if (evidence.condition.tier === 'investor') {
-      evidence.investorSignalSources.push(evidence.condition.model === 'openai/gpt-6-luna' ? 'luna_tier' : 'clef_tier')
+      evidence.investorSignalSources.push(`${source}_tier`)
     }
     evidence.investorSignal ||= evidence.investorSignalSources.length > 0
   } else {
-    evidence.skippedReason = clefReady ? 'clef+luna failed' : 'no condition reader'
+    evidence.skippedReason = clefReady ? 'clef+reasoning failed' : 'no condition reader'
   }
   if (evidence.condition?.hint) evidence.hint = evidence.condition.hint
 

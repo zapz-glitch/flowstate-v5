@@ -15,7 +15,7 @@
  */
 
 import { MAJOR_ITEMS, type MajorItem, type MajorItemId } from '../valuation/types'
-import { createOpenRouterProvider } from '../llm'
+import { createReasoningProvider } from '../llm'
 import type { Env } from '../../types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ export async function classifyRehabIntel(
   enabledItems: Array<{ id: string; name: string; cost: number; reason: string }>,
 ): Promise<{ additions: RehabAddition[]; advisories: RehabAdvisory[] }> {
   const empty = { additions: [], advisories: [] }
-  if (!env.OPENROUTER_API_KEY || notes.length === 0) return empty
+  if (notes.length === 0) return empty
 
   const enabledList = enabledItems.length
     ? enabledItems.map((i) => `${i.id} (${i.name}) — $${i.cost} — ${i.reason}`).join('\n')
@@ -175,11 +175,8 @@ Rules:
 - Empty arrays are valid. Maximum 4 additions, 4 advisories.`
 
   try {
-    const provider = createOpenRouterProvider({
-      apiKey: env.OPENROUTER_API_KEY,
-      model: env.OPENROUTER_MODEL ?? 'google/gemini-2.5-flash',
-      maxTokens: 600,
-    })
+    const provider = createReasoningProvider(env, env.OPENROUTER_MODEL ?? 'google/gemini-2.5-flash')
+    if (!provider) return empty
     const result = await provider.execute({
       prompt,
       responseFormat: 'json',

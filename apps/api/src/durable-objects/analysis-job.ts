@@ -1639,7 +1639,7 @@ export class AnalysisJobDO {
         // Sale-date fill for undated in-pocket comps — MLS sale history via
         // the listing-details fetch (best-effort; an undated comp ATTOM
         // included stays usable either way, in disclosure states or not).
-        this.env.FIRECRAWL_API_KEY && this.env.OPENROUTER_API_KEY
+        this.env.FIRECRAWL_API_KEY && (this.env.ANTHROPIC_API_KEY || this.env.OPENROUTER_API_KEY)
           ? async (comp: NormalizedComparable) => {
               const r = await fetchRedfinPropertyDetails(this.env, {
                 propertyId: comp.id, address: comp.address,

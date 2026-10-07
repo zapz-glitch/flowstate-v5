@@ -16,7 +16,7 @@
  *   continues without an invented level
  */
 
-import { createLLMProvider } from '../llm'
+import { createReasoningProvider, isReasoningProviderAvailable } from '../llm'
 import { fetchImageAsBase64, type FetchedImage } from '../llm/image-utils'
 import { REHAB_LEVELS } from '../valuation/types'
 
@@ -149,6 +149,10 @@ export interface RenovationEnv {
   VISION_MODEL?: string
   /** Reasoning effort for the vision call (low|medium|high|xhigh|max) — default medium. */
   VISION_REASONING_EFFORT?: string
+  /** Anthropic direct — the reasoning lane (tier verdicts) when configured. */
+  ANTHROPIC_API_KEY?: string
+  REASONING_PROVIDER?: string
+  REASONING_MODEL?: string
   /** Workers AI binding — Clef is the subject's primary reader. */
   AI?: import('../../types').Env['AI']
 }
@@ -653,7 +657,7 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  if (!env.OPENROUTER_API_KEY && !env.AI && !providerOverride) {
+  if (!isReasoningProviderAvailable(env) && !env.AI && !providerOverride) {
     return {
       ...base,
       status: 'unavailable',
@@ -663,14 +667,11 @@ export async function assessRenovationFromPhotos(
     }
   }
 
+  // Reasoning lane — Anthropic Haiku when configured, otherwise the
+  // OpenRouter model this call site has always used (gpt-6-luna).
   const provider =
     providerOverride ??
-    createLLMProvider({
-      provider: 'openrouter',
-      apiKey: env.OPENROUTER_API_KEY as string,
-      // Luna is the fallback reader — same chain as the comp lane.
-      model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'openai/gpt-6-luna',
-    })
+    createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'openai/gpt-6-luna')
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
 
@@ -699,13 +700,24 @@ export async function assessRenovationFromPhotos(
     .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
   const mergedClef = mergedClefAssessment(clef.answers, live)
   if (mergedClef) {
-    const luna = await assessViaLunaEvidence(provider, clef, live, propertyContext ?? {})
-      .catch(() => null)
+    const luna = provider
+      ? await assessViaLunaEvidence(provider, clef, live, propertyContext ?? {}).catch(() => null)
+      : null
     if (luna) {
       if (!luna.curbAppeal && mergedClef.curbAppeal) luna.curbAppeal = mergedClef.curbAppeal
       return luna
     }
     return mergedClef
+  }
+
+  if (!provider) {
+    return {
+      ...base,
+      status: 'unavailable',
+      photosExamined: live.length,
+      error: 'No reasoning provider configured',
+      limitations: ['Reasoning provider not configured'],
+    }
   }
 
   let prompt = ''
@@ -873,13 +885,9 @@ export async function assessCompCurbAppeal(
   const base: CurbAppealCheck = { condition: 'unknown', source: 'vision', confidence: null, summary: null, photosExamined: photos.length }
 
   if (photos.length < CURB_APPEAL_MIN_PHOTOS) return { ...base, summary: 'Insufficient photos' }
-  if (!env.OPENROUTER_API_KEY) return { ...base, summary: 'Vision provider not configured' }
 
-  const provider = createLLMProvider({
-    provider: 'openrouter',
-    apiKey: env.OPENROUTER_API_KEY as string,
-    model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
-  })
+  const provider = createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash')
+  if (!provider) return { ...base, summary: 'Vision provider not configured' }
 
   const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))
   const live = fetched.filter((f): f is FetchedImage => f != null && f.size > 0)

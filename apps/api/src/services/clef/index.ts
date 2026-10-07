@@ -15,7 +15,9 @@
 
 import type { Env } from '../../types'
 
-export type ClefModel = 'clef' | 'clef-flash' | 'openai/gpt-6-luna'
+// Workers-AI reader names, the legacy OpenRouter lane, or whichever
+// reasoning model answered (e.g. 'claude-haiku-5-5' via Anthropic).
+export type ClefModel = 'clef' | 'clef-flash' | 'openai/gpt-6-luna' | (string & {})
 
 export interface ClefImage {
   content_type: 'image/png' | 'image/jpeg' | 'image/webp'

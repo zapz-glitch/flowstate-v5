@@ -64,6 +64,7 @@ import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, unavailableAssessment, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
+import { isReasoningProviderAvailable } from '../llm'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
 import {
@@ -778,7 +779,7 @@ export async function performAnalysisPhase1(
   )
   const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
 
-  const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY)
+  const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
         (): RedfinDetailsResult => ({ details: null, skippedReason: 'fetch_failed' }),
@@ -1093,7 +1094,7 @@ export async function performAnalysisPhase1(
           hint: ev.hint ? { priceSanity: ev.hint.priceSanity, anchorQuality: ev.hint.anchorQuality } : undefined,
           source: 'vision',
           confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
-          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${c.model === 'openai/gpt-6-luna' ? ' · luna' : ''}${ev.listing.description ? ' · listing text available' : ''}`,
+          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${c.model && !c.model.startsWith('clef') ? ` · ${c.model}` : ''}${ev.listing.description ? ' · listing text available' : ''}`,
           photosExamined: ev.listing.photoCount,
         }
         // Sqft cross-check — Zillow counts finished basement/upper floors
