@@ -56,6 +56,7 @@ import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 import { gradeVerdict } from './verdict-grade'
+import { buildRenovationEvidence, priceAgentRenovation } from './renovation'
 import { computeEvidenceBands, type EvidenceBands } from '@flowstate-api/shared/appraisal'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
@@ -236,6 +237,9 @@ export interface EvaluationRunEvidence {
   attempts: EvaluationAttemptRecord[]
   /** Present when the agent drove comp selection — the posted verdict. */
   agentSelection?: AgentSelection
+  /** Renovation engine record — the agent's posted scope and the
+   *  deterministic pricing of it (audit trail + flags). */
+  renovation?: { posted: import('./renovation').AgentRenovation; priced: import('./renovation').PricedRenovation }
   /** Decision-level grade of whoever posted the selection (agent or the
    *  deterministic fallback) — docs/BANDING-VERIFICATION-SPEC.md §4. */
   verdictGrade?: import('./verdict-grade').VerdictGrade
@@ -1317,6 +1321,13 @@ export async function performAnalysisPhase2(
   const appraisalService = createAppraisalService()
   const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
   const buybox = params.buybox ?? {}
+  // Renovation engine — the agent's posted line-item scope is priced
+  // deterministically against the same evidence it judged (fail-open:
+  // omissions are appended, outlier costs clamped, all flagged). The priced
+  // total replaces the flat tier × $/sf base rehab in valuation.
+  const pricedReno = agentSelection?.renovation
+    ? priceAgentRenovation(agentSelection.renovation, buildRenoEvidence(ctx, compClassifications))
+    : null
   let prevStepAt = Date.now()
   const step = (name: string, status: ReportStep['status'], detail?: string) => {
     const now = Date.now()
@@ -1477,8 +1488,11 @@ export async function performAnalysisPhase2(
         compAvgSqft,
         rehabLevelIndex: derivedBuybox.rehabLevelIndex,
         skipBaseRehab: derivedBuybox.renovatedVerified === true,
+        rehabBaseOverride: pricedReno?.total,
         locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, valuationAnchor, params.proximityConfig),
-        majorItems: derivedBuybox.majorItems,
+        // A priced agent scope already includes mandatory items — pass an
+        // empty set so permit adders don't double-count.
+        majorItems: pricedReno ? [] : derivedBuybox.majorItems,
         additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
         closingCostsPercent: buybox.closingCostsPercent ?? 8,
         carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
@@ -1517,6 +1531,28 @@ export async function performAnalysisPhase2(
     } else if (bResult.arv == null && !insufficient) {
       step('set_b_arv', 'skipped', 'Set-B produced no ARV — no anchor produced')
     }
+  }
+
+  // Renovation engine — when the agent posted a scope but the anchor didn't
+  // move (agent ARV equals the pre-B anchor), the valuation above never
+  // re-ran. Recompute it once with the priced scope as the base rehab.
+  if (pricedReno != null && valuationAnchor != null && valuation?.totalRehabCost !== pricedReno.total) {
+    valuation = valuationService.calculateValuation({
+      arv: valuationAnchor,
+      subjectSqft,
+      compAvgSqft,
+      rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+      skipBaseRehab: false,
+      rehabBaseOverride: pricedReno.total,
+      locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, valuationAnchor, params.proximityConfig),
+      majorItems: [],
+      additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
+      closingCostsPercent: buybox.closingCostsPercent ?? 8,
+      carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+      wholesaleFee: buybox.wholesaleFee ?? 10000,
+      desiredProfit: buybox.desiredProfit,
+    })
+    step('renovation_scope', 'completed', `Agent Path-${pricedReno.pathUsed} scope: $${pricedReno.total.toLocaleString()} (${pricedReno.audit[0] ?? ''})`)
   }
 
   // A Set-B widen can append comps after the overlapping Redfin batch began.
@@ -1674,6 +1710,14 @@ export async function performAnalysisPhase2(
       source: 'agent',
       pocketScore: agentSelection.pocketScore ?? null,
       dealEconomics: agentSelection.dealEconomics ?? null,
+      ...(pricedReno ? {
+        renovation: {
+          pathUsed: pricedReno.pathUsed,
+          total: pricedReno.total,
+          items: pricedReno.items.map((i) => ({ item: i.item, action: i.action, category: i.category, cost: i.resolvedCost, source: i.source })),
+          flags: pricedReno.flags,
+        },
+      } : {}),
       ...(agentSelection.notes ? { notes: agentSelection.notes } : {}),
     }
   }
@@ -1696,6 +1740,9 @@ export async function performAnalysisPhase2(
       bAttemptTrail,
       attempts: bAttempts,
       ...(agentSelection ? { agentSelection } : {}),
+      ...(pricedReno && agentSelection?.renovation
+        ? { renovation: { posted: agentSelection.renovation, priced: pricedReno } }
+        : {}),
       // Fail-open verdict grade — agent selections grade on their posted
       // verdict; a deterministic-fallback run synthesizes the equivalent
       // selection from its own B result so it is graded the same way
@@ -1955,6 +2002,10 @@ export interface AgentSelection {
   pocketScore?: number | null
   /** Deal-economics classification prose — rides the report when present. */
   dealEconomics?: string | null
+  /** Renovation scope — the agent's posted line-item budget (renovation
+   *  engine, docs/RENOVATION-ENGINE-RULESET.md). Priced deterministically
+   *  against renovationEvidence at resume; absent = deterministic tier math. */
+  renovation?: import('./renovation').AgentRenovation
   /** Free-text verdict summary for the run record. */
   notes?: string
 }
@@ -1998,6 +2049,18 @@ export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComp
     }
   }
   if (!['high', 'medium', 'low'].includes(sel.conf)) fails.push('conf must be high|medium|low')
+  if (sel.renovation != null) {
+    if (sel.renovation.pathUsed !== 'A' && sel.renovation.pathUsed !== 'B') fails.push('renovation.pathUsed must be A|B')
+    const items = sel.renovation.lineItems
+    if (!Array.isArray(items) || items.length === 0) fails.push('renovation.lineItems must be a non-empty array')
+    else {
+      if (items.length > 100) fails.push('renovation.lineItems exceeds 100 items')
+      for (const li of items) {
+        if (typeof li.item !== 'string' || !li.item) fails.push('renovation item missing item id')
+        if (typeof li.cost !== 'number' || !Number.isFinite(li.cost) || li.cost < 0) fails.push(`renovation item ${li.item} has invalid cost`)
+      }
+    }
+  }
   // Persisted verbatim into runEvidence — bound the fields the report keeps.
   if (typeof sel.notes === 'string' && sel.notes.length > 4_000) fails.push('notes exceeds 4000 chars')
   if (typeof sel.dealEconomics === 'string' && sel.dealEconomics.length > 1_000) fails.push('dealEconomics exceeds 1000 chars')
@@ -2039,6 +2102,9 @@ export function adaptAgentSelection(
 export interface HarnessEvidence {
   jobId: string
   subject: ReturnType<typeof buildBSubjectFields> & { address?: string | null; id?: string }
+  /** Renovation evidence — zone grades, description claims, permit ledger,
+   *  seller notes, finish parity, flip-delta + cost schedule (advisory). */
+  renovationEvidence?: import('./renovation').RenovationEvidence
   comps: Array<BComp & { id: string; salePriceFormatted?: string }>
   suggestedSelection: string[]
   classifications: Record<string, ClassificationResult>
@@ -2056,6 +2122,50 @@ export interface HarnessEvidence {
   steps: ReportStep[]
 }
 
+/** Renovation evidence from the frozen phase-1 context — the four data
+ *  points (subject listing claims, permit ledger, seller notes, vision zones)
+ *  plus finish parity, flip-delta, and the effective cost schedule. */
+export function buildRenoEvidence(
+  ctx: Phase1Context,
+  compClassifications: Map<string, ClassificationResult>,
+): import('./renovation').RenovationEvidence {
+  return buildRenovationEvidence({
+    renovation: ctx.renovation,
+    subjectDescription: ctx.photoBundle?.subject?.description ?? null,
+    subjectFeatures: ctx.photoBundle?.subject?.features ?? [
+      ...(ctx.subjectListingDetails?.details?.interiorFeatures ?? []),
+      ...(ctx.subjectListingDetails?.details?.exteriorFeatures ?? []),
+      ...(ctx.subjectListingDetails?.details?.flooring ?? []),
+      ctx.subjectListingDetails?.details?.roof,
+      ctx.subjectListingDetails?.details?.heating,
+      ctx.subjectListingDetails?.details?.cooling,
+      ctx.subjectListingDetails?.details?.foundation,
+    ].filter((s): s is string => typeof s === 'string' && s.length > 0),
+    permits: ctx.bundle.enrichment.permits?.items,
+    majorItems: ctx.derivedBuybox.majorItems,
+    rehabAdditions: ctx.rehabAdditions,
+    rehabAdvisories: ctx.rehabAdvisories,
+    arvCompDescriptions: ctx.appraisalResult.comparables
+      .filter((c) => {
+        const cls = compClassifications.get(c.id)
+        return cls?.classification === 'after_renovation' || ctx.compCurbAppeal?.[c.id]?.condition === 'renovated'
+      })
+      .map((c) => ({
+        compId: c.id,
+        description: [
+          ...(c.listingDetails?.interiorFeatures ?? []),
+          ...(c.listingDetails?.flooring ?? []),
+          ...(c.listingDetails?.appliances ?? []),
+          ...(c.listingDetails?.exteriorFeatures ?? []),
+          c.listingDetails?.roof, c.listingDetails?.heating, c.listingDetails?.cooling,
+        ].filter((s): s is string => typeof s === 'string').join('. ') || null,
+      })),
+    flipPairs: ctx.appraisalResult.comparables
+      .filter((c) => c.flip?.priorSalePrice && c.salePrice && c.squareFeet)
+      .map((c) => ({ compId: c.id, buy: c.flip!.priorSalePrice, resale: c.salePrice!, sqft: c.squareFeet! })),
+  })
+}
+
 export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   const compClassifications = new Map(ctx.compClassifications)
   const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests)
@@ -2067,6 +2177,7 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
       id: ctx.bundle.property.id,
     },
     comps: ctx.appraisalResult.comparables.map((comp, i) => ({ id: comp.id, ...bcomps[i]! })),
+    renovationEvidence: buildRenoEvidence(ctx, compClassifications),
     suggestedSelection: ctx.appraisalResult.selectedCompIds ?? [],
     classifications: Object.fromEntries(compClassifications),
     classificationSummary: ctx.classificationSummary ?? null,

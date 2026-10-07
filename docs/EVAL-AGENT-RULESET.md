@@ -348,3 +348,73 @@ The harness also owns the classification that used to render server-side
 - Both ride the saved report next to your verdict. If evidence is thin,
   say so in the score — don't grade on what you wished the pocket looked
   like.
+
+## 11. The renovation scope — the second verdict
+
+The evidence bundle carries `renovationEvidence` — the four data points a
+human underwriter reads plus the pricing context:
+
+- `zoneGrades` — Clef/Luna's per-zone photo reads (kitchen, baths,
+  flooring, walls/ceilings, exterior) + system and structural concerns.
+- `pathGate` — `photoConfidence` and `readableZones` with a recommended
+  path. ≥70% confidence and ≥4 readable zones → Path A (custom scope).
+  Otherwise Path B (zip $/sf fallback).
+- `descriptionClaims` — year-anchored work claims pulled from the
+  subject's listing text ("roof replaced in 2019").
+- `permitLedger` — every major item with its age threshold, newest
+  matching permit year, and status: `credited` (verified in window →
+  charge $0), `past_threshold` (must charge), `unknown`.
+- `sellerNoteClaims` — realtor notes parsed into additions and
+  advisories. Notes only ever add scope.
+- `finishParity` — finish keywords the pocket's ARV comps advertise vs
+  what the subject has. Items missing on the subject are your cosmetic
+  upgrade list.
+- `flipDelta` — the local rehab $/sf measured from verified flip pairs in
+  this pool. `pathBRates.flipDeltaPerSqft` is the Path-B rate.
+- `costSchedule` — effective per-item costs (user overrides applied).
+
+Post a `renovation` object inside your selection:
+
+```json
+{
+  "renovation": {
+    "pathUsed": "A",
+    "lineItems": [
+      { "item": "roof", "action": "replace", "category": "capex",
+        "uadFrom": "C4", "uadTo": "C2", "spec": "arch shingle, tear-off",
+        "cost": 11500, "source": "permit" },
+      { "item": "kitchen", "action": "upgrade", "category": "cosmetic",
+        "uadFrom": "C3", "uadTo": "C2", "spec": "LVP + quartz parity",
+        "cost": 14000, "source": "parity" }
+    ],
+    "contingencyPct": 15,
+    "totalEstimate": 29400,
+    "notes": "one line on the scope"
+  }
+}
+```
+
+Rules:
+
+- **Path A** (zone reads support it): itemize the scope — CapEx items
+  (permit-ledger mandatory + structural/system concerns) and cosmetic
+  items (zone grades + finish-parity gaps) as separate `category` values.
+  `base_scope` is allowed as a single item for broad cosmetic work the
+  zones justify but don't quantify.
+- **Path B** (thin photo coverage): post `base_scope` with
+  `cost = subjectSqft × rate` — flip-delta rate first, your judgment of
+  the zone evidence second. Still post every mandatory permit item.
+- **Every line item** maps a UAD move (`uadFrom` → `uadTo`) — the scope
+  must literally construct the ARV condition your comps prove.
+- **Dated description claims** credit an item at repair tier (not $0 —
+  permits are the only $0 credit). Undated claims are advisory.
+- **Recondition ≠ replace** — a serviced or recently repaired system
+  charges the repair/recondition cost, not full replacement.
+- The harness prices your posted scope against `costSchedule`
+  deterministically: omitted mandatory permit items are appended, costs
+  outside 0.4×–2.5× of schedule are clamped, user overrides are
+  enforced. `totalEstimate` diverging >15% from the priced total is
+  flagged on the run record — price to the schedule, adjust by judgment
+  inside the band.
+- Omit `renovation` entirely to leave the deterministic tier × $/sf math
+  in place — only post a scope when the evidence supports one.
