@@ -98,12 +98,10 @@ export default function Sidebar() {
   const pathname = usePathname()
   const { user } = useUser()
   const { theme, setTheme } = useTheme()
-  const { collapsed: collapsedPref, toggleCollapsed } = useSidebar()
   // Hover-expand — hovering the collapsed rail temporarily opens it;
   // leaving collapses back after a beat. The stored pref stays collapsed.
-  const [hoverExpanded, setHoverExpanded] = useState(false)
+  const { collapsed, collapsedPref, setHoverExpanded, toggleCollapsed } = useSidebar()
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const collapsed = collapsedPref && !hoverExpanded
   // Derived boolean atom — sidebar re-renders only when a run starts/ends,
   // not on every analysis atom write during a live run.
   const isAnalysisRunning = useAtomValue(isAnalysisRunningAtom)

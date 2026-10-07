@@ -3,7 +3,10 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 
 interface SidebarContextType {
+  // What is on screen right now: the stored choice, opened while the rail is hovered.
   collapsed: boolean
+  collapsedPref: boolean
+  setHoverExpanded: (expanded: boolean) => void
   setCollapsed: (collapsed: boolean) => void
   toggleCollapsed: () => void
 }
@@ -11,7 +14,10 @@ interface SidebarContextType {
 const SidebarContext = createContext<SidebarContextType | undefined>(undefined)
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsedPref, setCollapsed] = useState(false)
+  // Hover-expand lives here so the page moves over with the rail instead of sitting under it.
+  const [hoverExpanded, setHoverExpanded] = useState(false)
+  const collapsed = collapsedPref && !hoverExpanded
 
   useEffect(() => {
     const stored = localStorage.getItem('sidebar-collapsed')
@@ -19,13 +25,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const toggleCollapsed = () => {
-    const newState = !collapsed
+    const newState = !collapsedPref
     setCollapsed(newState)
     localStorage.setItem('sidebar-collapsed', String(newState))
   }
 
   return (
-    <SidebarContext.Provider value={{ collapsed, setCollapsed, toggleCollapsed }}>
+    <SidebarContext.Provider value={{ collapsed, collapsedPref, setCollapsed, setHoverExpanded, toggleCollapsed }}>
       {children}
     </SidebarContext.Provider>
   )

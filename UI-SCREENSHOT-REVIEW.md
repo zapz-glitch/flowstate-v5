@@ -222,3 +222,10 @@ Requirement: title only, buttons stay, remove unhelpful info.
 Defects found: Offers/Analytics titles sat ~8px above the sidebar logo line (band top padding dropped). Evaluation Settings overflows sideways at 390 (tab row, not the header).
 Fixed: restored band top padding; titles now line up at the logo line.
 Gate: 18/21 checked. Unchecked: hover and selected states (header has none; buttons unchanged), photographs (n/a). Open: Evaluation Settings tab row at 390.
+
+### 2026-10-07 — Neutral widened-rules note; mini sidebar pushes the page
+Screenshots: `~/code/ui-shots/notice-*` (light 1440, dark 1440, light 820) · `side-mini-*` / `side-hover-*` (light, dark 1440)
+Requirement: the "No ARV evidence — rules had to be widened" note uses a neutral color; hovering the mini sidebar moves the page over instead of covering it.
+Defects found: none. No saved report shows the note, so the screenshots fake the flag in the browser's copy of the report only.
+Fixed: note is a gray box with ink text (was amber/red). Hover state moved into the sidebar provider; rail and page padding go 72px → 256px together and back on leave.
+Gate: light and dark, desktop and narrow, no sideways scroll. Not screenshotted: Offers detail page (reads the same setting). Open: page content shifts on each hover.

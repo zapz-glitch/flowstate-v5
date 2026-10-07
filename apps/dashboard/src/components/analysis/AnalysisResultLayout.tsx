@@ -158,14 +158,11 @@ export function AnalysisResultLayout({
       ) : null}
 
       {/* Widened-rules warning · shown only when the search had to stretch its rules to look for ARV
-          evidence and still found none (amber: once or twice, red: further). The plain "no ARV evidence
+          evidence and still found none. Neutral on purpose: it is a note, not an alarm. The plain "no ARV evidence
           in the verified pool" note, with no widening, was removed: it warned about nothing. */}
       {subject && !isStreaming && comps?.insufficientComps === true && (comps?.retrieval?.paramFlex?.extensions ?? 0) > 0 ? (() => {
-        const extensions = comps?.retrieval?.paramFlex?.extensions ?? 0
-        const tone = extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
-          : 'text-red-400 border-red-400/30 bg-red-400/5'
         return (
-          <div data-notice className={`border rounded-sm px-4 py-3 ${tone}`}>
+          <div data-notice className="border border-border rounded-sm px-4 py-3 bg-secondary/40 text-foreground">
             <div className="text-sm font-semibold">No ARV evidence — rules had to be widened</div>
             <p className="text-xs text-foreground-secondary mt-0.5">
               {comps?.retrieval?.paramFlex?.concessions?.length
