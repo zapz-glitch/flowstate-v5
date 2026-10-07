@@ -159,7 +159,14 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const enabledUnpicked = evidence.comps.filter((c) => priceable(c) && !selection.selectedCompIds.includes(c.id))
   const subjectTract = evidence.subject.censusTract
 
-  const bands = computeEvidenceBands(evidence.comps, evidence.subject)
+  // Recompute the bands exactly as the evidence payload showed them —
+  // comp.band already carries reasoning-model adjudication overrides, so
+  // feeding the labels back as overrides keeps the gate's verified band
+  // identical to what the agent was asked to restate (without this the
+  // gate verifies pre-adjudication edges no selection can match).
+  const bandOverrides: Record<string, BandName | null> = {}
+  for (const c of evidence.comps) if (c.band !== undefined) bandOverrides[c.id] = c.band
+  const bands = computeEvidenceBands(evidence.comps, evidence.subject, { bandOverrides })
 
   // ── d1: right neighborhood — pricing weight, block group first ───────────
   // Principle: ANY comp carrying pricing weight outside the operative
