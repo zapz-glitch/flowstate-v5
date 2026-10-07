@@ -40,7 +40,7 @@ export type LedgerStatus =
   | 'credited'
   | 'claimed_dated'
   | 'past_threshold'
-  | 'assumed_past'
+  | 'assumed_past' // Tier 3 — universal systems only (roof/hvac/water_heater)
   | 'unknown'
 
 export interface PermitLedgerEntry {
@@ -232,12 +232,12 @@ const DESIGN_LIFE: Record<string, number> = {
   electric_panel: 30,
 }
 
-/** Systems every house has — only these get the Tier-3 age baseline.
- *  Conditional systems (pool, septic, foundation) stay advisory without
- *  evidence: an unverified pool is not a chargeable pool. */
-const UNIVERSAL_SYSTEMS = new Set([
-  'roof', 'hvac', 'water_heater', 'electric_panel', 'replumb', 'rewire',
-])
+/** Systems the user actually budgets on age alone — only these get the
+ *  Tier-3 assumed_past baseline ($20,500 mandatory set). Electric panel,
+ *  replumb, rewire, pool, septic, and foundation stay advisory: they
+ *  charge only when a permit, dated claim, or seller note evidences them.
+ *  User verbatim: "I would typically just do HVAC water heater roof". */
+const UNIVERSAL_SYSTEMS = new Set(['roof', 'hvac', 'water_heater'])
 
 export function buildRenovationEvidence(input: {
   renovation: RenovationAssessment | null | undefined

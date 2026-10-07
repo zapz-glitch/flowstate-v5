@@ -285,6 +285,15 @@ the groups adjusts only one way:
   the ARV.** Do not withhold a value because renovated proof is missing —
   move-in-ready stock is the legitimate fallback, since the subject
   renovated to a lower standard can still command that sale.
+- **Unverified top-band anchors are blended, never trusted outright.**
+  When no driver carries verified-renovated evidence (flip pair, vision
+  read, dated work claims), the ARV sits at the midpoint of the
+  unverified top-band cluster's GLA-scaled read and the in-pocket
+  maintained read — the number you post is the one you would defend in
+  underwriting review, doubt included. Never post the unverified cluster
+  alone and flag the doubt afterward; the defensibility blend IS the
+  verdict. When the top cluster is your only upper evidence, weight the
+  maintained read at least half.
 - **Among renovated comps, prefer the closest physical and location match
   to the subject**, not the higher sale price.
 - **A group average of true twins beats a single comp.** When several
@@ -369,7 +378,9 @@ human underwriter reads plus the pricing context:
   `softRepairCost` is the standard allowance), `past_threshold` (permit
   on record but past the window → mandatory full charge),
   `assumed_past` (Tier 3 — unverified and home age exceeds design life →
-  mandatory full charge), `unknown` (within design life → advisory).
+  mandatory full charge — universal budgeted systems only: roof, HVAC,
+  water heater), `unknown` (within design life, or a system without an
+  age-baseline trigger → advisory).
 - `sellerNoteClaims` — realtor notes parsed into additions and
   advisories. Notes only ever add scope.
 - `finishParity` — finish keywords the pocket's ARV comps advertise vs
@@ -421,8 +432,11 @@ Rules:
   permits are the only $0 credit; a dated claim prices the item at the
   soft-repair allowance (`softRepairCost`, ≤20% of schedule) — not $0,
   not full; an undated claim earns nothing; a defect note forces a full
-  mandatory line. Unverified systems on a home older than their design
-  life are `assumed_past` — charge them like `past_threshold`.
+  mandatory line. Unverified roof/HVAC/water heater on a home older
+  than their design life are `assumed_past` — charge them like
+  `past_threshold`. Panel, replumb, rewire, pool, septic, and foundation
+  carry no age baseline: they charge only when a permit, dated claim,
+  or seller note evidences them — age alone is not a charge.
 - **Recondition ≠ replace** — a serviced or recently repaired system
   charges the repair/recondition cost, not full replacement.
 - The harness prices your posted scope against `costSchedule` and the
