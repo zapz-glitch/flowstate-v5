@@ -208,6 +208,56 @@ const CLEF_MAX_PHOTOS = 4
 interface ClefAnswerMap {
   renovation_level?: { choice?: string; probabilities?: Record<string, number> }
   curb_appeal?: { choice?: string; probabilities?: Record<string, number> }
+  kitchen_condition?: { choice?: string; probabilities?: Record<string, number> }
+  bathroom_condition?: { choice?: string; probabilities?: Record<string, number> }
+  flooring_condition?: { choice?: string; probabilities?: Record<string, number> }
+  wall_ceiling_condition?: { choice?: string; probabilities?: Record<string, number> }
+  exterior_condition?: { choice?: string; probabilities?: Record<string, number> }
+  major_system_concern?: { noul?: number; probability?: number }
+  structural_concern?: { noul?: number; probability?: number }
+}
+
+const ZONE_CRITERIA: Record<string, Record<string, string>> = {
+  kitchen_condition: {
+    excellent: 'recently remodeled — new cabinets, counters, appliances',
+    good: 'updated and clean, no obvious work needed',
+    dated: 'functional but visibly dated finishes',
+    poor: 'heavy wear or damage — needs renovation',
+    failed: 'unusable, gutted, or stripped',
+    not_visible: 'no kitchen visible in these photos',
+  },
+  bathroom_condition: {
+    excellent: 'recently remodeled — new vanity, tile, fixtures',
+    good: 'updated and clean',
+    dated: 'functional but visibly dated finishes',
+    poor: 'heavy wear or damage — needs renovation',
+    failed: 'unusable, gutted, or stripped',
+    not_visible: 'no bathroom visible in these photos',
+  },
+  flooring_condition: {
+    excellent: 'new or like-new flooring throughout visible areas',
+    good: 'clean flooring, minor wear',
+    dated: 'functional but dated — old carpet, worn vinyl, dated tile',
+    poor: 'damaged, stained, or heavily worn flooring',
+    failed: 'missing, stripped, or subfloor exposed',
+    not_visible: 'no interior flooring visible in these photos',
+  },
+  wall_ceiling_condition: {
+    excellent: 'fresh paint/finishes, no visible damage',
+    good: 'clean walls and ceilings, minor wear',
+    dated: 'dated finishes, wallpaper, or old paint',
+    poor: 'damage, staining, cracks, or heavy wear',
+    failed: 'open studs, missing drywall, water damage',
+    not_visible: 'no interior walls/ceilings visible in these photos',
+  },
+  exterior_condition: {
+    excellent: 'new roof/siding, fresh exterior finishes',
+    good: 'maintained exterior, minor wear',
+    dated: 'dated siding/roof/paint, functional',
+    poor: 'visible exterior damage or deferred maintenance',
+    failed: 'roof failure, siding missing, structural exterior damage',
+    not_visible: 'no exterior visible in these photos',
+  },
 }
 
 async function assessViaClef(
@@ -238,6 +288,47 @@ async function assessViaClef(
         distressed: 'obvious disrepair, damage, heavy wear',
         unknown: 'photos insufficient to judge',
       },
+    },
+    // Zone reads — each 4-photo chunk answers every zone; chunks that don't
+    // show a zone answer not_visible and drop out of the merge, so the
+    // verdict per zone comes only from chunks that actually saw it.
+    kitchen_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of any kitchen visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.kitchen_condition,
+    },
+    bathroom_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of any bathroom visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.bathroom_condition,
+    },
+    flooring_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of interior flooring visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.flooring_condition,
+    },
+    wall_ceiling_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of interior walls and ceilings visible in THESE photos. If none are visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.wall_ceiling_condition,
+    },
+    exterior_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of the exterior — roof, siding, paint, yard — visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.exterior_condition,
+    },
+    major_system_concern: {
+      type: 'noul',
+      instructions:
+        'Do THESE photos show a visible major-system concern — aged or rusty ' +
+        'HVAC unit, water heater corrosion, old/damaged electrical panel, ' +
+        'knob-and-tube or exposed wiring, plumbing leaks, missing fixtures?',
+    },
+    structural_concern: {
+      type: 'noul',
+      instructions:
+        'Do THESE photos show structural distress — foundation cracks, roof ' +
+        'sag, wall bowing, floor slope, fire or severe water damage?',
     },
   }
   // One Clef call per photo chunk — Clef's image budget is 4, so a
@@ -287,6 +378,47 @@ async function assessViaClef(
   const confidence = Math.round(Math.min(1, Math.max(0, pickProb)) * 100)
   const { pick: curbPick, prob: curbProb } = mergeProbs('curb_appeal')
 
+  // Zone merge — a zone verdict comes only from chunks that saw it:
+  // not_visible picks drop out; remaining picks majority-vote weighted by
+  // their probability. No chunk saw the zone → 'not_visible' (never NA —
+  // the gate counts real reads, and a zone no camera reached is a data
+  // gap, not an unread zone).
+  const zoneKeys = [
+    'kitchen_condition', 'bathroom_condition', 'flooring_condition',
+    'wall_ceiling_condition', 'exterior_condition',
+  ] as const
+  const zones: Record<(typeof zoneKeys)[number], string> = {
+    kitchen_condition: 'not_visible', bathroom_condition: 'not_visible',
+    flooring_condition: 'not_visible', wall_ceiling_condition: 'not_visible',
+    exterior_condition: 'not_visible',
+  }
+  for (const zk of zoneKeys) {
+    const votes = new Map<string, number>()
+    for (const a of answers) {
+      const q = a[zk]
+      const ch = q?.choice
+      if (!ch || ch === 'not_visible') continue
+      const p = q?.probabilities?.[ch] ?? 0.5
+      votes.set(ch, (votes.get(ch) ?? 0) + p)
+    }
+    let bestZone: string | null = null
+    let bestV = 0
+    for (const [z, v] of votes) if (v > bestV) { bestV = v; bestZone = z }
+    if (bestZone) zones[zk] = bestZone
+  }
+  const noulAvg = (key: 'major_system_concern' | 'structural_concern') => {
+    const vals = answers
+      .map((a) => a[key]?.noul ?? a[key]?.probability)
+      .filter((v): v is number => typeof v === 'number')
+    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
+  }
+  const systemConcerns = noulAvg('major_system_concern') >= 0.5
+    ? ['Clef zone read: visible major-system concern in photo set']
+    : []
+  const structuralConcerns = noulAvg('structural_concern') >= 0.5
+    ? ['Clef zone read: possible structural distress in photo set']
+    : []
+
   return {
     status: confidence !== null && confidence < LOW_CONFIDENCE ? 'needs_review' : 'ok',
     renovationLevelIndex: levelIndex,
@@ -294,18 +426,18 @@ async function assessViaClef(
     confidence,
     photosExamined: live.length,
     majorObservations: [],
-    kitchenCondition: 'NA',
-    bathroomCondition: 'NA',
-    flooringCondition: 'NA',
-    wallCeilingCondition: 'NA',
-    exteriorCondition: 'NA',
-    visibleMajorSystemConcerns: [],
-    structuralConcerns: [],
+    kitchenCondition: zones.kitchen_condition,
+    bathroomCondition: zones.bathroom_condition,
+    flooringCondition: zones.flooring_condition,
+    wallCeilingCondition: zones.wall_ceiling_condition,
+    exteriorCondition: zones.exterior_condition,
+    visibleMajorSystemConcerns: systemConcerns,
+    structuralConcerns,
     rationale: null,
     evidenceForClassification: [],
     evidenceAgainstMoreSevereLevel: [],
     evidenceAgainstLessSevereLevel: [],
-    limitations: ['Clef level-read only — per-room conditions unverified'],
+    limitations: [`Clef chunked zone read — ${answers.length} call(s), zones not photographed report not_visible`],
     provider: 'workers-ai',
     model: 'clef-flash',
     curbAppeal: curbPick && curbPick !== 'unknown'

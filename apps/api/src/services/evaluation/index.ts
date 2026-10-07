@@ -1231,6 +1231,7 @@ export async function performAnalysisPhase1(
       .filter((v): v is number => v != null && v > 0)
       .sort((a, b) => a - b)
     const poolRefPpsf = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
+    const topBandRefPpsf = bandRefPpsf(appraisalResult.comparables, bundle.property.censusTract, compClassifications)
     const packageIds = packageDeedIds(appraisalResult.comparables)
     const bulkIds = bulkSaleIds(appraisalResult.comparables)
     let verified = 0, stale = 0, divergent = 0, noisy = 0
@@ -1238,6 +1239,8 @@ export async function performAnalysisPhase1(
       comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf, preferredSaleAgeDays, {
         packageDeed: packageIds.has(comp.id),
         bulkSale: bulkIds.has(comp.id),
+        band: compClassifications.get(comp.id)?.classification,
+        bandRefPpsf: topBandRefPpsf,
       })
       if (comp.evidenceVerification.priceCheck === 'corroborated') verified++
       if (comp.evidenceVerification.staleness === 'stale') stale++
@@ -1375,7 +1378,7 @@ export async function performAnalysisPhase2(
       return fails
     }
     const stampVerification = () =>
-      stampPoolVerification(appraisalResult.comparables, bundle.property, preferredSaleAgeDays)
+      stampPoolVerification(appraisalResult.comparables, bundle.property, preferredSaleAgeDays, compClassifications)
 
     bAttemptTrail = []
     const recordBAttempt = (
@@ -1952,10 +1955,29 @@ function toBCompsOf(
 /** Re-stamp price/age/market-fit verification across the pool and switch off
  *  transaction-noise comps. Same body phase 2's ladder uses — shared so the
  *  agent's deepen round restamps identically. */
+/** Median $/sf of the after_renovation cluster in the subject's tract —
+ *  the band-relative reference for the outlier check. Needs ≥2 members;
+ *  null falls back to the pool reference (old pool-relative behavior). */
+function bandRefPpsf(
+  comparables: AppraisedComparable[],
+  censusTract: string | null | undefined,
+  classifications: Map<string, ClassificationResult> | undefined,
+): number | null {
+  if (!classifications || censusTract == null) return null
+  const ppsfs = comparables
+    .filter((c) => c.censusTract != null && c.censusTract === censusTract &&
+      classifications.get(c.id)?.classification === 'after_renovation')
+    .map((c) => c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null))
+    .filter((v): v is number => v != null && v > 0)
+    .sort((a, b) => a - b)
+  return ppsfs.length >= 2 ? ppsfs[Math.floor(ppsfs.length / 2)] : null
+}
+
 function stampPoolVerification(
   comparables: AppraisedComparable[],
   subject: NormalizedProperty,
   preferredSaleAgeDays: number,
+  classifications?: Map<string, ClassificationResult>,
 ): void {
   const tractPpsfs = comparables
     .filter((c) => c.censusTract != null && c.censusTract === subject.censusTract)
@@ -1963,12 +1985,15 @@ function stampPoolVerification(
     .filter((v): v is number => v != null && v > 0)
     .sort((a, b) => a - b)
   const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
+  const topBandRefPpsf = bandRefPpsf(comparables, subject.censusTract, classifications)
   const packageIds = packageDeedIds(comparables)
   const bulkIds = bulkSaleIds(comparables)
   for (const comp of comparables) {
     comp.evidenceVerification = verifyCompEvidence(subject, comp, ref, preferredSaleAgeDays, {
       packageDeed: packageIds.has(comp.id),
       bulkSale: bulkIds.has(comp.id),
+      band: classifications?.get(comp.id)?.classification,
+      bandRefPpsf: topBandRefPpsf,
     })
     const noise = TRANSACTION_NOISE_REASON[comp.evidenceVerification?.transactionCheck ?? '']
     if (noise && comp.isEnabled) {
@@ -2217,7 +2242,7 @@ export async function harnessDeepen(ctx: Phase1Context, params: EvaluationParams
     if (comp.landAssessedValue == null && e.landAssessedValue != null) { comp.landAssessedValue = e.landAssessedValue; deepened++ }
   }
   if (deepened > 0) {
-    stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays)
+    stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays, new Map(ctx.compClassifications))
   }
   return deepened
 }
@@ -2243,11 +2268,13 @@ export function harnessWiden(ctx: Phase1Context, widened: NormalizedComparable[]
   // detail — widened comps must join it or a selected widened comp loses
   // its source evidence in the saved report.
   ctx.bundle.comparables.push(...added)
-  stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays)
+  // Re-classify first so widened comps' band labels inform the
+  // band-relative noise reference on the same pass.
   const cls = new Map(ctx.compClassifications)
   for (const [id, c] of classifyCompsByEvidence(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.compCurbAppeal)) {
     cls.set(id, c)
   }
+  stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays, cls)
   ctx.compClassifications = [...cls.entries()]
   return widenedResult.comparables.length
 }
