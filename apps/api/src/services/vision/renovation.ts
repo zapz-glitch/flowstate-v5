@@ -191,7 +191,10 @@ const RENOVATION_SCHEMA = {
 }
 
 const MIN_UNIQUE_PHOTOS = 1
-const MAX_PHOTOS = 12
+const MAX_PHOTOS = 30
+// The LLM fallback reads in one call — cap its image payload. Clef reads
+// every photo via 4-image chunks instead, so nothing is skipped.
+const LLM_MAX_IMAGES = 12
 const LOW_CONFIDENCE = 40
 /** Clef's image budget is 4 — the comp lane uses the same cap. */
 const CLEF_MAX_PHOTOS = 4
@@ -212,7 +215,8 @@ async function assessViaClef(
   live: FetchedImage[],
   propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
 ): Promise<RenovationAssessment | null> {
-  if (!env.AI) return null
+  const ai = env.AI
+  if (!ai) return null
   const model = '@cf/cloudflare/clef-flash'
   const questions = {
     renovation_level: {
@@ -236,33 +240,59 @@ async function assessViaClef(
       },
     },
   }
-  const res = (await env.AI.run(model, {
-    state: {
-      subject: 'Subject-property renovation assessment for a fix-and-flip appraisal.',
-      property: {
-        address: propertyContext.address ?? null,
-        squareFeet: propertyContext.squareFeet ?? null,
-        yearBuilt: propertyContext.yearBuilt ?? null,
+  // One Clef call per photo chunk — Clef's image budget is 4, so a
+  // 12-photo subject reads through 3 calls. Level/curb probabilities are
+  // averaged across chunks into one verdict.
+  const chunks: FetchedImage[][] = []
+  for (let i = 0; i < live.length; i += CLEF_MAX_PHOTOS) chunks.push(live.slice(i, i + CLEF_MAX_PHOTOS))
+  const calls = await Promise.all(chunks.map((chunk) =>
+    ai.run(model, {
+      state: {
+        subject: 'Subject-property renovation assessment for a fix-and-flip appraisal.',
+        property: {
+          address: propertyContext.address ?? null,
+          squareFeet: propertyContext.squareFeet ?? null,
+          yearBuilt: propertyContext.yearBuilt ?? null,
+        },
       },
-    },
-    questions,
-    images: live.slice(0, CLEF_MAX_PHOTOS).map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
-  })) as { answers?: ClefAnswerMap }
+      questions,
+      images: chunk.map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
+    }).then((r) => r as { answers?: ClefAnswerMap }).catch(() => null),
+  ))
+  const answers = calls.map((c) => c?.answers).filter((a): a is ClefAnswerMap => !!a)
+  if (!answers.length) return null
 
-  const pick = res?.answers?.renovation_level?.choice
+  // Merge chunk probabilities — majority vote weighted by confidence.
+  const mergeProbs = (key: 'renovation_level' | 'curb_appeal') => {
+    const agg = new Map<string, { sum: number; n: number }>()
+    for (const a of answers) {
+      const probs = a[key]?.probabilities
+      if (!probs) continue
+      for (const [k, v] of Object.entries(probs)) {
+        const e = agg.get(k) ?? { sum: 0, n: 0 }
+        e.sum += v; e.n += 1; agg.set(k, e)
+      }
+    }
+    let best: string | null = null; let bestAvg = 0
+    for (const [k, { sum, n }] of agg) {
+      const avg = sum / n
+      if (avg > bestAvg) { bestAvg = avg; best = k }
+    }
+    return { pick: best, prob: bestAvg }
+  }
+
+  const { pick, prob: pickProb } = mergeProbs('renovation_level')
   const levelIndex = renovationLevelToIndex(pick)
   if (levelIndex === null) return null
-  const p = res?.answers?.renovation_level?.probabilities
-  const confidence = p && pick ? Math.round(Math.min(1, Math.max(0, p[pick] ?? 0)) * 100) : null
-  const curbPick = res?.answers?.curb_appeal?.choice
-  const curbP = res?.answers?.curb_appeal?.probabilities
+  const confidence = Math.round(Math.min(1, Math.max(0, pickProb)) * 100)
+  const { pick: curbPick, prob: curbProb } = mergeProbs('curb_appeal')
 
   return {
     status: confidence !== null && confidence < LOW_CONFIDENCE ? 'needs_review' : 'ok',
     renovationLevelIndex: levelIndex,
     renovationLevel: REHAB_LEVELS[levelIndex],
     confidence,
-    photosExamined: Math.min(live.length, CLEF_MAX_PHOTOS),
+    photosExamined: live.length,
     majorObservations: [],
     kitchenCondition: 'NA',
     bathroomCondition: 'NA',
@@ -282,9 +312,9 @@ async function assessViaClef(
       ? {
           condition: curbPick as CurbAppealCheck['condition'],
           source: 'vision' as const,
-          confidence: curbP && curbPick ? Math.round((curbP[curbPick] ?? 0) * 100) : null,
+          confidence: Math.round(curbProb * 100),
           summary: null,
-          photosExamined: Math.min(live.length, CLEF_MAX_PHOTOS),
+          photosExamined: live.length,
         }
       : null,
   }
@@ -444,7 +474,7 @@ export async function assessRenovationFromPhotos(
   }
   prompt += RENOVATION_PROMPT
 
-  const imagePayload = live.map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
+  const imagePayload = live.slice(0, LLM_MAX_IMAGES).map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
 
   // Retry once on unparseable output — LLM formatting is nondeterministic
   let parsed: Record<string, unknown> | null = null
