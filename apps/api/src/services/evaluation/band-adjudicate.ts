@@ -47,6 +47,8 @@ export interface BandAdjudicationResult {
   model: string
   /** Members the model flagged as ambiguous but left alone. */
   ambiguous?: string[]
+  /** 0-1 — model's overall confidence in the adjudicated membership. */
+  confidence?: number
 }
 
 const BANDS: BandName[] = ['as_is', 'median', 'arv']
@@ -69,8 +71,11 @@ const ADJUDICATION_SCHEMA = {
       },
     },
     ambiguous: { type: 'array', items: { type: 'string' } },
+    /** 0-1 — how confident the model is in the adjudicated membership
+     *  as a whole (not per-adjustment). */
+    confidence: { type: 'number' },
   },
-  required: ['adjustments', 'ambiguous'],
+  required: ['adjustments', 'ambiguous', 'confidence'],
   additionalProperties: false,
 } as const
 
@@ -81,7 +86,8 @@ Each comp carries its draft band label plus the evidence behind it. Review every
   "adjustments": [
     { "compId": "<id>", "action": "include|exclude|move", "band": "as_is|median|arv|null", "reason": "<one line citing evidence>" }
   ],
-  "ambiguous": ["<compId>", "..."]
+  "ambiguous": ["<compId>", "..."] ,
+  "confidence": 0.0-1.0
 }
 Rules: only list a comp in adjustments when you are CHANGING its membership (exclude unbands it; move sets the named band; include re-bands a comp the draft left unbanded). Leave everything else out. Cite the specific evidence driving each change. When uncertain, do not adjust — put the id in "ambiguous" instead.
 
@@ -180,6 +186,9 @@ export async function adjudicateBandMembership(
     model: provider.model,
     ambiguous: Array.isArray(parsed.ambiguous)
       ? parsed.ambiguous.filter((v): v is string => typeof v === 'string' && validIds.has(v))
+      : undefined,
+    confidence: typeof (parsed as { confidence?: unknown }).confidence === 'number'
+      ? Math.max(0, Math.min(1, (parsed as { confidence: number }).confidence))
       : undefined,
   }
 }
