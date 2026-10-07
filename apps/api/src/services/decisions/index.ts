@@ -38,6 +38,10 @@ export async function decisionsRun(
     state: unknown
     questions: Record<string, ClefStyleQuestion>
     images?: Array<{ content_type?: string; base64: string }>
+    /** Interleaved sections — a text part followed by its images, in order.
+     *  Batch mode uses this so each comp's photos group under its own
+     *  header instead of pooling anonymously. Total image cap 128. */
+    sections?: Array<{ text?: string; images?: Array<{ content_type?: string; base64: string }> }>
   },
 ): Promise<{ answers?: Record<string, unknown> }> {
   if (!env.OPENAI_API_KEY) throw new Error('DECISIONS: no OPENAI_API_KEY')
@@ -45,11 +49,23 @@ export async function decisionsRun(
   const content: Array<Record<string, unknown>> = [
     { type: 'input_text', text: typeof params.state === 'string' ? params.state : JSON.stringify(params.state) },
   ]
-  for (const img of params.images ?? []) {
+  const pushImg = (img: { content_type?: string; base64: string }) => {
     content.push({
       type: 'input_image',
       image_url: `data:${img.content_type || 'image/jpeg'};base64,${img.base64}`,
     })
+  }
+  let imgBudget = 128
+  for (const s of params.sections ?? []) {
+    if (s.text) content.push({ type: 'input_text', text: s.text })
+    for (const img of s.images ?? []) {
+      if (imgBudget <= 0) break
+      pushImg(img); imgBudget--
+    }
+  }
+  for (const img of params.images ?? []) {
+    if (imgBudget <= 0) break
+    pushImg(img); imgBudget--
   }
 
   const questions = Object.entries(params.questions).map(([name, q]) => {

@@ -93,7 +93,7 @@ export const CONDITION_SCALE = [
   'Renovated — comprehensively remodeled for sale',
 ] as const
 
-const CONDITION_QUESTIONS: Record<string, Question> = {
+export const CONDITION_QUESTIONS: Record<string, Question> = {
   renovated: {
     type: 'noul',
     instructions:
@@ -284,6 +284,20 @@ export async function classifyCompCondition(
       })) as { model?: string; answers?: Record<string, unknown> })
 
   const answers = res?.answers ?? {}
+  return {
+    ...buildConditionResult(answers),
+    model: (res?.model ?? model) as ClefModel,
+    modelVersion: res?.model ?? model,
+    durationMs: Date.now() - started,
+  }
+}
+
+/** Assemble a CompConditionResult from an answer map — shared by the
+ *  single-comp path and the batch Decisions classifier (per-comp answer
+ *  subsets are re-keyed then passed through the same assembly). */
+export function buildConditionResult(
+  answers: Record<string, unknown>,
+): Omit<CompConditionResult, 'model' | 'modelVersion' | 'durationMs'> {
   const { idx, score } = scoreIdx(answers.condition)
   const clamped = Math.max(0, Math.min(CONDITION_SCALE.length - 1, idx))
   const renP = prob(answers.renovated)
@@ -317,8 +331,5 @@ export async function classifyCompCondition(
     conditionLabel: CONDITION_SCALE[clamped].split(' — ')[0],
     confidence: typeof conf === 'number' ? conf : undefined,
     hint,
-    model: (res?.model ?? model) as ClefModel,
-    modelVersion: res?.model ?? model,
-    durationMs: Date.now() - started,
   }
 }

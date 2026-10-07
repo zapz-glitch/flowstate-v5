@@ -20,8 +20,9 @@
 
 import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, type ClefImage, type CompConditionResult } from '../clef'
+import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, CONDITION_QUESTIONS, buildConditionResult, type ClefImage, type CompConditionResult } from '../clef'
 import { createReasoningProvider } from '../llm'
+import { decisionsRun } from '../decisions'
 
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // Clef per-image cap
@@ -36,6 +37,13 @@ export interface CompEvidenceInput extends PropertyIdentifier {
    *  listing exists on any portal. */
   latitude?: number | null
   longitude?: number | null
+  /** Geo-tier fields — the batch Decisions classify reads the whole pool's
+   *  geocode context when it classifies each comp. */
+  sameBlockGroup?: boolean | null
+  neighborhoodName?: string | null
+  subdivision?: string | null
+  censusTract?: string | null
+  distanceMiles?: number | null
 }
 
 export interface CompConditionEvidence {
@@ -89,6 +97,9 @@ export interface CompConditionEvidence {
   investorSignalSources: string[]
   /** Why classification didn't run — 'no_listing' | 'clef_unavailable' | fetch error */
   skippedReason?: string
+  /** Transient — embedded listing photos for the deferred (batch) classify
+   *  pass. Never persisted to KV: stripped before the evidence pins. */
+  _images?: ClefImage[]
 }
 
 /**
@@ -202,6 +213,20 @@ Answer as strict JSON:
   "confidence": number 0-1 — your confidence in the condition_label
 }`
 
+const LUNA_COMP_SCHEMA = {
+  type: 'object',
+  properties: {
+    condition_label: { type: 'string', enum: ['Poor', 'Dated', 'Maintained', 'Updated', 'Renovated'] },
+    renovated: { type: 'number' },
+    as_is: { type: 'number' },
+    investor_language: { type: 'number' },
+    tier: { type: 'string', enum: ['investor', 'median', 'arv'] },
+    confidence: { type: 'number' },
+  },
+  required: ['condition_label', 'renovated', 'as_is', 'investor_language', 'tier', 'confidence'],
+  additionalProperties: false,
+} as const
+
 export interface LunaCompAnswer {
   condition_label?: unknown
   renovated?: unknown
@@ -257,6 +282,8 @@ async function classifyCompConditionLuna(
     prompt: `${LUNA_COMP_PROMPT}\n\n${context}`,
     images: (input.images ?? []).slice(0, MAX_IMAGES).map((i) => ({ base64: i.base64, mimeType: i.content_type })),
     responseFormat: 'json',
+    // Anthropic structured outputs 400s on a bare {type:'object'} schema.
+    jsonSchema: { name: 'comp_condition', schema: LUNA_COMP_SCHEMA },
     maxTokens: 1024,
   })
   if (!res.success || !res.data?.content) return null
@@ -269,6 +296,7 @@ export async function gatherCompConditionEvidence(
   env: Env,
   comp: CompEvidenceInput,
   subject?: { squareFeet?: number; address?: string },
+  opts?: { deferClassify?: boolean },
 ): Promise<CompConditionEvidence> {
   const key = evidenceKey(comp)
   const cached = await env.API_CACHE.get(key, 'json').catch(() => null) as CompConditionEvidence | null
@@ -401,6 +429,16 @@ export async function gatherCompConditionEvidence(
   // description alone still carries renovation/fixture language.
   const images = photos.photos.length > 0 ? await embedPhotos(photos.photos) : []
 
+  const imagesEmbedded = photos.photos.length > 0 ? images : []
+
+  // Batch lane (Decisions): classification is deferred to the pool-level
+  // pass in startCompEvidenceBatch — the model reads every comp together,
+  // which calibrates 'renovated' against siblings instead of in isolation.
+  if (opts?.deferClassify) {
+    evidence._images = imagesEmbedded
+    return evidence
+  }
+
   // Clef is the primary reader; Luna is the fallback — absent binding or a
   // failed call both route here. The stamp contract is identical.
   const clefReady = isClefAvailable(env)
@@ -453,10 +491,129 @@ export async function gatherCompConditionEvidence(
   // classification); 'no_listing'/'clef_unavailable' partials stay
   // uncached so a retry can still find them.
   if (evidence.condition || evidence.listing) {
-    void env.API_CACHE.put(key, JSON.stringify(evidence), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+    const { _images, ...persistable } = evidence
+    void env.API_CACHE.put(key, JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
   }
 
   return evidence
+}
+
+/** One Decisions request classifies a whole comp chunk — the model sees
+ *  the pool price ladder + every comp's listing text, with each comp's
+ *  photos grouped under its own section header. That's the calibration
+ *  per-comp isolation can't give: 'renovated' gets judged relative to the
+ *  pocket's other renovated stock, not absolutely. Answers re-key per
+ *  comp (`c_<id>__<q>`) and run through the same buildConditionResult
+ *  assembly as the single-comp path. */
+const DECISIONS_BATCH_CHUNK = 10
+
+export async function classifyCompBatchDecisions(
+  env: Env,
+  evidences: Array<{ evidence: CompConditionEvidence; comp: CompEvidenceInput }>,
+  subject?: { squareFeet?: number; address?: string },
+): Promise<void> {
+  const model = env.DECISIONS_MODEL || 'gpt-6-luna'
+  const classifiable = evidences.filter((e) => e.evidence.listing != null && !e.evidence.condition)
+  if (classifiable.length === 0) return
+
+  const pool = evidences.map(({ comp }) => ({
+    compId: comp.propertyId,
+    address: comp.address,
+    salePrice: comp.salePrice,
+    saleDate: comp.saleDate,
+    squareFeet: comp.squareFeet,
+    pricePerSqft: comp.salePrice && comp.squareFeet ? Math.round(comp.salePrice / comp.squareFeet) : null,
+    sameBlockGroup: comp.sameBlockGroup ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    subdivision: comp.subdivision ?? null,
+    censusTract: comp.censusTract ?? null,
+    distanceMiles: comp.distanceMiles ?? null,
+  }))
+
+  for (let i = 0; i < classifiable.length; i += DECISIONS_BATCH_CHUNK) {
+    const chunk = classifiable.slice(i, i + DECISIONS_BATCH_CHUNK)
+    const withImages = chunk.filter((e) => (e.evidence._images?.length ?? 0) > 0)
+    const perCompImages = Math.max(1, Math.min(4, Math.floor(128 / Math.max(1, withImages.length))))
+
+    const questions: Record<string, typeof CONDITION_QUESTIONS[string]> = {}
+    for (const { comp } of chunk) {
+      for (const [name, q] of Object.entries(CONDITION_QUESTIONS)) {
+        questions[`c_${comp.propertyId}__${name}`] = {
+          ...q,
+          instructions: `For comp ${comp.propertyId} (${comp.address}): ${q.instructions}`,
+        } as typeof q
+      }
+    }
+
+    const state = {
+      subject: 'Batch comparable condition assessment — classify EACH comp independently using its own section below, calibrated against the full pool ladder in `pool`.',
+      appraisalSubject: subject ?? null,
+      pool,
+    }
+
+    const sections = chunk.map(({ evidence: ev, comp }) => ({
+      text: `=== COMP ${comp.propertyId}: ${comp.address}` +
+        `${comp.salePrice ? ` — sold $${comp.salePrice.toLocaleString()}` : ''}` +
+        `${comp.saleDate ? ` on ${comp.saleDate}` : ''}` +
+        `${comp.squareFeet ? `, ${comp.squareFeet}sf` : ''}` +
+        `${comp.yearBuilt ? `, built ${comp.yearBuilt}` : ''} ===\n` +
+        (ev.listing?.description ? `Description: ${ev.listing.description}\n` : '') +
+        (ev.listing?.whatsSpecial?.length ? `Highlights: ${ev.listing.whatsSpecial.join('; ')}\n` : '') +
+        (ev.listing?.features?.length ? `Features: ${ev.listing.features.join('; ')}` : ''),
+      images: (ev._images ?? []).slice(0, perCompImages),
+    }))
+
+    const started = Date.now()
+    const res = await decisionsRun(env, { state, questions, sections }).catch(() => null)
+    for (const { evidence: ev, comp } of chunk) {
+      const answers = res?.answers
+      if (answers) {
+        const sub: Record<string, unknown> = {}
+        const prefix = `c_${comp.propertyId}__`
+        for (const [k, v] of Object.entries(answers)) {
+          if (k.startsWith(prefix)) sub[k.slice(prefix.length)] = v
+        }
+        if (Object.keys(sub).length) {
+          ev.condition = {
+            ...buildConditionResult(sub),
+            model: model as CompConditionResult['model'],
+            modelVersion: model,
+            durationMs: Date.now() - started,
+          }
+        }
+      }
+      if (!ev.condition) {
+        // Batch call or parse miss — fall back to the reasoning reader
+        // (same lane the single-comp path falls back to).
+        ev.condition = await classifyCompConditionLuna(env, {
+          address: comp.address,
+          salePrice: comp.salePrice,
+          saleDate: comp.saleDate,
+          description: ev.listing?.description,
+          whatsSpecial: ev.listing?.whatsSpecial,
+          features: ev.listing?.features,
+          yearBuilt: comp.yearBuilt,
+          squareFeet: comp.squareFeet,
+          images: ev._images,
+        }).catch(() => null)
+      }
+      if (ev.condition) {
+        const m = ev.condition.model ?? ''
+        const source = m.startsWith('clef') ? 'clef' : m === 'gpt-6-luna' ? 'decisions' : 'reasoning'
+        if (ev.condition.investorLanguageProbability >= 0.5) ev.investorSignalSources.push(`${source}_noul`)
+        if (ev.condition.tier === 'investor') ev.investorSignalSources.push(`${source}_tier`)
+        ev.investorSignal ||= ev.investorSignalSources.length > 0
+        if (ev.condition.hint) ev.hint = ev.condition.hint
+      } else {
+        ev.skippedReason = 'decisions_batch+reasoning failed'
+      }
+      if (ev.condition || ev.listing) {
+        const { _images, ...persistable } = ev
+        void env.API_CACHE.put(evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+      }
+      delete ev._images
+    }
+  }
 }
 
 /**
@@ -469,18 +626,25 @@ export async function gatherCompConditionEvidence(
 export async function startCompEvidenceBatch(
   env: Env,
   comps: CompEvidenceInput[],
-  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string } },
+  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
   const perComp = opts?.perCompTimeoutMs ?? 45_000
   const deadline = opts?.globalDeadlineMs ?? 150_000
   const laneCount = Math.min(opts?.lanes ?? 15, comps.length)
+  // Decisions lane: gather every comp's listing + photos first, then run
+  // the pool-level batch classify — the model sees all the data at the
+  // end, not comp-by-comp as each fetch lands. Clef lane keeps the
+  // per-comp classify inside the gather. `gatherOnly` defers the batch
+  // classify to the caller — used by the early prefetch, which fires
+  // before census geo-stamps land on the comps.
+  const batchDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
   let next = 0
   const lane = async () => {
     while (next < comps.length) {
       const comp = comps[next++]
       const ev = await Promise.race([
-        gatherCompConditionEvidence(env, comp, opts?.subject),
+        gatherCompConditionEvidence(env, comp, opts?.subject, { deferClassify: batchDecisions }),
         new Promise<null>((r) => setTimeout(() => r(null), perComp)),
       ]).catch(() => null)
       out.set(comp.propertyId, ev)
@@ -490,5 +654,14 @@ export async function startCompEvidenceBatch(
     Promise.all(Array.from({ length: laneCount }, lane)),
     new Promise((r) => setTimeout(r, deadline)),
   ])
+  if (batchDecisions && !opts?.gatherOnly) {
+    await classifyCompBatchDecisions(
+      env,
+      comps
+        .map((comp) => ({ evidence: out.get(comp.propertyId), comp }))
+        .filter((e): e is { evidence: CompConditionEvidence; comp: CompEvidenceInput } => e.evidence != null),
+      opts?.subject,
+    ).catch(() => null)
+  }
   return out
 }

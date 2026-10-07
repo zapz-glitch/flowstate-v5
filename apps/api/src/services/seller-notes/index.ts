@@ -174,12 +174,49 @@ Rules:
 - If a note is ambiguous, produces no addition and no advisory.
 - Empty arrays are valid. Maximum 4 additions, 4 advisories.`
 
+  const SELLER_NOTES_SCHEMA = {
+    type: 'object',
+    properties: {
+      additions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            itemId: { type: 'string' },
+            estimatedCost: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+            evidence: { type: 'string' },
+          },
+          required: ['itemId', 'estimatedCost', 'evidence'],
+          additionalProperties: false,
+        },
+      },
+      advisories: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            itemId: { type: 'string' },
+            suggestion: { type: 'string' },
+            note: { type: 'string' },
+            evidence: { type: 'string' },
+          },
+          required: ['itemId', 'suggestion', 'note', 'evidence'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['additions', 'advisories'],
+    additionalProperties: false,
+  } as const
+
   try {
     const provider = createReasoningProvider(env, env.OPENROUTER_MODEL ?? 'google/gemini-2.5-flash')
     if (!provider) return empty
     const result = await provider.execute({
       prompt,
       responseFormat: 'json',
+      // Anthropic structured outputs 400s on a bare {type:'object'} schema.
+      jsonSchema: { name: 'seller_notes', schema: SELLER_NOTES_SCHEMA },
       temperature: 0,
     })
     if (!result.success || !result.data?.content) return empty

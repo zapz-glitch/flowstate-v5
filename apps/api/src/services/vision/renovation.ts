@@ -889,6 +889,18 @@ Never guess a condition the photos don't show — use "unknown".`
 const CURB_APPEAL_PHOTOS = 4
 const CURB_APPEAL_MIN_PHOTOS = 2
 
+const CURB_APPEAL_SCHEMA = {
+  type: 'object',
+  properties: {
+    condition: { type: 'string', enum: ['renovated', 'dated', 'distressed', 'unknown'] },
+    rehab_level: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    confidence: { type: 'number' },
+    summary: { type: 'string' },
+  },
+  required: ['condition', 'rehab_level', 'confidence', 'summary'],
+  additionalProperties: false,
+} as const
+
 /**
  * Lightweight per-comp visual check: is this comp's sale price plausibly
  * an ARV (post-renovation) candidate? Returns 'unknown' when photo evidence
@@ -914,6 +926,8 @@ export async function assessCompCurbAppeal(
     prompt: CURB_APPEAL_PROMPT,
     images: live.map((f) => ({ base64: f.base64, mimeType: f.mimeType })),
     responseFormat: 'json',
+    // Anthropic structured outputs 400s on a bare {type:'object'} schema.
+    jsonSchema: { name: 'curb_appeal', schema: CURB_APPEAL_SCHEMA },
     maxTokens: 2048,
   })
   if (!result.success || !result.data?.content) return { ...base, summary: 'Vision call failed', photosExamined: live.length }
