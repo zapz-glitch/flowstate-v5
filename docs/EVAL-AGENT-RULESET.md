@@ -134,6 +134,34 @@ suggests ARV but condition suggests MEDIAN, the price position carries the
 weight. A distressed property that sold near MEDIAN or ARV prices does not
 stay in the AS-IS band — its price places it.
 
+## 5a. Stating your bands — the verifier contract
+
+The harness independently computes the same three bands from the comp
+evidence and grades the verdict against them. Alongside `bands` (your
+per-comp assignment), every selection must state band edges:
+
+```jsonc
+"bandEdges": {
+  "as_is":  { "low": 110000, "high": 145000, "mid": 130000, "compIds": ["…"] },
+  "median": { "low": 160000, "high": 195000, "mid": 178000, "compIds": ["…"] },
+  "arv":    { "low": 240000, "high": 285000, "mid": 265000, "compIds": ["…"] }
+}
+```
+
+- Each band's `low`/`high`/`mid` are its scaled-price edges and median —
+  scale each member's price to the subject's living area the way §7
+  bracket math does, then take min/max/median.
+- `compIds` lists that band's members. Every comp belongs to exactly one
+  primary band — no dual membership, and an AS-IS-classified comp never
+  appears in the ARV band.
+- Self-check before submitting: `low ≤ mid ≤ high` inside each band.
+- A band the evidence cannot support (fewer than two real members) is
+  simply omitted — `INSUFFICIENT_DATA`, not an error. Never fabricate a
+  band to look complete.
+- The bundle's `evidenceBands` field shows the harness's own edges. They
+  are advisory: state what the evidence argues, then defend it — the
+  grade records agreement, it never overturns your verdict.
+
 ## 6. Sale recency
 
 - Prefer sales within 180 days. The more recent the sale, the steadier the

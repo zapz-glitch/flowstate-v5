@@ -55,6 +55,8 @@ import { gatherCompConditionEvidence, startCompEvidenceBatch, type CompCondition
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
+import { gradeVerdict } from './verdict-grade'
+import { computeEvidenceBands, type EvidenceBands } from '@flowstate-api/shared/appraisal'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
 import { persistReportAssets } from '../report-assets'
@@ -234,6 +236,9 @@ export interface EvaluationRunEvidence {
   attempts: EvaluationAttemptRecord[]
   /** Present when the agent drove comp selection — the posted verdict. */
   agentSelection?: AgentSelection
+  /** Decision-level grade of whoever posted the selection (agent or the
+   *  deterministic fallback) — docs/BANDING-VERIFICATION-SPEC.md §4. */
+  verdictGrade?: import('./verdict-grade').VerdictGrade
 }
 
 export interface EvaluationResult {
@@ -1691,6 +1696,22 @@ export async function performAnalysisPhase2(
       bAttemptTrail,
       attempts: bAttempts,
       ...(agentSelection ? { agentSelection } : {}),
+      // Fail-open verdict grade — agent selections grade on their posted
+      // verdict; a deterministic-fallback run synthesizes the equivalent
+      // selection from its own B result so it is graded the same way
+      // (spec §4). Never blocks the response.
+      ...(params.harness === 'agent' && pipelineBResult != null
+        ? {
+            verdictGrade: gradeVerdict(
+              buildHarnessEvidence(ctx),
+              agentSelection ?? {
+                arv: pipelineBResult.arv ?? finalArv ?? 0,
+                conf: (pipelineBResult.conf as AgentSelection['conf']) ?? 'low',
+                selectedCompIds: appraisalResult.selectedCompIds ?? [],
+              },
+            ),
+          }
+        : {}),
     },
   }
 }
@@ -1922,6 +1943,11 @@ export interface AgentSelection {
   drivers?: string[]
   /** Per-comp band assignment for the report: arv | median | asis | outlier. */
   bands?: Record<string, 'arv' | 'median' | 'asis' | 'outlier'>
+  /** Stated band edges for the verifier — docs/BANDING-VERIFICATION-SPEC.md §3.
+   *  Each band carries its scaled-price edges + member compIds. A band that
+   *  legitimately doesn't exist in the pool is omitted (INSUFFICIENT_DATA). */
+  bandEdges?: Partial<Record<'as_is' | 'median' | 'arv',
+    { low: number; high: number; mid: number; compIds: string[] }>>
   /** Per-comp adjustments applied by the agent (audit trail). */
   adjustments?: Record<string, Array<{ type: string; amount: number; note?: string }>>
   flags?: string[]
@@ -2018,6 +2044,9 @@ export interface HarnessEvidence {
   classifications: Record<string, ClassificationResult>
   classificationSummary: ReturnType<typeof summarizeClassifications> | null
   insufficient: boolean
+  /** Deterministic evidence bands — the verifier's side of the band contract.
+   *  The agent states bandEdges against these (docs/BANDING-VERIFICATION-SPEC). */
+  evidenceBands: EvidenceBands
   rules: {
     filters: AppraisalFilter[]
     adjustments: AppraisalAdjustment[]
@@ -2042,6 +2071,7 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
     classifications: Object.fromEntries(compClassifications),
     classificationSummary: ctx.classificationSummary ?? null,
     insufficient: ctx.insufficient,
+    evidenceBands: computeEvidenceBands(bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b })), ctx.bundle.property),
     rules: {
       filters: ctx.filters,
       adjustments: ctx.adjustments,
