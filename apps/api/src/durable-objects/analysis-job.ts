@@ -21,6 +21,7 @@ import {
   performAnalysisPhase1,
   performAnalysisPhase2,
   buildHarnessEvidence,
+  adjudicatePhase1Bands,
   harnessDeepen,
   harnessWiden,
   validateAgentSelection,
@@ -598,6 +599,10 @@ export class AnalysisJobDO {
         }))
         const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
+          // Decisions lane defers classification — this prefetch fires
+          // before census geo-stamps land, and the batch classify needs
+          // the gated pool's geocode context. Evaluation runs it after.
+          gatherOnly: this.env.CONDITION_READER === 'decisions',
         })
         // Stage-A digest on sale records — no listing data needed, runs
         // beside the listing fetch it precedes in the evidence batch.
@@ -1425,6 +1430,10 @@ export class AnalysisJobDO {
         if (ctx.photoBundlePromise) ctx.photoBundle = await ctx.photoBundlePromise
         delete ctx.photoBundlePromise
         await marketContextPromise.catch(() => { /* display-only */ })
+        // Reasoned band adjudication — the arm's reasoning model (luna /
+        // haiku) reviews draft band membership per BAND-FIRST-PRINCIPLES
+        // before the agent or gate sees bands. No-op without a provider.
+        await adjudicatePhase1Bands(ctx, this.env).catch(() => null)
         ctx.steps.push({ step: 'agent_selection', label: 'agent_selection', status: 'skipped', detail: 'Awaiting Evaluation Agent verdict', durationMs: 0 })
         this.jobState = {
           ...(this.jobState ?? { jobId: config.jobId, userId: config.userId, status: 'processing' as const, pending: [], events: [], createdAt: Date.now() }),
@@ -1683,6 +1692,9 @@ export class AnalysisJobDO {
           { status: 409 },
         )
       }
+      // New pool members (widen) change draft bands — re-adjudicate before
+      // the agent re-reads evidence so bands stay consistent.
+      if (mode === 'widen') await adjudicatePhase1Bands(ctx, this.env).catch(() => null)
       js.harnessContext = JSON.stringify(ctx)
       js.harnessRounds = rounds + 1
       js.harnessDeadline = Date.now() + AnalysisJobDO.HARNESS_DEADLINE_MS

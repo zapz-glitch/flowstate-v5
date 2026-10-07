@@ -51,13 +51,14 @@ import {
   type RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { gatherCompConditionEvidence, startCompEvidenceBatch, type CompConditionEvidence } from '../comp-evidence'
+import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, type CompConditionEvidence } from '../comp-evidence'
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 import { gradeVerdict } from './verdict-grade'
 import { buildRenovationEvidence, priceAgentRenovation } from './renovation'
-import { computeEvidenceBands, bandForComp, type EvidenceBands, type BandName } from '@flowstate-api/shared/appraisal'
+import { computeEvidenceBands, computeGeoTieredBands, bandForComp, type EvidenceBands, type GeoTieredBands, type BandName } from '@flowstate-api/shared/appraisal'
+import { adjudicateBandMembership, type BandAdjudicationResult } from './band-adjudicate'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
 import { persistReportAssets } from '../report-assets'
@@ -819,6 +820,13 @@ export async function performAnalysisPhase1(
     saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
     yearBuilt: comp.yearBuilt ?? undefined,
     squareFeet: comp.squareFeet ?? undefined,
+    // Geo context for the batch classify — Decisions reads the pool's
+    // geocode data when it bands/conditions each comp.
+    sameBlockGroup: comp.sameBlockGroup ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    subdivision: comp.subdivision ?? null,
+    censusTract: comp.censusTract ?? null,
+    distanceMiles: comp.distanceMiles ?? null,
   }))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)
@@ -830,6 +838,19 @@ export async function performAnalysisPhase1(
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
               })
             : new Map<string, CompConditionEvidence | null>()
+          // Decisions lane: the prefetch path gathers listings early but
+          // defers classification until now — the batch call reads the
+          // GATED pool's geo fields (BG / neighborhood / tract), which
+          // didn't exist when the scrape started.
+          if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+            await classifyCompBatchDecisions(
+              env,
+              clefInputs
+                .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
+                .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null),
+              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+            ).catch(() => null)
+          }
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null
@@ -1898,6 +1919,33 @@ export interface Phase1Context {
   /** 1-revision gate telemetry — every selection attempt with its grade
    *  and gate decision (rejected | accepted | accepted_final). */
   selectionAttempts?: SelectionAttempt[]
+  /** Reasoning-model band overrides persisted on the frozen context —
+   *  buildHarnessEvidence applies them to band labels + evidenceBands
+   *  identically at evidence-serve and selection-grade time. */
+  bandOverrides?: Record<string, BandName | null>
+  bandAdjudication?: { adjustments: import('./band-adjudicate').BandAdjustment[]; model: string; ambiguous?: string[] }
+}
+
+/** Park-path helper — runs the reasoning-model adjudication over the
+ *  DRAFT band membership (deterministic labels as input) and stamps the
+ *  result onto the context so both the evidence payload and the gate
+ *  verify the same adjudicated bands. No-op without a reasoning provider. */
+export async function adjudicatePhase1Bands(ctx: Phase1Context, env: Env): Promise<void> {
+  const compClassifications = new Map(ctx.compClassifications)
+  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests)
+  const rows = bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b, band: bandForComp({ id: ctx.appraisalResult.comparables[i]!.id, ...b }) }))
+  const res = await adjudicateBandMembership(env, {
+    subject: {
+      address: ctx.bundle.property.address ?? null,
+      squareFeet: ctx.bundle.property.squareFeet ?? null,
+      censusTract: ctx.bundle.property.censusTract ?? null,
+      neighborhoodName: ctx.bundle.property.neighborhoodName ?? null,
+    },
+    comps: rows,
+  }).catch(() => null)
+  if (!res) return
+  ctx.bandOverrides = res.overrides
+  ctx.bandAdjudication = { adjustments: res.adjustments, model: res.model, ambiguous: res.ambiguous }
 }
 
 export interface SelectionAttempt {
@@ -2193,6 +2241,14 @@ export interface HarnessEvidence {
   /** Deterministic evidence bands — the verifier's side of the band contract.
    *  The agent states bandEdges against these (docs/BANDING-VERIFICATION-SPEC). */
   evidenceBands: EvidenceBands
+  /** Geo-tightening band sets — block_group → neighborhood → tract. The agent
+   *  prices off the tightest tier that formed a band; the gate verifies the
+   *  same tier. Emitted whenever any tier differs from the flat pool view. */
+  geoBands?: GeoTieredBands
+  /** Reasoning-model adjudication applied to band membership — the arm's
+   *  reasoning provider's include/exclude/move verdicts + which comps it
+   *  changed. Present only when a provider is configured and it answered. */
+  bandAdjudication?: { model: string; adjustments: import('./band-adjudicate').BandAdjustment[]; ambiguous?: string[] }
   rules: {
     filters: AppraisalFilter[]
     adjustments: AppraisalAdjustment[]
@@ -2251,6 +2307,12 @@ export function buildRenoEvidence(
 export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   const compClassifications = new Map(ctx.compClassifications)
   const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests)
+  const overrides = ctx.bandOverrides
+  const bandLabel = (row: BComp & { id: string }): BandName | null => {
+    const o = overrides?.[row.id]
+    return o !== undefined ? o : bandForComp(row)
+  }
+  const rows = bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b }))
   return {
     jobId: ctx.jobId,
     subject: {
@@ -2263,15 +2325,20 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
       // Band-class label — what the band module assigns, which can differ
       // from the listing `classification.type` (e.g. transitional listing
       // landing in the as_is band). Surfaced so the agent reads the same
-      // label the gate enforces.
-      return { ...row, band: bandForComp(row) }
+      // label the gate enforces. Reasoning-model adjudication wins when
+      // the arm ran it.
+      return { ...row, band: bandLabel(row) }
     }),
     renovationEvidence: buildRenoEvidence(ctx, compClassifications),
     suggestedSelection: ctx.appraisalResult.selectedCompIds ?? [],
     classifications: Object.fromEntries(compClassifications),
     classificationSummary: ctx.classificationSummary ?? null,
     insufficient: ctx.insufficient,
-    evidenceBands: computeEvidenceBands(bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b })), ctx.bundle.property),
+    evidenceBands: computeEvidenceBands(rows, ctx.bundle.property, { bandOverrides: overrides }),
+    geoBands: computeGeoTieredBands(rows, ctx.bundle.property, { bandOverrides: overrides }),
+    bandAdjudication: ctx.bandAdjudication
+      ? { model: ctx.bandAdjudication.model, adjustments: ctx.bandAdjudication.adjustments, ambiguous: ctx.bandAdjudication.ambiguous }
+      : undefined,
     rules: {
       filters: ctx.filters,
       adjustments: ctx.adjustments,

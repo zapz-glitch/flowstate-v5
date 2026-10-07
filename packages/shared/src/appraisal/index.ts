@@ -24,6 +24,7 @@ export { calculateARV, pickBestComps, getCompAvgSqft } from './arv'
 export type { ArvCompLike } from './arv'
 export * from "./set-b"
 export {
-  computeEvidenceBands, bandEdgeCheck, bandForComp,
+  computeEvidenceBands, computeGeoTieredBands, bandEdgeCheck, bandForComp, geoTierMatch,
   type BandName, type BandResult, type BandSubject, type EvidenceBands,
+  type GeoTier, type GeoTieredBands, type BandOverrides,
 } from './banding'
