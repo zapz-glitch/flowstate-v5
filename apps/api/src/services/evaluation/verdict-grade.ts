@@ -127,8 +127,11 @@ function gradeBand(
     }
   }
   if (!stated) {
-    // Invalid disregard — band exists in evidence, agent didn't state it.
-    return { stated: null, evidence: null, epsLow: null, epsHigh: null, iou: null, result: 'fail', method }
+    // Bands are the gate's referee, not the agent's language — under the
+    // first-principles selection contract the agent posts picks + ARV and
+    // never states band edges. An unstated band is neutral, not a
+    // disregard: skipped, omitted from the denominator.
+    return { stated: null, evidence: null, epsLow: null, epsHigh: null, iou: null, result: 'skipped', method }
   }
   const check = bandEdgeCheck(stated.low, stated.high, evidenceBand.low!, evidenceBand.high!)
   const pass = check.epsLow <= 0.1 && check.epsHigh <= 0.1 && check.iou >= 0.7

@@ -110,6 +110,9 @@ export interface BComp {
   /** Clef advisory digests per pipeline stage (A=post-pull, B=post-geocode,
    *  C=post-enrichment). Agent-assist only — never feeds a B verdict. */
   clefDigest?: { A?: unknown; B?: unknown; C?: unknown } | null
+  /** Persisted listing cover photo — the final evaluation agent reads it
+   *  as vision evidence alongside the condition tier. */
+  coverPhotoUrl?: string | null
   evidenceVerification?: {
     /** Age only — stale means outside the preferred sale-age window. */
     staleness?: string | null

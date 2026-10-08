@@ -134,46 +134,33 @@ suggests ARV but condition suggests MEDIAN, the price position carries the
 weight. A distressed property that sold near MEDIAN or ARV prices does not
 stay in the AS-IS band — its price places it.
 
-## 5a. Stating your bands — the verifier contract
+## 5a. Bands are the gate's referee, not your language
 
-The harness independently computes the same three bands from the comp
-evidence and grades the verdict against them. Alongside `bands` (your
-per-comp assignment), every selection must state band edges:
+The harness computes the three bands deterministically from the comp
+evidence (classify → coherence trim → scale-to-subject → edges) and
+verifies your picks + ARV against them internally. **You do not state
+band edges.** Select comps by first principles — condition tier, price,
+geo proximity — and let the gate police coherence. Each evidence comp
+row still carries its `band` label as evidence you can read (and its
+`coverPhotoUrl` for a direct look), but you never have to reproduce a
+band assignment or its edges.
 
-```jsonc
-"bandEdges": {
-  "as_is":  { "low": 110000, "high": 145000, "mid": 130000, "compIds": ["…"] },
-  "median": { "low": 160000, "high": 195000, "mid": 178000, "compIds": ["…"] },
-  "arv":    { "low": 240000, "high": 285000, "mid": 265000, "compIds": ["…"] }
-}
-```
+- `evidenceBands` shows the harness's computed bands — read them as
+  evidence of where the pocket's price tiers actually broke.
+- `geoBands` repeats that computation at `block_group` → `neighborhood`
+  → `tract`, tightest first. When the block group produced a band, that
+  tier is the operative pocket for the gate's geo checks.
+- `bandAdjudication` records the reasoning model's pass over draft band
+  membership (include / exclude / move per
+  docs/BAND-FIRST-PRINCIPLES.md). Excluded comps carry `band: null`;
+  moved comps carry their new label — the labels in the payload are
+  final.
+- `bandEscalation` (when present) records the expert review that fired
+  over the adjudication on a hard pool — its overrides already applied.
 
-- Each band's `low`/`high`/`mid` are its scaled-price edges and median —
-  scale each member's price to the subject's living area the way §7
-  bracket math does, then take min/max/median.
-- `compIds` lists that band's members. Every comp belongs to exactly one
-  primary band — no dual membership, and an AS-IS-classified comp never
-  appears in the ARV band.
-- Self-check before submitting: `low ≤ mid ≤ high` inside each band.
-- A band with **one real member still forms a band** — a degenerate
-  point band (`low = mid = high` = that member's scaled price). If that
-  lone comp is all the pocket produced, it IS the evidence: state it.
-  Only omit a band with zero plausible members — never fabricate one.
-- The bundle's `evidenceBands` field shows the harness's own edges. They
-  are advisory: state what the evidence argues, then defend it — the
-  grade records agreement, it never overturns your verdict. Bands that
-  couldn't form clean edges (stale, bimodal, extreme variance) still
-  carry an `implied` envelope from their members — your stated edges
-  can disagree with it, but be ready to say why.
-- The bundle's `geoBands` field repeats the band computation three times
-  by geography — `block_group`, then `neighborhood`, then `tract` —
-  tightest first. Use the tightest tier that produced edges; widen only
-  when the tighter tier has none, and say why in `notes`.
-- `bandAdjudication` records the reasoning model's pass over the draft
-  band membership (include / exclude / move per
-  docs/BAND-FIRST-PRINCIPLES.md). Comps it excluded carry `band: null`;
-  moved comps carry their new label. Do not re-band an adjudicated comp
-  in your own head — the band labels in the payload are final.
+`bandEdges` still exists in the schema for deliberate debugging only:
+a stated band that contradicts the computed evidence fails the gate
+(d8). Leave it out — an unstated band is neutral, never a disregard.
 
 ### The revision gate — principle over position
 

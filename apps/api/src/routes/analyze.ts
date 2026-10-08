@@ -757,4 +757,24 @@ analyze.post('/jobs/:jobId/harness/selection', async (c) => {
   return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json' } });
 });
 
+/**
+ * POST /analyze/jobs/:jobId/harness/consult
+ *
+ * Expert second opinion for the Evaluation Agent — claude-opus-5-5 reviews
+ * a proposed selection against the same evidence + gate grade, read-only.
+ * Intended for revision turns: check the consult's suggestedFixes before
+ * re-posting to /harness/selection. Never consumes the revision budget.
+ */
+analyze.post('/jobs/:jobId/harness/consult', async (c) => {
+  const ownership = await harnessOwnerCheck(c, c.req.param('jobId'));
+  if (ownership instanceof Response) return ownership;
+  const resp = await ownership.fetch('http://internal/harness/consult', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: await c.req.text(),
+  });
+  const text = await resp.text();
+  return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json' } });
+});
+
 export default analyze;

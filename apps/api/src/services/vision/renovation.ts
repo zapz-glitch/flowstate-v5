@@ -16,7 +16,7 @@
  *   continues without an invented level
  */
 
-import { createReasoningProvider, isReasoningProviderAvailable } from '../llm'
+import { createReasoningProvider, createSpecialistProvider, isReasoningProviderAvailable } from '../llm'
 import { decisionsRun } from '../decisions'
 import { fetchImageAsBase64, type FetchedImage } from '../llm/image-utils'
 import { REHAB_LEVELS } from '../valuation/types'
@@ -684,10 +684,12 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  // Reasoning lane — Anthropic Haiku when configured, otherwise the
-  // OpenRouter model this call site has always used (gpt-6-luna).
+  // Specialist lane — image understanding rides claude-sonnet-5-5 when
+  // the Anthropic key is set; otherwise the arm's reasoning provider
+  // (luna on A, haiku on B).
   const provider =
     providerOverride ??
+    createSpecialistProvider(env, 'routine') ??
     createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'openai/gpt-6-luna')
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
@@ -915,7 +917,8 @@ export async function assessCompCurbAppeal(
 
   if (photos.length < CURB_APPEAL_MIN_PHOTOS) return { ...base, summary: 'Insufficient photos' }
 
-  const provider = createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash')
+  const provider = createSpecialistProvider(env, 'routine')
+    ?? createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash')
   if (!provider) return { ...base, summary: 'Vision provider not configured' }
 
   const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))
