@@ -1574,6 +1574,13 @@ export class AnalysisJobDO {
               attempts: (appraisal?.attempts ?? []).map((a) => a.grade),
               finalDecision: decision != null ? 'accepted' : appraisal?.unavailable ? 'appraiser_unavailable' : 'rejected_deterministic_fallback',
             },
+            observables: ctx.compObservables || ctx.subjectObservables || ctx.marketBenchmark
+              ? {
+                  subject: ctx.subjectObservables ?? null,
+                  comps: ctx.compObservables ?? null,
+                  marketBenchmark: ctx.marketBenchmark ?? null,
+                }
+              : null,
             latency: { appraiserMs, phase2Ms },
           }
           const resp = evalResult.response as unknown as Record<string, unknown>
