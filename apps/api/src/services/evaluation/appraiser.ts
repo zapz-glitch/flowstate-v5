@@ -170,7 +170,14 @@ function appraiserCompRows(evidence: HarnessEvidence) {
     },
     rulesCheck: c.rulesCheck ?? null,
     verifiedFlip: c.verifiedFlip ?? null,
-    verification: c.evidenceVerification ?? null,
+    // Verification fields minus the `flags` prose — each flag restates a
+    // machine field already in this block ("Sale is 486 days old" ==
+    // saleAgeDays vs preferredSaleAgeDays, "No comp AVM" ==
+    // priceCheck:'unverified'). The fields are the decision inputs; the
+    // prose was ~40% of every comp row. The bundle itself keeps flags.
+    verification: c.evidenceVerification
+      ? (() => { const { flags: _flags, ...fields } = c.evidenceVerification; return fields })()
+      : null,
     coverPhotoUrl: c.coverPhotoUrl ?? null,
     adjustedPrice: c.adjustedPrice ?? null,
   }))
@@ -309,7 +316,14 @@ export async function runOpusAppraiser(
       // The deterministic engine's own suggestion — context, not an anchor.
       selectedCompIds: evidence.suggestedSelection,
     },
-    rules: evidence.rules,
+    rules: {
+      // Disabled rows carry no signal — the appraiser only needs the
+      // active ladder + its thresholds.
+      filters: evidence.rules.filters.filter((f) => f.enabled !== false),
+      adjustments: evidence.rules.adjustments.filter((a) => a.enabled !== false),
+      preferredSaleAgeDays: evidence.rules.preferredSaleAgeDays,
+      asIsThresholdPercent: evidence.rules.asIsThresholdPercent,
+    },
     classificationSummary: evidence.classificationSummary ?? null,
     comps: appraiserCompRows(evidence),
   }
