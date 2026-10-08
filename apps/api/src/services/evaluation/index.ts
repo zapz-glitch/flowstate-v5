@@ -1097,6 +1097,7 @@ export async function performAnalysisPhase1(
   // them as evidence alongside the condition tier (vision-capable).
   const compCoverPhotos: Record<string, string> = {}
   const compConditions: Record<string, CompConditionResult> = {}
+  const clefEvidenceDebug: NonNullable<Phase1Context['clefEvidenceDebug']> = []
   // What the classifier could read per comp — the appraiser weighs
   // photo-verified reads above description-only ones.
   const compEvidenceCoverage: Record<string, 'photo+desc' | 'photo' | 'desc'> = {}
@@ -1111,7 +1112,17 @@ export async function performAnalysisPhase1(
   if (clefCompPromise) {
     clefResolvePromise = clefCompPromise.then(async (settled) => {
       const map: CompCurbAppealMap = {}
-      for (const ev of settled) {
+      for (const [i, ev] of settled.entries()) {
+        const fedId = ev?.propertyId ?? clefInputs[i]?.propertyId ?? `idx${i}`
+        clefEvidenceDebug.push({
+          propertyId: fedId,
+          evidence: ev,
+          listingSource: ev?.listing?.source ?? null,
+          coverage: ev?.listing ? (ev.listing.coverPhotoUrl && ev.listing.description ? 'photo+desc' : ev.listing.coverPhotoUrl ? 'photo' : ev.listing.description ? 'desc' : null) : null,
+          skippedReason: ev?.skippedReason ?? null,
+          classified: !!(ev?.condition && ev.listing),
+        })
+        if (!ev) continue
         const details = ev?.listing?.details
         if (ev?.listing?.coverPhotoUrl) compCoverPhotos[ev.propertyId] = ev.listing.coverPhotoUrl
         if (ev?.listing) {
@@ -1380,6 +1391,7 @@ export async function performAnalysisPhase1(
     jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
     filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
     compCurbAppeal, compDigests, compCoverPhotos, compConditions, compEvidenceCoverage, compListingPhysicalDetails, subjectListingDetails,
+    clefEvidenceDebug,
     redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
     sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
@@ -1933,6 +1945,16 @@ export interface Phase1Context {
   /** Listing-evidence coverage per comp — 'photo+desc' | 'photo' | 'desc';
    *  absent entries had no listing evidence at all. */
   compEvidenceCoverage?: Record<string, 'photo+desc' | 'photo' | 'desc'>
+  /** Per-comp evidence-pipeline status for observability — what each fed
+   *  comp ended with (listing source, coverage, skip reason, classified). */
+  clefEvidenceDebug?: Array<{
+    propertyId: string
+    evidence: CompConditionEvidence | null
+    listingSource: string | null
+    coverage: string | null
+    skippedReason: string | null
+    classified: boolean
+  }>
   compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
   subjectListingDetails: RedfinDetailsResult | null
   redfinDetailsEnabled: boolean

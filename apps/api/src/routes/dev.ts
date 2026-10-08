@@ -104,6 +104,57 @@ dev.post('/comp-condition-batch', async (c) => {
   })
 })
 
+/** Streaming-pool probe — gatherOnly + startCompClassifyPool + onComp feed,
+ *  exactly the eval's wiring. Returns per-comp evidence fields and the
+ *  condition the pool stamped (or why it skipped). */
+dev.post('/comp-classify-pool', async (c) => {
+  const body = await c.req.json<{ comps?: Array<Record<string, unknown>> }>()
+  const comps = (body.comps ?? []).map((b, i) => ({
+    propertyId: (b.propertyId as string) ?? `dev-p${i}`,
+    address: b.address as string,
+    city: b.city as string,
+    state: b.state as string,
+    zipCode: b.zipCode as string,
+    salePrice: b.salePrice as number | undefined,
+    saleDate: b.saleDate as string | undefined,
+    yearBuilt: b.yearBuilt as number | undefined,
+    squareFeet: b.squareFeet as number | undefined,
+  }))
+  if (!comps.length) return c.json({ error: 'comps required' }, 400)
+  const { startCompEvidenceBatch, startCompClassifyPool } = await import('../services/comp-evidence')
+  const evidence = new Map<string, import('../services/comp-evidence').CompConditionEvidence | null>()
+  const pool = startCompClassifyPool(c.env, comps.map((comp) => ({ evidence: null, comp })), { squareFeet: 1800 }, 4)
+  const t0 = Date.now()
+  await startCompEvidenceBatch(c.env, comps, {
+    subject: { squareFeet: 1800 },
+    gatherOnly: true,
+    onComp: (gathered, ev) => {
+      evidence.set(gathered.propertyId, ev)
+      if (ev) pool.push({ evidence: ev, comp: gathered })
+    },
+  })
+  const gatherMs = Date.now() - t0
+  await pool.done()
+  const totalMs = Date.now() - t0
+  return c.json({
+    success: true,
+    gatherMs,
+    classifyTailMs: totalMs - gatherMs,
+    totalMs,
+    data: comps.map((cp) => {
+      const ev = evidence.get(cp.propertyId)
+      return {
+        propertyId: cp.propertyId,
+        source: ev?.listing?.source ?? null,
+        photoCount: ev?.listing?.photoCount ?? 0,
+        tier: ev?.condition?.tier ?? null,
+        model: ev?.condition?.model ?? null,
+        skipped: ev?.skippedReason ?? (ev == null ? 'lane timeout' : null),
+      }
+    }),
+  })
+})
+
 export default dev
 
 /** Token warm probe — runs the same scheduled-handler path live so token

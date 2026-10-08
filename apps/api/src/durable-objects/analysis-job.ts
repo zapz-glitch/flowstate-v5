@@ -1538,6 +1538,18 @@ export class AnalysisJobDO {
                   rulesCheck: c.rulesCheck ?? null,
                 }]),
               ),
+              // Per-comp evidence status — comps the classify pool was fed
+              // and what each one ended with, so a 0-classified run shows
+              // whether gathers timed out, listings were empty, or the
+              // classify itself failed.
+              compEvidence: Object.fromEntries(
+                (ctx.clefEvidenceDebug ?? []).map((d) => [d.propertyId, {
+                  listing: d.listingSource ?? (d.evidence === null ? null : 'none'),
+                  coverage: d.coverage ?? null,
+                  skipped: d.skippedReason ?? null,
+                  classified: d.classified,
+                }]),
+              ),
             },
             opus: {
               model: appraisal?.model ?? null,
