@@ -33,8 +33,18 @@ export interface BandResult {
   trimmedIds: string[]
   /** Transitional comps — counted in IQR, barred from edges. */
   edgeExcludedIds: string[]
+  /** Members outside the 1.0×IQR core fence — survive the 1.5× trim but
+   *  are too incoherent to set band edges (also folded into edgeExcludedIds). */
+  coherenceExcludedIds: string[]
+  /** (high-low)/mid on scaled prices — band coherence measure; high spread
+   *  = the membership doesn't price one market. */
+  spread: number | null
   /** 'ok' | disregard reasons from the §6 ladder. */
   method: 'ok' | 'insufficient_data' | 'extreme_variance' | 'stale' | 'bimodal'
+  /** When method != 'ok' the edges are an implied envelope over surviving
+   *  members — weaker than a verified band but still evidence: usable for
+   *  context and soft checks, never as a verified-band gate. */
+  implied: boolean
 }
 
 export interface EvidenceBands {
@@ -54,6 +64,47 @@ const LINEAR_GLA_WINDOW = 0.15
 /** A comp whose unit rate sits within 5% of an ADJACENT band's median is
  *  transitional: it counts in its band's IQR but cannot set an edge. */
 const TRANSITIONAL_TOLERANCE = 0.05
+
+/** Geo tightening for band membership — block group tightest, then
+ *  neighborhood/subdivision, then census tract. A comp belongs to every
+ *  tier it geo-matches (BG members also appear in neighborhood + tract). */
+export type GeoTier = 'block_group' | 'neighborhood' | 'tract'
+
+const normGeo = (v?: string | null) =>
+  (v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '') || null
+
+/** Geo-tier membership — mirrors the pocket doctrine in evaluation
+ *  (compGeoPriority) so bands tighten exactly the way the gate reasons. */
+export function geoTierMatch(tier: GeoTier, c: CompRow, subject: BandSubject): boolean {
+  if (tier === 'block_group') return c.sameBlockGroup === true
+  if (tier === 'neighborhood') {
+    const sn = normGeo(subject.neighborhoodName)
+    const cn = normGeo(c.neighborhoodName)
+    const ss = normGeo(subject.subdivision)
+    const cs = normGeo(c.subdivision)
+    return (sn != null && cn === sn) || (ss != null && cs === ss) || c.sameBlockGroup === true
+  }
+  return subject.censusTract != null && c.censusTract === subject.censusTract
+}
+
+/** Per-tier band sets — BG → neighborhood → tract. The agent prices off the
+ *  tightest tier that formed a band; the gate verifies the same tier. */
+export interface GeoTieredBands {
+  block_group: EvidenceBands
+  neighborhood: EvidenceBands
+  tract: EvidenceBands
+}
+
+/** Reasoning-model adjudication overrides — compId → final band (or null =
+ *  unbanded). Applied at member assignment before any trimming, so edges
+ *  recompute on the adjudicated membership. */
+export type BandOverrides = Map<string, BandName | null> | Record<string, BandName | null>
+
+const overrideFor = (overrides: BandOverrides | undefined, id: string): BandName | null | undefined => {
+  if (!overrides) return undefined
+  const v = overrides instanceof Map ? overrides.get(id) : (overrides as Record<string, BandName | null>)[id]
+  return v === undefined ? undefined : v
+}
 
 const median = (xs: number[]): number | null => {
   if (xs.length === 0) return null
@@ -109,10 +160,25 @@ const isDistressFlagged = (c: CompRow): boolean => {
   return false
 }
 
+/** Single-comp band assignment — the label the gate/band module actually
+ *  assigns (condition class + vision read + distress override), as opposed
+ *  to the raw listing `classification.type` shown on pool rows. Stamp this
+ *  on evidence comps so the two labels can't diverge silently. */
+export function bandForComp(c: CompRow): BandName | null {
+  return isDistressFlagged(c) ? 'as_is' : classifyBand(c)
+}
+
 export function computeEvidenceBands(
   comps: CompRow[],
   subject: BandSubject,
-  opts: { staleDays?: number; beta?: Partial<Record<BandName, number>> } = {},
+  opts: {
+    staleDays?: number
+    beta?: Partial<Record<BandName, number>>
+    /** Adjudicated band labels — applied at member assignment. */
+    bandOverrides?: BandOverrides
+    /** Restrict membership to comps matching this geo tier vs the subject. */
+    geoTier?: GeoTier
+  } = {},
 ): EvidenceBands {
   const beta = { ...BETA, ...opts.beta }
   const staleDays = opts.staleDays ?? 180
@@ -121,7 +187,9 @@ export function computeEvidenceBands(
   const members: Record<BandName, CompRow[]> = { as_is: [], median: [], arv: [] }
   for (const c of comps) {
     if (!priceable(c)) continue
-    const band = isDistressFlagged(c) ? 'as_is' : classifyBand(c)
+    if (opts.geoTier && !geoTierMatch(opts.geoTier, c, subject)) continue
+    const o = overrideFor(opts.bandOverrides, c.id)
+    const band = o !== undefined ? o : (isDistressFlagged(c) ? 'as_is' : classifyBand(c))
     if (band) members[band].push(c)
   }
 
@@ -138,9 +206,24 @@ export function computeEvidenceBands(
     const pool = members[band]
     const empty: BandResult = {
       band, low: null, high: null, mid: null, n: 0,
-      memberIds: [], trimmedIds: [], edgeExcludedIds: [], method: 'insufficient_data',
+      memberIds: [], trimmedIds: [], edgeExcludedIds: [], coherenceExcludedIds: [],
+      spread: null, method: 'insufficient_data', implied: false,
     }
     if (pool.length === 0) return empty
+
+    // Scaled-to-subject price for one comp — needed before the early-return
+    // branches so implied envelopes can be emitted on non-'ok' methods.
+    const scale = (c: CompRow): number => {
+      if (aSub == null || aSub <= 0) return c.salePrice!
+      const ai = c.squareFeet!
+      const ratio = Math.abs(ai - aSub) / aSub
+      if (ratio <= LINEAR_GLA_WINDOW) return (c.salePrice! / ai) * aSub
+      return c.salePrice! * Math.pow(aSub / ai, beta[band])
+    }
+    const impliedEnvelope = (cs: CompRow[]): Pick<BandResult, 'low' | 'high' | 'mid'> => {
+      const xs = cs.map(scale).sort((a, b) => a - b)
+      return { low: xs[0] ?? null, high: xs[xs.length - 1] ?? null, mid: median(xs) }
+    }
 
     // Stale-market rule — ARV band only (spec §6).
     if (band === 'arv') {
@@ -149,7 +232,7 @@ export function computeEvidenceBands(
         return Math.max(acc, t)
       }, 0)
       if (newest > 0 && (Date.now() - newest) / 86_400_000 > staleDays) {
-        return { ...empty, n: pool.length, memberIds: pool.map((c) => c.id), method: 'stale' }
+        return { ...empty, ...impliedEnvelope(pool), n: pool.length, memberIds: pool.map((c) => c.id), method: 'stale', implied: true }
       }
     }
 
@@ -176,33 +259,43 @@ export function computeEvidenceBands(
         const adjMed = bandMedianRate(adj)
         return adjMed != null && Math.abs(unitRate(c) - adjMed) / adjMed <= TRANSITIONAL_TOLERANCE
       }))
-    const edgeSet = kept.filter((c) => !edgeExcluded.includes(c))
+    // Intra-band coherence — tighter 1.0×IQR fence about the kept core's
+    // quartiles. Members outside it survive the 1.5× trim but are too
+    // incoherent to set edges (the mixed-pocket failure mode: a $253k and
+    // a $610k comp both 'renovated' in one band). n>=4 required so small
+    // bands keep their evidence.
+    const coherenceExcluded = kept.length >= 4
+      ? kept.filter((c) => unitRate(c) < q1 - 1.0 * iqr || unitRate(c) > q3 + 1.0 * iqr)
+      : []
+    const edgeExcludedAll = [...edgeExcluded, ...coherenceExcluded.filter((c) => !edgeExcluded.includes(c))]
+    const edgeSet = kept.filter((c) => !edgeExcludedAll.includes(c))
     const edgePool = edgeSet.length >= 2 ? edgeSet : kept // all-transitional edge case: fall back so the band doesn't collapse
+
+    const spreadOf = (cs: CompRow[]): number | null => {
+      const xs = cs.map(scale).sort((a, b) => a - b)
+      const m = median(xs)
+      return m != null && m > 0 && xs.length > 0 ? (xs[xs.length - 1]! - xs[0]!) / m : null
+    }
 
     // Extreme variance — CV > 0.25 on unit rates → disregard edges.
     const keptRates = kept.map(unitRate)
     const cv = (stdev(keptRates) ?? 0) / (mean(keptRates) ?? 1)
     if (cv > 0.25) {
       return {
-        ...empty, n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
-        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'extreme_variance',
+        ...empty, ...impliedEnvelope(edgePool), n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
+        edgeExcludedIds: edgeExcludedAll.map((c) => c.id), coherenceExcludedIds: coherenceExcluded.map((c) => c.id),
+        spread: spreadOf(edgePool), method: 'extreme_variance', implied: true,
       }
     }
 
     // Bimodal check — sorted scaled prices with a >20% interior gap.
-    const scale = (c: CompRow): number => {
-      if (aSub == null || aSub <= 0) return c.salePrice!
-      const ai = c.squareFeet!
-      const ratio = Math.abs(ai - aSub) / aSub
-      if (ratio <= LINEAR_GLA_WINDOW) return unitRate(c) * aSub
-      return c.salePrice! * Math.pow(aSub / ai, beta[band])
-    }
     const scaled = edgePool.map(scale).sort((a, b) => a - b)
     const gaps = scaled.slice(1).map((v, i) => (v - scaled[i]!) / scaled[i]!)
     if (gaps.some((g) => g > 0.2)) {
       return {
-        ...empty, n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
-        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'bimodal',
+        ...empty, ...impliedEnvelope(edgePool), n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
+        edgeExcludedIds: edgeExcludedAll.map((c) => c.id), coherenceExcludedIds: coherenceExcluded.map((c) => c.id),
+        spread: spreadOf(edgePool), method: 'bimodal', implied: true,
       }
     }
 
@@ -214,8 +307,11 @@ export function computeEvidenceBands(
       n: kept.length,
       memberIds: kept.map((c) => c.id),
       trimmedIds,
-      edgeExcludedIds: edgeExcluded.map((c) => c.id),
+      edgeExcludedIds: edgeExcludedAll.map((c) => c.id),
+      coherenceExcludedIds: coherenceExcluded.map((c) => c.id),
+      spread: spreadOf(edgePool),
       method: 'ok',
+      implied: false,
     }
   }
 
@@ -223,6 +319,21 @@ export function computeEvidenceBands(
     as_is: build('as_is'),
     median: build('median'),
     arv: build('arv'),
+  }
+}
+
+/** The three geo-tightening band sets — one computeEvidenceBands pass per
+ *  tier. BG members naturally also appear in the wider tiers, so the agent
+ *  can read "the block group's renovated sales" vs "the tract's". */
+export function computeGeoTieredBands(
+  comps: CompRow[],
+  subject: BandSubject,
+  opts: Parameters<typeof computeEvidenceBands>[2] = {},
+): GeoTieredBands {
+  return {
+    block_group: computeEvidenceBands(comps, subject, { ...opts, geoTier: 'block_group' }),
+    neighborhood: computeEvidenceBands(comps, subject, { ...opts, geoTier: 'neighborhood' }),
+    tract: computeEvidenceBands(comps, subject, { ...opts, geoTier: 'tract' }),
   }
 }
 
@@ -236,7 +347,11 @@ export function bandEdgeCheck(
   const epsHigh = Math.abs(agentHigh - evidenceHigh) / evidenceHigh
   const inter = Math.max(0, Math.min(agentHigh, evidenceHigh) - Math.max(agentLow, evidenceLow))
   const union = Math.max(agentHigh, evidenceHigh) - Math.min(agentLow, evidenceLow)
-  // Degenerate point band (n=1): zero-width edges agree iff they coincide.
-  const iou = union > 0 ? inter / union : (agentLow === agentHigh && epsLow === 0 && epsHigh === 0 ? 1 : 0)
+  // Degenerate/narrow bands: a union smaller than 5% of the band value
+  // means the edges nearly coincide — the IoU ratio divides by noise and
+  // the eps tolerance carries the agreement test instead.
+  const iou = union <= evidenceHigh * 0.05
+    ? (epsLow <= 0.1 && epsHigh <= 0.1 ? 1 : 0)
+    : inter / union
   return { epsLow, epsHigh, iou }
 }

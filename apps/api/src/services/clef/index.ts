@@ -14,8 +14,11 @@
  */
 
 import type { Env } from '../../types'
+import { decisionsRun } from '../decisions'
 
-export type ClefModel = 'clef' | 'clef-flash' | 'openai/gpt-6-luna'
+// Workers-AI reader names, the legacy OpenRouter lane, or whichever
+// reasoning model answered (e.g. 'claude-haiku-5-5' via Anthropic).
+export type ClefModel = 'clef' | 'clef-flash' | 'openai/gpt-6-luna' | (string & {})
 
 export interface ClefImage {
   content_type: 'image/png' | 'image/jpeg' | 'image/webp'
@@ -74,6 +77,11 @@ export interface CompConditionResult {
   conditionLabel: string
   /** Clef's reported confidence in the score answer, when present */
   confidence?: number
+  /** 1-2 sentence evidence summary the classifier wrote (haiku path). */
+  summary?: string
+  /** Comp-rules check — does the comp satisfy the selection rules and,
+   *  if not, what is it missing (price, sqft, recency, legitimacy). */
+  rulesCheck?: { meets: boolean; missing: string[] }
   /** Agent-assist digest — advisory pre-read the Evaluation Agent weighs
    *  next to the raw data; never a verdict by itself. */
   hint?: CompHint
@@ -90,7 +98,7 @@ export const CONDITION_SCALE = [
   'Renovated — comprehensively remodeled for sale',
 ] as const
 
-const CONDITION_QUESTIONS: Record<string, Question> = {
+export const CONDITION_QUESTIONS: Record<string, Question> = {
   renovated: {
     type: 'noul',
     instructions:
@@ -237,7 +245,8 @@ function scoreIdx(v: unknown): { idx: number; score: number } {
 }
 
 export function isClefAvailable(env: Env): boolean {
-  return typeof env.AI?.run === 'function'
+  return typeof env.AI?.run === 'function' ||
+    (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY)
 }
 
 export async function classifyCompCondition(
@@ -264,14 +273,36 @@ export async function classifyCompCondition(
   }
 
   const started = Date.now()
-  const res = (await env.AI.run(`@cf/cloudflare/${model}`, {
-    model,
-    state,
-    questions: CONDITION_QUESTIONS,
-    ...(input.images?.length ? { images: input.images.slice(0, 4) } : {}),
-  })) as { model?: string; answers?: Record<string, unknown> }
+  // 'decisions' lane — same questions through OpenAI's dedicated endpoint.
+  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  const res: { model?: string; answers?: Record<string, unknown> } = useDecisions
+    ? { ...(await decisionsRun(env, {
+        state,
+        questions: CONDITION_QUESTIONS,
+        images: input.images?.slice(0, 4) as Array<{ content_type?: string; base64: string }> | undefined,
+      })), model: env.DECISIONS_MODEL || 'gpt-6-luna' }
+    : ((await env.AI.run(`@cf/cloudflare/${model}`, {
+        model,
+        state,
+        questions: CONDITION_QUESTIONS,
+        ...(input.images?.length ? { images: input.images.slice(0, 4) } : {}),
+      })) as { model?: string; answers?: Record<string, unknown> })
 
   const answers = res?.answers ?? {}
+  return {
+    ...buildConditionResult(answers),
+    model: (res?.model ?? model) as ClefModel,
+    modelVersion: res?.model ?? model,
+    durationMs: Date.now() - started,
+  }
+}
+
+/** Assemble a CompConditionResult from an answer map — shared by the
+ *  single-comp path and the batch Decisions classifier (per-comp answer
+ *  subsets are re-keyed then passed through the same assembly). */
+export function buildConditionResult(
+  answers: Record<string, unknown>,
+): Omit<CompConditionResult, 'model' | 'modelVersion' | 'durationMs'> {
   const { idx, score } = scoreIdx(answers.condition)
   const clamped = Math.max(0, Math.min(CONDITION_SCALE.length - 1, idx))
   const renP = prob(answers.renovated)
@@ -305,8 +336,5 @@ export async function classifyCompCondition(
     conditionLabel: CONDITION_SCALE[clamped].split(' — ')[0],
     confidence: typeof conf === 'number' ? conf : undefined,
     hint,
-    model,
-    modelVersion: res?.model ?? model,
-    durationMs: Date.now() - started,
   }
 }

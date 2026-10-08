@@ -18,6 +18,7 @@
 
 import type { Env } from '../../types'
 import type { Question } from '../clef'
+import { decisionsRun } from '../decisions'
 
 export type DigestStage = 'A' | 'B' | 'C'
 
@@ -193,18 +194,22 @@ export async function assessCompDigest(
   subject: DigestSubject,
   stage: DigestStage,
 ): Promise<CompDigest | null> {
-  if (!env.AI) return null
+  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  if (!env.AI && !useDecisions) return null
   const model = env.CLEF_MODEL === 'clef' ? 'clef' : 'clef-flash'
   const started = Date.now()
-  const res = (await env.AI.run(`@cf/cloudflare/${model}`, {
-    model,
-    state: {
-      subject: `Stage-${stage} comparable digest — advisory pre-read for the appraisal Evaluation Agent.`,
-      appraisalSubject: subject,
-      comparable: comp,
-    },
-    questions: STAGE_QUESTIONS[stage],
-  }).catch(() => null)) as { answers?: Record<string, unknown> } | null
+  const state = {
+    subject: `Stage-${stage} comparable digest — advisory pre-read for the appraisal Evaluation Agent.`,
+    appraisalSubject: subject,
+    comparable: comp,
+  }
+  const res = useDecisions
+    ? await decisionsRun(env, { state, questions: STAGE_QUESTIONS[stage] }).catch(() => null)
+    : ((await env.AI!.run(`@cf/cloudflare/${model}`, {
+        model,
+        state,
+        questions: STAGE_QUESTIONS[stage],
+      }).catch(() => null)) as { answers?: Record<string, unknown> } | null)
   const answers = res?.answers
   if (!answers) return null
   const band = choicePick(answers.band, ['as_is', 'median', 'arv', 'outlier'] as const)

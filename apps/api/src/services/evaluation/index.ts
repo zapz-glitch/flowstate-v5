@@ -51,19 +51,22 @@ import {
   type RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { gatherCompConditionEvidence, startCompEvidenceBatch, type CompConditionEvidence } from '../comp-evidence'
+import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
+import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 import { gradeVerdict } from './verdict-grade'
 import { buildRenovationEvidence, priceAgentRenovation } from './renovation'
-import { computeEvidenceBands, type EvidenceBands } from '@flowstate-api/shared/appraisal'
+
+
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, unavailableAssessment, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
+import { isReasoningProviderAvailable } from '../llm'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
 import {
@@ -605,6 +608,7 @@ export async function performAnalysisPhase1(
           address: bundle.property.address,
           squareFeet: bundle.property.squareFeet,
           yearBuilt: bundle.property.yearBuilt,
+          description: photoBundle?.subject?.description ?? null,
         })
       } catch (e) {
         return unavailableAssessment({
@@ -778,7 +782,7 @@ export async function performAnalysisPhase1(
   )
   const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
 
-  const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY)
+  const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
         (): RedfinDetailsResult => ({ details: null, skippedReason: 'fetch_failed' }),
@@ -818,6 +822,13 @@ export async function performAnalysisPhase1(
     saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
     yearBuilt: comp.yearBuilt ?? undefined,
     squareFeet: comp.squareFeet ?? undefined,
+    // Geo context for the batch classify — Decisions reads the pool's
+    // geocode data when it bands/conditions each comp.
+    sameBlockGroup: comp.sameBlockGroup ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    subdivision: comp.subdivision ?? null,
+    censusTract: comp.censusTract ?? null,
+    distanceMiles: comp.distanceMiles ?? null,
   }))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)
@@ -829,6 +840,25 @@ export async function performAnalysisPhase1(
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
               })
             : new Map<string, CompConditionEvidence | null>()
+          // Classification runs after geo-stamps land — the classifier reads
+          // the GATED pool's geo fields (BG / neighborhood / tract), which
+          // didn't exist when the scrape started. Haiku is the comp
+          // classifier (no decision authority); Decisions is the fallback
+          // lane when the Anthropic key isn't configured.
+          const classifyInputs = clefInputs
+            .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
+            .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
+          if (env.ANTHROPIC_API_KEY) {
+            await classifyCompPoolHaiku(
+              env, classifyInputs,
+              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+            ).catch(() => null)
+          } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+            await classifyCompBatchDecisions(
+              env, classifyInputs,
+              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+            ).catch(() => null)
+          }
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null
@@ -954,8 +984,8 @@ export async function performAnalysisPhase1(
 
   // ── 6. Valuation ────────────────────────────────────────────────────────────
   const buybox = params.buybox ?? {}
-  const subjectSqft = bundle.property.squareFeet || 0
-  const compAvgSqft =
+  let subjectSqft = bundle.property.squareFeet || 0
+  let compAvgSqft =
     enabledComps.length > 0
       ? enabledComps.reduce((sum, c) => sum + (c.squareFeet || 0), 0) / enabledComps.length
       : subjectSqft
@@ -1049,6 +1079,10 @@ export async function performAnalysisPhase1(
   // stamps ride the response; if it lands late, onCurbAppeal lets the
   // caller patch the persisted result (cards populate on next fetch).
   let compCurbAppeal: CompCurbAppealMap | undefined
+  // Cover photo URLs persist per comp — the final evaluation agent reads
+  // them as evidence alongside the condition tier (vision-capable).
+  const compCoverPhotos: Record<string, string> = {}
+  const compConditions: Record<string, CompConditionResult> = {}
   const compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData> = {}
   // Permit types that validate added living area — county-dependent free
   // text; a match means the marketed sqft is a permitted product.
@@ -1062,6 +1096,7 @@ export async function performAnalysisPhase1(
       const map: CompCurbAppealMap = {}
       for (const ev of settled) {
         const details = ev?.listing?.details
+        if (ev?.listing?.coverPhotoUrl) compCoverPhotos[ev.propertyId] = ev.listing.coverPhotoUrl
         if (details) {
           compListingPhysicalDetails[ev.propertyId] = {
             style: details.style,
@@ -1076,6 +1111,7 @@ export async function performAnalysisPhase1(
         }
         if (!ev?.condition || !ev.listing) continue
         const c = ev.condition
+        compConditions[ev.propertyId] = c
         let condition =
           c.asIs || c.conditionLabel === 'Poor'
             ? 'distressed' as const
@@ -1093,7 +1129,7 @@ export async function performAnalysisPhase1(
           hint: ev.hint ? { priceSanity: ev.hint.priceSanity, anchorQuality: ev.hint.anchorQuality } : undefined,
           source: 'vision',
           confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
-          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${c.model === 'openai/gpt-6-luna' ? ' · luna' : ''}${ev.listing.description ? ' · listing text available' : ''}`,
+          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${c.model && !c.model.startsWith('clef') ? ` · ${c.model}` : ''}${ev.listing.description ? ' · listing text available' : ''}`,
           photosExamined: ev.listing.photoCount,
         }
         // Sqft cross-check — Zillow counts finished basement/upper floors
@@ -1204,12 +1240,53 @@ export async function performAnalysisPhase1(
       }
     }
     // Same supplement on the subject — the provider misses beds entirely
-    // for some parcels; the listing carries them.
+    // for some parcels; the listing carries them. Sqft and year built fill
+    // the same way: ATTOM stays authoritative when present, the MLS read
+    // only lands where the provider has nothing (a missing subject GLA
+    // breaks band scaling, so the fill matters here).
     if (subjectRes?.details) {
       bundle.property.bedrooms ??= subjectRes.details.beds ?? null
       bundle.property.bathrooms ??= subjectRes.details.bathsFull != null
         ? subjectRes.details.bathsFull + (subjectRes.details.bathsHalf ?? 0) * 0.5
         : null
+      bundle.property.squareFeet ??= subjectRes.details.squareFeet ?? null
+      bundle.property.yearBuilt ??= subjectRes.details.yearBuilt ?? null
+      // The fill lands after the valuation capture — when the provider had
+      // no area, rehab math ran on 0sf. Recompute so the report's buy/
+      // wholesale numbers use the same sqft the bands now see.
+      if (subjectSqft <= 0 && (bundle.property.squareFeet ?? 0) > 0) {
+        subjectSqft = bundle.property.squareFeet as number
+        compAvgSqft = enabledComps.length > 0
+          ? enabledComps.reduce((sum, c) => sum + (c.squareFeet || 0), 0) / enabledComps.length
+          : subjectSqft
+        if (valuationAnchor != null) {
+          valuation = valuationService.calculateValuation({
+            arv: valuationAnchor,
+            subjectSqft,
+            compAvgSqft,
+            rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+            skipBaseRehab: derivedBuybox.renovatedVerified === true,
+            locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, valuationAnchor, params.proximityConfig),
+            majorItems: derivedBuybox.majorItems,
+            additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
+            closingCostsPercent: buybox.closingCostsPercent ?? 8,
+            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+            wholesaleFee: buybox.wholesaleFee ?? 10000,
+            desiredProfit: buybox.desiredProfit,
+          })
+          rehabLevelEstimates = calculateAllRehabLevelEstimates(valuationService, {
+            arv: valuationAnchor,
+            subjectSqft,
+            compAvgSqft,
+            selectedRehabLevelIndex: derivedBuybox.rehabLevelIndex,
+            majorItems: derivedBuybox.majorItems,
+            additionPlay: buybox.additionPlay ?? 0,
+            closingCostsPercent: buybox.closingCostsPercent ?? 8,
+            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+            wholesaleFee: buybox.wholesaleFee ?? 10000,
+          })
+        }
+      }
     }
     step(
       'listing_details',
@@ -1280,7 +1357,7 @@ export async function performAnalysisPhase1(
   return freezePhase1Context({
     jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
     filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
-    compCurbAppeal, compDigests, compListingPhysicalDetails, subjectListingDetails,
+    compCurbAppeal, compDigests, compCoverPhotos, compConditions, compListingPhysicalDetails, subjectListingDetails,
     redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
     sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
@@ -1368,7 +1445,7 @@ export async function performAnalysisPhase2(
     // attempts — a persistently failing pool ships its honest fallback
     // tier, never a forced number.
     const bSubjectFields = buildBSubjectFields(bundle, valuation, subjectAvm)
-    const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal, compDigests)
+    const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal, compDigests, ctx.compCoverPhotos)
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
       const fails: string[] = []
@@ -1825,6 +1902,12 @@ export interface Phase1Context {
   compCurbAppeal?: CompCurbAppealMap
   /** Clef stage digests per comp — advisory agent-assist reads. */
   compDigests?: Record<string, CompDigestStages>
+  /** Cover photo URL per comp — persisted listing evidence the final
+   *  evaluation agent reads with the condition tier (vision-capable). */
+  compCoverPhotos?: Record<string, string>
+  /** Haiku condition classification per comp — label, tier, summary and
+   *  the comp-rules check the classifier notated. */
+  compConditions?: Record<string, CompConditionResult>
   compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
   subjectListingDetails: RedfinDetailsResult | null
   redfinDetailsEnabled: boolean
@@ -1857,6 +1940,7 @@ export interface Phase1Context {
    *  and gate decision (rejected | accepted | accepted_final). */
   selectionAttempts?: SelectionAttempt[]
 }
+
 
 export interface SelectionAttempt {
   selection: AgentSelection
@@ -1928,11 +2012,13 @@ function buildBSubjectFields(
   }
 }
 
-function toBCompsOf(
+export function toBCompsOf(
   comparables: AppraisedComparable[],
   compClassifications: Map<string, ClassificationResult>,
   compCurbAppeal?: CompCurbAppealMap,
   compDigests?: Record<string, CompDigestStages>,
+  compCoverPhotos?: Record<string, string>,
+  compConditions?: Record<string, CompConditionResult>,
 ): BComp[] {
   return comparables.map((comp) => ({
     address: comp.address ?? null,
@@ -1959,7 +2045,13 @@ function toBCompsOf(
       ? { type: compClassifications.get(comp.id)!.classification }
       : null,
     curbAppeal: compCurbAppeal?.[comp.id] ?? null,
+    conditionLabel: compConditions?.[comp.id]?.conditionLabel ?? null,
+    compTier: compConditions?.[comp.id]?.tier ?? null,
+    conditionAsIs: compConditions?.[comp.id]?.asIs ?? null,
+    conditionSummary: compConditions?.[comp.id]?.summary ?? null,
+    rulesCheck: compConditions?.[comp.id]?.rulesCheck ?? null,
     clefDigest: compDigests?.[String(comp.id)] ?? null,
+    coverPhotoUrl: compCoverPhotos?.[comp.id] ?? null,
     evidenceVerification: comp.evidenceVerification ?? null,
     appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
   }))
@@ -2026,13 +2118,6 @@ export interface AgentSelection {
   selectedCompIds: string[]
   /** Subset of selectedCompIds that drove the ARV (defaults to all picks). */
   drivers?: string[]
-  /** Per-comp band assignment for the report: arv | median | asis | outlier. */
-  bands?: Record<string, 'arv' | 'median' | 'asis' | 'outlier'>
-  /** Stated band edges for the verifier — docs/BANDING-VERIFICATION-SPEC.md §3.
-   *  Each band carries its scaled-price edges + member compIds. A band that
-   *  legitimately doesn't exist in the pool is omitted (INSUFFICIENT_DATA). */
-  bandEdges?: Partial<Record<'as_is' | 'median' | 'arv',
-    { low: number; high: number; mid: number; compIds: string[] }>>
   /** Per-comp adjustments applied by the agent (audit trail). */
   adjustments?: Record<string, Array<{ type: string; amount: number; note?: string }>>
   flags?: string[]
@@ -2046,6 +2131,9 @@ export interface AgentSelection {
   renovation?: import('./renovation').AgentRenovation
   /** Free-text verdict summary for the run record. */
   notes?: string
+  /** Appraiser's 0-10 rating of the dataset it was handed — 10 means the
+   *  evidence made the decision easy and unambiguous. Rides the trace. */
+  dataQuality?: { score: number; notes: string }
 }
 
 /** Server-side bounds on the agent verdict — coherence checks, never an
@@ -2143,14 +2231,15 @@ export interface HarnessEvidence {
   /** Renovation evidence — zone grades, description claims, permit ledger,
    *  seller notes, finish parity, flip-delta + cost schedule (advisory). */
   renovationEvidence?: import('./renovation').RenovationEvidence
-  comps: Array<BComp & { id: string; salePriceFormatted?: string }>
+  /** Haiku's pocket-desirability read for the subject's location — its
+   *  own call (docs/HAIKU-POCKET-DESIRABILITY.md), attached after the
+   *  bundle is built so the appraiser sees it. */
+  pocketDesirability?: import('./pocket-desirability').PocketDesirability
+  comps: Array<BComp & { id: string; salePriceFormatted?: string; coverPhotoUrl?: string | null }>
   suggestedSelection: string[]
   classifications: Record<string, ClassificationResult>
   classificationSummary: ReturnType<typeof summarizeClassifications> | null
   insufficient: boolean
-  /** Deterministic evidence bands — the verifier's side of the band contract.
-   *  The agent states bandEdges against these (docs/BANDING-VERIFICATION-SPEC). */
-  evidenceBands: EvidenceBands
   rules: {
     filters: AppraisalFilter[]
     adjustments: AppraisalAdjustment[]
@@ -2208,7 +2297,8 @@ export function buildRenoEvidence(
 
 export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   const compClassifications = new Map(ctx.compClassifications)
-  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests)
+  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos, ctx.compConditions)
+  const rows = bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b }))
   return {
     jobId: ctx.jobId,
     subject: {
@@ -2222,7 +2312,6 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
     classifications: Object.fromEntries(compClassifications),
     classificationSummary: ctx.classificationSummary ?? null,
     insufficient: ctx.insufficient,
-    evidenceBands: computeEvidenceBands(bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b })), ctx.bundle.property),
     rules: {
       filters: ctx.filters,
       adjustments: ctx.adjustments,
@@ -2233,26 +2322,46 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   }
 }
 
-/** Agent retry round — deepen enrichment on thin pool members and restamp
- *  verification, mirroring the B ladder's third attempt. Returns the number
- *  of fields filled so the caller can decide whether to re-offer the bundle. */
-export async function harnessDeepen(ctx: Phase1Context, params: EvaluationParams): Promise<number> {
-  if (!params.enrichComparables) return 0
+/** Agent retry round — deepen enrichment on thin IN-POCKET pool members
+ *  (block group / neighborhood / same tract only — out-of-pocket comps are
+ *  never deepened) and restamp verification, mirroring the B ladder's third
+ *  attempt. `detailsFetcher` is the caller's listing-details lookup (Redfin
+ *  MLS details); its sale history fills undated comps — a comp ATTOM
+ *  included stays usable whether or not a date ever lands. Returns the
+ *  number of fields filled so the caller can decide whether to re-offer
+ *  the bundle. */
+export async function harnessDeepen(
+  ctx: Phase1Context,
+  params: EvaluationParams,
+  detailsFetcher?: (comp: NormalizedComparable) => Promise<{ saleDate?: string | null } | null>,
+): Promise<number> {
+  const subject = ctx.bundle.property
+  const inPocket = (c: AppraisedComparable): boolean => compGeoPriority(subject, c) != null
   const thin = ctx.appraisalResult.comparables
-    .filter((c) => c.avmValue == null || c.landAssessedValue == null)
+    .filter((c) => inPocket(c) && (c.avmValue == null || c.landAssessedValue == null || (c.salePrice != null && c.saleDate == null)))
     .sort((a, b) =>
-      Number((b.censusTract != null && b.censusTract === ctx.bundle.property.censusTract) || b.sameBlockGroup === true)
-      - Number((a.censusTract != null && a.censusTract === ctx.bundle.property.censusTract) || a.sameBlockGroup === true)
+      (compGeoPriority(subject, a) ?? 9) - (compGeoPriority(subject, b) ?? 9)
       || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
     .slice(0, 8)
-  const enriched = await params.enrichComparables(thin).catch(() => null)
-  const byId = new Map((enriched ?? []).map((c) => [c.id, c]))
   let deepened = 0
-  for (const comp of ctx.appraisalResult.comparables) {
-    const e = byId.get(comp.id)
-    if (!e) continue
-    if (comp.avmValue == null && e.avmValue != null) { comp.avmValue = e.avmValue; deepened++ }
-    if (comp.landAssessedValue == null && e.landAssessedValue != null) { comp.landAssessedValue = e.landAssessedValue; deepened++ }
+  if (params.enrichComparables && thin.length > 0) {
+    const enriched = await params.enrichComparables(thin).catch(() => null)
+    const byId = new Map((enriched ?? []).map((c) => [c.id, c]))
+    for (const comp of ctx.appraisalResult.comparables) {
+      const e = byId.get(comp.id)
+      if (!e) continue
+      if (comp.avmValue == null && e.avmValue != null) { comp.avmValue = e.avmValue; deepened++ }
+      if (comp.landAssessedValue == null && e.landAssessedValue != null) { comp.landAssessedValue = e.landAssessedValue; deepened++ }
+    }
+  }
+  // Listing-history date fill — undated in-pocket comps only. Best-effort:
+  // an undated comp is never dropped, the fill just upgrades its conf tier.
+  if (detailsFetcher) {
+    const undated = thin.filter((c) => c.saleDate == null && c.salePrice != null)
+    const fills = await Promise.all(undated.map(async (c) => ({ c, d: await detailsFetcher(c).catch(() => null) })))
+    for (const { c, d } of fills) {
+      if (d?.saleDate) { c.saleDate = d.saleDate; deepened++ }
+    }
   }
   if (deepened > 0) {
     stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays, new Map(ctx.compClassifications))
