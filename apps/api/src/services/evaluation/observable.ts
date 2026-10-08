@@ -163,6 +163,11 @@ const SUBJECT_QUESTIONS = {
     criteria: { SUPPORTS: 'condition supports the asking-price position', PRICE_APPEARS_HIGH: 'asking appears high for the observed condition', PRICE_APPEARS_LOW: 'asking appears low for the observed condition', INSUFFICIENT: 'cannot tell' },
     instructions: "Does the SUBJECT's observed condition reasonably support its asking-price position relative to similar neighborhood properties?",
   },
+  s8_lot_premium: {
+    type: 'choice' as const,
+    criteria: { WATERFRONT: 'waterfront or water-adjacent lot', OVERSIZED_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac premium lot', POOL: 'pool visible on property', NONE: 'no premium lot features evident', UNVERIFIED: 'imagery insufficient to tell' },
+    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? Satellite imagery counts as evidence — look for waterfront, oversized or corner lots, cul-de-sac position, or a visible pool.',
+  },
 }
 
 const COMP_QUESTIONS = {
@@ -197,6 +202,11 @@ const COMP_QUESTIONS = {
     type: 'choice' as const, criteria: TIER_CHOICES,
     instructions: 'Using the supplied price distribution as the primary evidence, assign the COMP to its market price tier. Consider property condition, physical differences, and evidence conflicts. Do not change a verified price-position fact merely because the property appears renovated or dated. Preserve disagreements between price position and condition evidence for the final appraiser.',
   },
+  c8_premium_attributes: {
+    type: 'choice' as const,
+    criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
+    instructions: "Does the description, cover photo, or supplied property data indicate a premium lot attribute that could explain a price premium — waterfront, oversized/corner lot, cul-de-sac, view, or pool? Pick the strongest single attribute; NONE if none is evident. This explains non-condition price premiums.",
+  },
 }
 
 // ─── Answer shapes ───────────────────────────────────────────────────────
@@ -212,6 +222,8 @@ export interface SubjectObservables {
   /** Whether the evidence supports that code-assigned position. */
   askPriceSupport: string | null
   priceConditionAgreement: string | null
+  /** Premium lot attribute from satellite + photos (waterfront/pool/corner etc.). */
+  lotPremium: string | null
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
@@ -231,6 +243,8 @@ export interface CompObservables {
   priceConditionAgreement: string | null
   unexplainedPremiumP: number | null
   finalTier: string | null
+  /** Non-condition premium driver (waterfront/lot/pool/view) — explains c6 flags. */
+  premiumAttributes: string | null
   confidence: Record<string, number>
   model: string
   durationMs: number
@@ -249,10 +263,29 @@ const confs = (a: DecisionsAnswers): Record<string, number> =>
 
 const DECISIONS_IMG_CAP = 128
 
+/** Satellite tile for the subject — Google Maps Static API, aerial view
+ *  feeds the s8 lot-premium question. Null when the key/coords/fetch miss. */
+async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
+  const key = env.GOOGLE_MAPS_KEY
+  const lat = subject.latitude, lng = subject.longitude
+  if (!key || typeof lat !== 'number' || typeof lng !== 'number') return null
+  const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&maptype=satellite&key=${key}`
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+  if (!res.ok) return null
+  const mime = res.headers.get('content-type') ?? 'image/png'
+  if (!mime.startsWith('image/')) return null
+  const buf = new Uint8Array(await res.arrayBuffer())
+  let bin = ''
+  for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192))
+  return { base64: btoa(bin), content_type: mime }
+}
+
 export async function decisionsSubjectObservables(
   env: Env,
   input: {
     subject: Record<string, unknown>
+    /** Satellite tile when available — prepended to the photo set. */
+    satelliteImage?: { base64: string; content_type?: string } | null
     photoUrls: string[]
     coverPhotoUrl?: string | null
     description?: string | null
@@ -264,8 +297,15 @@ export async function decisionsSubjectObservables(
   if (!isDecisionsAvailable(env)) return null
   const started = Date.now()
   const urls = input.photoUrls.length > 0 ? input.photoUrls : (input.coverPhotoUrl ? [input.coverPhotoUrl] : [])
-  const images = await fetchImagesAsBase64(urls, { concurrency: 10 })
-  const imgs = urls.map((u) => images.get(u)).filter((i): i is NonNullable<typeof i> => !!i)
+  const [sat, images] = await Promise.all([
+    fetchSatelliteTile(env, input.subject).catch(() => null),
+    fetchImagesAsBase64(urls, { concurrency: 10 }),
+  ])
+  const satImg = sat ?? input.satelliteImage ?? null
+  const imgs = [
+    ...(satImg ? [{ mimeType: satImg.content_type ?? 'image/png', base64: satImg.base64 }] : []),
+    ...urls.map((u) => images.get(u)).filter((i): i is NonNullable<typeof i> => !!i),
+  ]
   const askPos = input.askPpsf != null && input.benchmark ? positionFor(input.askPpsf, input.benchmark) : null
 
   const state = {
@@ -318,6 +358,7 @@ export async function decisionsSubjectObservables(
     askPricePosition: askPos?.tier ?? null,
     askPriceSupport: choiceOf(merged, 's6_ask_price_support'),
     priceConditionAgreement: choiceOf(merged, 's7_price_condition'),
+    lotPremium: choiceOf(merged, 's8_lot_premium'),
     confidence: confs(merged),
     photosRead: imgs.length,
     photosTotal: urls.length,
@@ -384,6 +425,7 @@ export async function decisionsCompObservables(
     priceConditionAgreement: choiceOf(a, 'c5_price_condition'),
     unexplainedPremiumP: probOf(a, 'c6_unexplained_premium'),
     finalTier: choiceOf(a, 'c7_final_tier'),
+    premiumAttributes: choiceOf(a, 'c8_premium_attributes'),
     confidence: confs(a),
     model: env.DECISIONS_MODEL || 'gpt-6-luna',
     durationMs: Date.now() - started,
