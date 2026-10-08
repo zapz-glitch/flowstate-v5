@@ -70,7 +70,14 @@ export class AnthropicProvider extends BaseLLMProvider {
     if (request.systemPrompt) body.system = request.systemPrompt
     if (request.tools?.length) body.tools = request.tools
     if (request.temperature != null) body.temperature = request.temperature
-    if (request.reasoning?.enabled) body.thinking = { type: 'adaptive' }
+    if (request.reasoning?.enabled) {
+      body.thinking = { type: 'adaptive' }
+      // Effort levels on the 5.5 adaptive-thinking models ride
+      // output_config — 'high' for the appraiser seat.
+      if (request.reasoning.effort) {
+        body.output_config = { effort: request.reasoning.effort }
+      }
+    }
     if (request.jsonSchema) {
       body.output_format = { type: 'json_schema', schema: sanitizeSchema(request.jsonSchema.schema) }
     } else if (request.responseFormat === 'json') {

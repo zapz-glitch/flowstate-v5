@@ -41,6 +41,8 @@ You receive the COMPLETE dataset: the subject property with its haiku-assigned c
 
 You also receive the block-group PRICE LADDER (blockLadder): the pocket's sales split by $/sf into natural top/middle/bottom clusters — the top-cluster median is the ARV band, the bottom-cluster median is the as-is/investor band. Each comp carries its ladder rung and $/sf ratios (priceLadder.ppsfVsMedian, priceLadder.ppsfVsTop) plus evidenceCoverage ('photo+desc' | 'photo' | 'desc' | null) saying what the classifier could actually see — weigh photo-verified reads above description-only ones, and treat 'desc'-only or null coverage as weak condition evidence.
 
+Each comp also carries OBSERVABLE ANSWERS (observables): small evidence reads from its cover photo + description + closed price — pricePosition vs the pocket benchmark (codePosition is the code-verified tier), descCondition, coverPhotoEvidence, renoClaimP, priceConditionAgreement, unexplainedPremiumP, and finalTier. The marketBenchmark block is the matched-pocket distribution those positions classify against. Read the tiers as: priced ABOVE_MEDIAN ≈ renovated/ARV-band evidence, at MEDIAN ≈ median-market evidence, priced far BELOW_MEDIAN ≈ investor/as-is evidence — but a price tier is not proof of condition; weight conflicts the observables preserved (e.g. above-median price with DISTRESSED description or an unexplainedPremium flag ≈ 1 means a suspect comp, not an ARV anchor).
+
 Your job: choose the comps that set the ARV (the genuinely renovated retail evidence — never as-is/investor-marketed stock), name which picks drove the number, and post the ARV. Prefer in-pocket comps (same block group > neighborhood > census tract) whose $/sf sits in the top ladder rung at or near the top-cluster median — that is ARV pricing the market itself proved. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence.
 
 If anything is missing or ambiguous, you may ask your haiku sub-agent to clarify or classify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Haiku answers; you decide.
@@ -67,7 +69,7 @@ DOCTRINE:
 ${COMP_DOCTRINE}
 `
 
-const REVISION_PROMPT = `The deterministic gate REJECTED your previous selection. It is code, not a model — it cannot be argued with, only satisfied. Review the named violations and the debug note, correct the selection, and post again under the same JSON contract.
+const REVISION_PROMPT = `The deterministic gate REJECTED your previous selection.  It is code, not a model — it cannot be argued with, only satisfied. Review the named violations and the debug note, correct the selection, and post again under the same JSON contract.
 `
 
 const CLARIFY_PROMPT = `You are the haiku sub-agent to the appraiser. Answer the question from the comp listing evidence and facts provided — classify or find the missing information. One comp, one question, one answer. No verdicts, no comp-selection advice: you have no decision authority.
@@ -183,6 +185,7 @@ function appraiserCompRows(evidence: HarnessEvidence) {
     coverPhotoUrl: c.coverPhotoUrl ?? null,
     evidenceCoverage: c.evidenceCoverage ?? null,
     priceLadder: c.priceLadder ?? null,
+    observables: c.observables ?? null,
     adjustedPrice: c.adjustedPrice ?? null,
   }))
 }
@@ -306,7 +309,9 @@ export async function runOpusAppraiser(
   const out: AppraiserResult = {
     selection: null, model: null, attempts: [], clarifications: [], debugNotes: [], unavailable: false,
   }
-  const provider = createSpecialistProvider(env, 'expert')
+  // Sonnet 5.5 is the appraiser seat on the observable-evidence lane —
+  // high reasoning effort; 'expert' (Opus) stays the specialist fallback.
+  const provider = createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
   if (!provider) { out.unavailable = true; return out }
   out.model = provider.model
 
@@ -330,6 +335,8 @@ export async function runOpusAppraiser(
     },
     classificationSummary: evidence.classificationSummary ?? null,
     blockLadder: evidence.blockLadder ?? null,
+    marketBenchmark: evidence.marketBenchmark ?? null,
+    subjectObservables: evidence.subjectObservables ?? null,
     comps: appraiserCompRows(evidence),
   }
 
@@ -357,6 +364,7 @@ export async function runOpusAppraiser(
       responseFormat: 'json',
       jsonSchema: { name: 'appraiser_selection', schema: SELECTION_SCHEMA },
       maxTokens: 4096,
+      reasoning: { enabled: true, effort: 'high' },
     }).catch(() => null)
     const parsed = res?.data?.content ? parseSelection(res.data.content) : null
     if (!parsed) { out.unavailable = out.attempts.length === 0; break }
@@ -385,7 +393,7 @@ export async function runOpusAppraiser(
       const vfails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
       if (vfails.length > 0) {
         const grade: VerdictGrade = {
-          checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass' },
+          checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass' },
           score: 0, failures: ['coherence_validation'], warnings: [], scorePenalty: 0,
           gateFails: ['validation'], gateFeedback: vfails, gradedAt: new Date().toISOString(),
         }
@@ -400,7 +408,7 @@ export async function runOpusAppraiser(
       // Unusable selection shape — one more chance counts as a revision.
       if (++revisionsUsed > MAX_REVISIONS) break
       lastGrade = {
-        checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass' },
+        checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass' },
         score: 0, failures: ['malformed_selection'], warnings: [], scorePenalty: 0,
         gateFails: ['shape'], gateFeedback: ['selection was missing comps or a positive ARV — repost under the schema'], gradedAt: new Date().toISOString(),
       }

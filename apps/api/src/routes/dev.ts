@@ -121,20 +121,13 @@ dev.post('/comp-classify-pool', async (c) => {
     squareFeet: b.squareFeet as number | undefined,
   }))
   if (!comps.length) return c.json({ error: 'comps required' }, 400)
-  const { startCompEvidenceBatch, startCompClassifyPool } = await import('../services/comp-evidence')
-  const evidence = new Map<string, import('../services/comp-evidence').CompConditionEvidence | null>()
-  const pool = startCompClassifyPool(c.env, comps.map((comp) => ({ evidence: null, comp })), { squareFeet: 1800 }, 4)
+  const { startCompEvidenceBatch } = await import('../services/comp-evidence')
   const t0 = Date.now()
-  await startCompEvidenceBatch(c.env, comps, {
+  const evidence = await startCompEvidenceBatch(c.env, comps, {
     subject: { squareFeet: 1800 },
     gatherOnly: true,
-    onComp: (gathered, ev) => {
-      evidence.set(gathered.propertyId, ev)
-      if (ev) pool.push({ evidence: ev, comp: gathered })
-    },
   })
   const gatherMs = Date.now() - t0
-  await pool.done()
   const totalMs = Date.now() - t0
   return c.json({
     success: true,

@@ -53,6 +53,8 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
+import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
+import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
@@ -835,9 +837,17 @@ export async function performAnalysisPhase1(
   // Agent harness: comp evidence is core input, not a shadow lane — run
   // the batch whenever a condition reader exists even without the CLEF
   // flag (haiku classify feeds the Opus appraiser).
+  // Prototype: Decisions observable lane — small answerable questions
+  // (S1-S7 subject / C1-C7 per comp) replace the whole-condition classify.
+  // Price boundaries are code-computed; Decisions classifies, Sonnet
+  // appraises. Falls back to the classify pool when Decisions is absent.
+  const observablesOn = params.harness === 'agent' && isDecisionsAvailable(env)
+  const marketBenchmark = observablesOn
+    ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
+    : null
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
-    (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env)))
+    (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
@@ -860,7 +870,34 @@ export async function performAnalysisPhase1(
           const classifyInputs = clefInputs
             .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
             .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
-          if (env.ANTHROPIC_API_KEY) {
+          if (observablesOn) {
+            // C1-C7 per comp — cover photo + description + closed price vs
+            // the code-computed pocket benchmark. Parallel lanes.
+            let oi = 0
+            const lane = async () => {
+              while (oi < classifyInputs.length) {
+                const { evidence: ev, comp } = classifyInputs[oi++]!
+                const ppsf = comp.salePrice && comp.squareFeet ? comp.salePrice / comp.squareFeet : null
+                const ob = await decisionsCompObservables(env, {
+                  comp: {
+                    propertyId: comp.propertyId, address: comp.address,
+                    salePrice: comp.salePrice, squareFeet: comp.squareFeet,
+                    yearBuilt: comp.yearBuilt, saleDate: comp.saleDate,
+                    neighborhoodName: comp.neighborhoodName, censusTract: comp.censusTract,
+                    sameBlockGroup: comp.sameBlockGroup,
+                  },
+                  salePrice: comp.salePrice ?? null,
+                  ppsf,
+                  description: ev.listing?.description ?? null,
+                  coverImage: ev._images?.[0] ?? null,
+                  coverPhotoUrl: ev.listing?.coverPhotoUrl ?? null,
+                  benchmark: marketBenchmark,
+                }).catch(() => null)
+                if (ob) compObservables[comp.propertyId] = ob
+              }
+            }
+            await Promise.all(Array.from({ length: Math.min(12, classifyInputs.length) }, () => lane()))
+          } else if (env.ANTHROPIC_API_KEY) {
             await classifyCompPoolHaiku(
               env, classifyInputs,
               { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
@@ -1097,7 +1134,33 @@ export async function performAnalysisPhase1(
   // them as evidence alongside the condition tier (vision-capable).
   const compCoverPhotos: Record<string, string> = {}
   const compConditions: Record<string, CompConditionResult> = {}
+  const compObservables: Record<string, CompObservables> = {}
   const clefEvidenceDebug: NonNullable<Phase1Context['clefEvidenceDebug']> = []
+  // Subject S1-S7 — ALL listing photos (100% coverage) + description +
+  // the pocket benchmark. Runs beside the comp observable lane.
+  const subjectObservablesPromise: Promise<SubjectObservables | null> = observablesOn
+    ? photoBundlePromise.then((pb) => {
+        const entry = pb?.subject
+        const photos = entry?.photos ?? []
+        const listPrice = (entry?.metadata?.listPrice as number | undefined) ?? (bundle.property.listingDetails?.listPrice as number | undefined) ?? null
+        return decisionsSubjectObservables(env, {
+          subject: {
+            address: bundle.property.address, city: bundle.property.city, state: bundle.property.state,
+            zipCode: bundle.property.zipCode, bedrooms: bundle.property.bedrooms, bathrooms: bundle.property.bathrooms,
+            squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
+            lotSizeAcres: bundle.property.lotSizeAcres, censusBlockGroup: bundle.property.censusBlockGroup,
+            censusTract: bundle.property.censusTract, neighborhoodName: bundle.property.neighborhoodName,
+            subdivision: bundle.property.subdivision, propertyType: bundle.property.propertyType,
+          },
+          photoUrls: photos,
+          coverPhotoUrl: photos[0] ?? null,
+          description: entry?.description ?? null,
+          benchmark: marketBenchmark,
+          askPrice: listPrice,
+          askPpsf: listPrice != null && bundle.property.squareFeet ? listPrice / bundle.property.squareFeet : null,
+        })
+      }).catch(() => null)
+    : Promise.resolve(null)
   // What the classifier could read per comp — the appraiser weighs
   // photo-verified reads above description-only ones.
   const compEvidenceCoverage: Record<string, 'photo+desc' | 'photo' | 'desc'> = {}
@@ -1373,6 +1436,7 @@ export async function performAnalysisPhase1(
   // Await the DERIVED promise — stamps + permit resolution must land
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
+  const subjectObservables = await subjectObservablesPromise.catch(() => null)
   // Clef digests settle inside the same window — stage A/B/C advisory
   // reads merged per comp for the harness evidence bundle.
   const compDigestMap = params.compDigests ? await params.compDigests.catch(() => null) : null
@@ -1391,7 +1455,7 @@ export async function performAnalysisPhase1(
     jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
     filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
     compCurbAppeal, compDigests, compCoverPhotos, compConditions, compEvidenceCoverage, compListingPhysicalDetails, subjectListingDetails,
-    clefEvidenceDebug,
+    clefEvidenceDebug, compObservables, subjectObservables, marketBenchmark,
     redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
     sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
@@ -1955,6 +2019,11 @@ export interface Phase1Context {
     skippedReason: string | null
     classified: boolean
   }>
+  /** Decisions observable lane — S1-S7 subject + C1-C7 per comp answers,
+   *  with the code-computed pocket benchmark they classified against. */
+  compObservables?: Record<string, CompObservables>
+  subjectObservables?: SubjectObservables | null
+  marketBenchmark?: PocketBenchmark | null
   compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
   subjectListingDetails: RedfinDetailsResult | null
   redfinDetailsEnabled: boolean
@@ -2284,7 +2353,12 @@ export interface HarnessEvidence {
    *  own call (docs/HAIKU-POCKET-DESIRABILITY.md), attached after the
    *  bundle is built so the appraiser sees it. */
   pocketDesirability?: import('./pocket-desirability').PocketDesirability
-  comps: Array<BComp & { id: string; salePriceFormatted?: string; coverPhotoUrl?: string | null }>
+  comps: Array<BComp & { id: string; salePriceFormatted?: string; coverPhotoUrl?: string | null; observables?: CompObservables | null }>
+  /** Pocket benchmark the Decisions lane classified against — median/
+   *  p25/p75 over the matched set + a reliability flag. */
+  marketBenchmark?: PocketBenchmark | null
+  /** Subject S1-S7 observable answers (all listing photos + description). */
+  subjectObservables?: SubjectObservables | null
   /** Block-group price ladder — the pocket's sales split into natural-
    *  break clusters; top median ≈ ARV band, bottom median ≈ as-is band.
    *  The appraiser's price-position evidence (median-relative pricing). */
@@ -2377,7 +2451,10 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
       id: comp.id,
       ...bcomps[i]!,
       priceLadder: compLadderPosition(comp, ladder),
+      observables: ctx.compObservables?.[comp.id] ?? null,
     })),
+    marketBenchmark: ctx.marketBenchmark ?? null,
+    subjectObservables: ctx.subjectObservables ?? null,
     renovationEvidence: buildRenoEvidence(ctx, compClassifications),
     suggestedSelection: ctx.appraisalResult.selectedCompIds ?? [],
     classifications: Object.fromEntries(compClassifications),
