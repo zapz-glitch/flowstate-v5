@@ -68,6 +68,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       messages: [{ role: 'user', content }],
     }
     if (request.systemPrompt) body.system = request.systemPrompt
+    if (request.tools?.length) body.tools = request.tools
     if (request.temperature != null) body.temperature = request.temperature
     if (request.reasoning?.enabled) body.thinking = { type: 'adaptive' }
     if (request.jsonSchema) {

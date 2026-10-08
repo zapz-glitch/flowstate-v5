@@ -2,11 +2,13 @@
  * Pocket desirability — one haiku call, one job: rate how desirable the
  * SUBJECT'S LOCATION is for a wholesale acquisition on a 0-10 scale.
  *
- * Contract: docs/HAIKU-POCKET-DESIRABILITY.md. Serper gathers web signal
- * on the neighborhood/city (demand, turnover, livability); haiku reads
- * the evidence and returns a score + rationale. Classification only —
- * no decision authority; the result rides the evidence bundle for the
- * Opus appraiser and lands in the run trace.
+ * Contract: docs/HAIKU-POCKET-DESIRABILITY.md. Haiku gathers its own web
+ * signal via Anthropic's server-side web_search tool when the reasoning
+ * lane is Anthropic (the model searches, reads, and scores in one call).
+ * When the lane is not Anthropic or the tool call fails, Serper →
+ * Scrapfly gathers evidence and haiku scores what it is given.
+ * Classification only — no decision authority; the result rides the
+ * evidence bundle for the Opus appraiser and lands in the run trace.
  *
  * Separate call by design: it does not share state with the subject
  * condition call or the per-comp classify calls. Cached downstream only
@@ -28,6 +30,10 @@ export interface PocketDesirability {
   model: string | null
   durationMs: number
 }
+
+/** Anthropic server-side web-search tool — haiku does its own searching
+ *  (max 2 searches per eval keeps latency + spend bounded). */
+const WEB_SEARCH_TOOLS = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }]
 
 const DESIRABILITY_PROMPT = `You are the pocket-desirability classifier for a wholesale real-estate acquisition engine. Your ONLY job: rate how desirable the subject property's location is for a wholesale deal on a 0-10 scale.
 
@@ -92,29 +98,18 @@ async function gatherWebSignal(env: Env, query: string): Promise<string[]> {
   return clean ? [clean.slice(0, 4000)] : []
 }
 
-export async function ratePocketDesirability(env: Env, property: NormalizedProperty): Promise<PocketDesirability | null> {
-  const provider = createReasoningProvider(env, 'openai/gpt-6-luna')
-  if (!provider) return null
-
-  const location = {
-    neighborhood: property.neighborhoodName ?? property.subdivision ?? null,
-    city: property.city ?? null,
-    state: property.state ?? null,
-    zip: property.zipCode ?? null,
-    censusTract: property.censusTract ?? null,
-    blockGroup: property.censusBlockGroup ?? null,
-    address: property.address ?? null,
-  }
-  const anchor = [location.neighborhood, location.city, location.state].filter(Boolean).join(' ')
-    || location.address || 'unknown location'
-  const snippets = await gatherWebSignal(env, `${anchor} real estate market demand homes for sale neighborhood`)
-
+async function executeDesirability(
+  provider: NonNullable<ReturnType<typeof createReasoningProvider>>,
+  prompt: string,
+  tools?: unknown[],
+): Promise<{ score: number; summary: string; signals: string[]; model: string | null; durationMs: number } | null> {
   const started = Date.now()
   const res = await provider.execute({
-    prompt: `${DESIRABILITY_PROMPT}\n\nLOCATION:\n${JSON.stringify(location)}\n\nWEB EVIDENCE:\n${snippets.join('\n') || '(no web evidence gathered — weigh the location identity and say so)'}`,
+    prompt,
     responseFormat: 'json',
     jsonSchema: { name: 'pocket_desirability', schema: DESIRABILITY_SCHEMA },
-    maxTokens: 768,
+    maxTokens: 1500,
+    tools,
   }).catch(() => null)
   const raw = res?.data?.content
   let parsed: { score?: unknown; summary?: unknown; signals?: unknown } | null = null
@@ -134,4 +129,40 @@ export async function ratePocketDesirability(env: Env, property: NormalizedPrope
     model: provider.model,
     durationMs: Date.now() - started,
   }
+}
+
+export async function ratePocketDesirability(env: Env, property: NormalizedProperty): Promise<PocketDesirability | null> {
+  const provider = createReasoningProvider(env, 'openai/gpt-6-luna')
+  if (!provider) return null
+
+  const location = {
+    neighborhood: property.neighborhoodName ?? property.subdivision ?? null,
+    city: property.city ?? null,
+    state: property.state ?? null,
+    zip: property.zipCode ?? null,
+    censusTract: property.censusTract ?? null,
+    blockGroup: property.censusBlockGroup ?? null,
+    address: property.address ?? null,
+  }
+  const anchor = [location.neighborhood, location.city, location.state].filter(Boolean).join(' ')
+    || location.address || 'unknown location'
+
+  // Primary path — haiku searches the web itself via Anthropic's
+  // server-side web_search tool. No Serper/Scrapfly needed.
+  if (provider.name === 'claude') {
+    const found = await executeDesirability(
+      provider,
+      `${DESIRABILITY_PROMPT}\n\nYou have a web_search tool. Run 1-2 searches for "${anchor} real estate market / neighborhood desirability" (e.g. demand, days on market, schools, crime) and rate from what you actually find.\n\nLOCATION:\n${JSON.stringify(location)}`,
+      WEB_SEARCH_TOOLS,
+    )
+    if (found) return found
+  }
+
+  // Fallback — gather SERP evidence ourselves (Serper, else Scrapfly)
+  // and let haiku score what it is given.
+  const snippets = await gatherWebSignal(env, `${anchor} real estate market demand homes for sale neighborhood`)
+  return executeDesirability(
+    provider,
+    `${DESIRABILITY_PROMPT}\n\nLOCATION:\n${JSON.stringify(location)}\n\nWEB EVIDENCE:\n${snippets.join('\n') || '(no web evidence gathered — weigh the location identity and say so)'}`,
+  )
 }
