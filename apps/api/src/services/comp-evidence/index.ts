@@ -102,6 +102,9 @@ export interface CompConditionEvidence {
   investorSignalSources: string[]
   /** Why classification didn't run — 'no_listing' | 'clef_unavailable' | fetch error */
   skippedReason?: string
+  /** Listing photo URLs — persisted so a stale-lane reclassify on cached
+   *  evidence can re-embed photos the transient `_images` no longer holds. */
+  imageUrls?: string[]
   /** Transient — embedded listing photos for the deferred (batch) classify
    *  pass. Never persisted to KV: stripped before the evidence pins. */
   _images?: ClefImage[]
@@ -511,6 +514,7 @@ async function finishListing(
   // photos the inline classify saw. Transient: `_images` is stripped
   // from the KV persist below and deleted after pool classification.
   evidence._images = imagesEmbedded
+  if (photos.photos.length > 0) evidence.imageUrls = photos.photos.slice(0, MAX_IMAGES * 2)
 
   // Batch lane (Decisions): classification is deferred to the pool-level
   // pass in startCompEvidenceBatch — the model reads every comp together,
@@ -648,6 +652,12 @@ export async function classifyCompPoolHaiku(
       if (!item) return
       const { evidence: ev, comp } = item
       const started = Date.now()
+      // Cached evidence carries no _images (stripped before persist) — a
+      // stale-lane reclassify would otherwise read text alone and miss
+      // photo-only renovations. Re-embed from the persisted URL list.
+      if ((ev._images?.length ?? 0) === 0 && (ev.imageUrls?.length ?? 0) > 0) {
+        ev._images = await embedPhotos(ev.imageUrls ?? []).catch(() => [])
+      }
       ev.condition = await classifyCompConditionLuna(env, {
         address: comp.address,
         salePrice: comp.salePrice,
