@@ -1432,15 +1432,17 @@ export class AnalysisJobDO {
         // the final selection — verified by the deterministic gate, with
         // bounded haiku clarify sub-calls and ≤2 gate-driven revisions.
         // No awaiting_agent park; the job completes in-pipeline.
+        // Pocket desirability only needs the subject property — fire it
+        // overlapped with phase 1 (comp gather is the long pole) instead
+        // of serially after it.
+        const pocketDesirabilityPromise = ratePocketDesirability(this.env, bundle.property).catch(() => null)
         const ctx = await performAnalysisPhase1({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
         if (ctx.photoBundlePromise) ctx.photoBundle = await ctx.photoBundlePromise
         delete ctx.photoBundlePromise
         await marketContextPromise.catch(() => { /* display-only */ })
         const evidence = buildHarnessEvidence(ctx)
-        // Pocket desirability — its own haiku call (Serper gather →
-        // haiku verdict), riding the evidence bundle for Opus.
-        const pocketDesirability = await ratePocketDesirability(this.env, ctx.bundle.property).catch(() => null)
+        const pocketDesirability = await pocketDesirabilityPromise
         if (pocketDesirability) {
           evidence.pocketDesirability = pocketDesirability
           ctx.steps.push({

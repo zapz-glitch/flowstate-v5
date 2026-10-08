@@ -20,6 +20,7 @@
 
 import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
+import { fetchRedfinListing } from '../photo-provider/providers/redfin-stingray'
 import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, CONDITION_QUESTIONS, buildConditionResult, type ClefImage, type CompConditionResult } from '../clef'
 import { createReasoningProvider, createSpecialistProvider } from '../llm'
 import { decisionsRun } from '../decisions'
@@ -354,18 +355,25 @@ export async function gatherCompConditionEvidence(
 
   let photos: PropertyPhotos | null = null
   try {
-    const photoService = createPhotoService(env, { provider: 'zillow' })
-    if (photoService.isAvailable()) {
-      const result = await photoService.fetchPhotos(comp, {
-        maxPhotos: 8,
-        includeDescription: true,
-        includePriceHistory: false,
-      })
-      if (result.success) photos = result.data
+    // Redfin stingray first — structured JSON, no rendered scrape. The
+    // Zillow chain below stays as the fallback when Redfin can't resolve.
+    photos = await fetchRedfinListing(env, comp).catch(() => null)
+  } catch { photos = null }
+  if (!photos) {
+    try {
+      const photoService = createPhotoService(env, { provider: 'zillow' })
+      if (photoService.isAvailable()) {
+        const result = await photoService.fetchPhotos(comp, {
+          maxPhotos: 8,
+          includeDescription: true,
+          includePriceHistory: false,
+        })
+        if (result.success) photos = result.data
+      }
+    } catch (error) {
+      evidence.skippedReason = error instanceof Error ? error.message : 'listing fetch failed'
+      return evidence
     }
-  } catch (error) {
-    evidence.skippedReason = error instanceof Error ? error.message : 'listing fetch failed'
-    return evidence
   }
 
   // No listing found — Google the property for photos via Firecrawl
@@ -400,7 +408,21 @@ export async function gatherCompConditionEvidence(
     evidence.skippedReason = 'no_listing'
     return evidence
   }
+  return finishListing(env, evidence, photos, comp, subject, opts, key)
+}
 
+/** Shared tail for every listing source — assembles the evidence record,
+ *  scans marketed sqft, keyword-flags investor language, embeds photos,
+ *  classifies (unless deferred to the pool batch), and pins the KV stamp. */
+async function finishListing(
+  env: Env,
+  evidence: CompConditionEvidence,
+  photos: PropertyPhotos,
+  comp: CompEvidenceInput,
+  subject?: { squareFeet?: number; address?: string },
+  opts?: { deferClassify?: boolean },
+  key?: string,
+): Promise<CompConditionEvidence> {
   evidence.listing = {
     source: photos.source,
     sourceUrl: photos.sourceUrl,
@@ -524,7 +546,7 @@ export async function gatherCompConditionEvidence(
   // uncached so a retry can still find them.
   if (evidence.condition || evidence.listing) {
     const { _images, ...persistable } = evidence
-    void env.API_CACHE.put(key, JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+    void env.API_CACHE.put(key ?? evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
   }
 
   return evidence
@@ -767,7 +789,7 @@ export async function startCompEvidenceBatch(
   opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
-  const perComp = opts?.perCompTimeoutMs ?? 45_000
+  const perComp = opts?.perCompTimeoutMs ?? 30_000
   const deadline = opts?.globalDeadlineMs ?? 150_000
   const laneCount = Math.min(opts?.lanes ?? 15, comps.length)
   // Decisions lane: gather every comp's listing + photos first, then run
