@@ -70,7 +70,7 @@ app.use(
       return ''
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Dashboard-User-Id', 'X-Dashboard-Secret', 'X-Impersonate-User-Id'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Dashboard-User-Id', 'X-Dashboard-Secret', 'X-Impersonate-User-Id', 'Idempotency-Key'],
     exposeHeaders: ['X-Request-Id', 'X-RateLimit-Remaining', 'X-RateLimit-Limit', 'X-RateLimit-Reset'],
     credentials: true,
     maxAge: 86400,

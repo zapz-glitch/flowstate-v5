@@ -747,13 +747,16 @@ analyze.get('/jobs/:jobId/harness/evidence', async (c) => {
  * The agent's verdict (or `{ needsMoreEvidence: 'deepen' }`). Server validates
  * picks against the enabled pool and the evidence envelope, then resumes the
  * deterministic tail — the saved report and dashboard see only the selected
- * comps.
+ * comps. `agent` must echo the claimedBy token returned by /harness/claim.
  */
 analyze.post('/jobs/:jobId/harness/selection', async (c) => {
   const ownership = await harnessOwnerCheck(c, c.req.param('jobId'));
   if (ownership instanceof Response) return ownership;
   // Lease gate: when a live claim exists, only the lease holder may verdict —
-  // drainers share one API user, so ownership alone can't isolate them.
+  // drainers share one API user, so ownership alone can't isolate them. The
+  // claimedBy token carries a random suffix minted at claim time, so posting
+  // a verdict requires having actually made the claim, not just knowing a
+  // drainer's label.
   const rawBody = await c.req.text();
   const body = (() => { try { return JSON.parse(rawBody) as { agent?: string }; } catch { return null; } })();
   if (body) {
@@ -834,22 +837,28 @@ async function harnessQueueListHandler(c: Context) {
     ))
     .orderBy(asc(harnessQueue.parkedAt))
     .limit(50);
-  return c.json({ success: true, data: { jobs: rows, count: rows.length } });
+  // Mask claimedBy to the drainer label — the stored value embeds the lease
+  // token minted at claim and must not leak via the list.
+  const jobs = rows.map(({ claimedBy, ...r }) => ({ ...r, claimedBy: claimedBy?.split(':')[0] ?? null }));
+  return c.json({ success: true, data: { jobs, count: jobs.length } });
 }
 
 /**
  * POST /analyze/jobs/:jobId/harness/claim
  *
  * Atomic claim so two drainer sessions can't work the same parked job.
- * Body: { agent?: string } — a drainer id for observability. 409 when the
- * job isn't claimable (not parked, or a live lease is held). The claim is a
- * 10-minute lease; an expired lease returns the job to the queue.
+ * Body: { agent?: string } — a drainer label for observability; the stored
+ * claimedBy gets an unguessable suffix so a rival drainer can't echo a
+ * predictable agent id into /harness/selection. 409 when the job isn't
+ * claimable (not parked, or a live lease is held). The claim is a 10-minute
+ * lease; an expired lease returns the job to the queue.
  */
 analyze.post('/jobs/:jobId/harness/claim', async (c) => {
   const auth = c.get('auth');
   const jobId = c.req.param('jobId');
   const body = await c.req.json<{ agent?: string }>().catch(() => ({} as { agent?: string }));
-  const agent = typeof body.agent === 'string' && body.agent.trim() ? body.agent.trim().slice(0, 64) : 'drainer';
+  const agentLabel = typeof body.agent === 'string' && body.agent.trim() ? body.agent.trim().slice(0, 48) : 'drainer';
+  const agent = `${agentLabel}:${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
   const db = drizzle(c.env.DB);
   const now = new Date().toISOString();
   const lease = new Date(Date.now() + 10 * 60 * 1000).toISOString();
