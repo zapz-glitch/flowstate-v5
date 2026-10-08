@@ -80,24 +80,13 @@ async function engineJsonCached(
     }
     return { ok: true, body: cached.body }
   }
-  // Cold path: no cached body to fall back on — a slow-but-successful read
-  // beats a 502, and this is a once-per-30s caller anyway. When another
-  // request already holds the refresh, fail fast and let the poll retry.
+  // Cold path: the engine fan-out (~80s at ~500 queue items) outlives any
+  // sane inline timeout — blocking here would 502 anyway AND stall every
+  // concurrent poll behind the same lock. Kick the real refresh into
+  // waitUntil and fail fast; the next poll serves the snapshot it lands.
   if (!await acquireRefresh(c.env, path)) return { ok: false, body: null }
-  try {
-    const res = await engineGet(c.env, path, 60_000)
-    if (!res) return null
-    let body = await res.json().catch(() => null)
-    if (res.ok && body != null) {
-      if (transform) body = await transform(c.env, body)
-      c.executionCtx.waitUntil(
-        c.env.API_CACHE.put(proxyKey(path), JSON.stringify({ t: Date.now(), body })),
-      )
-    }
-    return res.ok ? { ok: true, body } : { ok: false, body }
-  } finally {
-    c.executionCtx.waitUntil(c.env.API_CACHE.delete(refreshLockKey(path)).catch(() => {}))
-  }
+  c.executionCtx.waitUntil(refreshProxy(c.env, path, transform))
+  return { ok: false, body: null }
 }
 
 /** Attach each queue item's asking price — the engine only sends
@@ -291,7 +280,16 @@ async function apiEvalQueueItems(env: Env, userId: string | undefined): Promise<
 // GET /v1/pipeline/queue → GET /engine/queue (KV-cached, SWR, listPrice-enriched,
 // hidden items filtered) + today's API evals merged in
 pipelineReads.get('/queue', async (c) => {
-  const r = await engineJsonCached(c, '/engine/queue', enrichQueueListPrices)
+  // Pocket + listPrice enrichment rides in the cached snapshot's transform —
+  // ~500 items × evidence/report JSON is ~160MB through the D1 binding; doing
+  // it once per refresh (30s) instead of per request keeps reads at KV speed.
+  const transform = async (env: Env, body: unknown): Promise<unknown> => {
+    body = await enrichQueueListPrices(env, body)
+    const items = (body as { items?: Array<Record<string, unknown>> })?.items
+    if (Array.isArray(items) && items.length) await attachPockets({ env, executionCtx: c.executionCtx }, items)
+    return body
+  }
+  const r = await engineJsonCached(c, '/engine/queue', transform)
   if (!r) return c.json({ ok: false, error: 'Engine unavailable' }, 502)
   if (!r.ok) return c.json({ ok: false, error: 'Engine fetch failed' }, 502)
   const hidden = await hiddenOpps(c.env)
@@ -309,8 +307,10 @@ pipelineReads.get('/queue', async (c) => {
     const seen = new Set((body.items ?? []).flatMap((i) => [addrKey(i.address)]).filter(Boolean))
     const fresh = [...apiItems, ...inflight].filter((i) => !seen.has(addrKey(i.address as string)))
     body.items = [...(body.items ?? []), ...fresh]
+    // Today's api evals merge post-transform — attach their pockets per
+    // request. Only a handful of rows, so the D1 cost is trivial.
+    if (fresh.length) await attachPockets(c, fresh)
   }
-  await attachPockets(c, body.items ?? [])
   body.count = body.items?.length ?? 0
   return c.json(body)
 })
