@@ -350,8 +350,10 @@ export function UnderwritingReportPDF({
   const excludedComps = comps?.items?.filter((c) => c.isEnabled === false) ?? []
   // "Selected for ARV" = the model/engine picks (compGroup === 'arv'), not
   // the whole enabled pool — a filter-passing comp isn't a selection.
-  // Fallback to enabled for legacy saved reports that predate compGroup.
-  const arvMarked = enabledComps.filter((c) => c.compGroup === 'arv')
+  // bRole === 'excluded' comps were dropped by verification after staging —
+  // they are not valuation evidence. Fallback to enabled for legacy saved
+  // reports that predate compGroup.
+  const arvMarked = enabledComps.filter((c) => c.compGroup === 'arv' && c.bRole !== 'excluded')
   const selectedComps = arvMarked.length > 0 ? arvMarked : enabledComps
   const profitColor = (valuation?.projectedProfit ?? 0) > 0 ? C.green : C.red
 
