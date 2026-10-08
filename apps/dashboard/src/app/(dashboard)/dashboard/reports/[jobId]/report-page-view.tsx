@@ -46,6 +46,16 @@ const ReportHistoryTimeline = dynamic(() => import('@/components/report/ReportHi
 const loadCompComparisonDialog = () => import('@/components/analysis/CompComparisonDialog')
 const CompComparisonDialog = dynamic(() => loadCompComparisonDialog().then((mod) => mod.CompComparisonDialog))
 
+/** Stage ladder on the Re-run control — SSE events that mark each step ("Pulling comps · 3/6") */
+const RERUN_STAGES: Array<{ event: string; label: string }> = [
+  { event: 'property_fetch', label: 'Fetching property' },
+  { event: 'subject_found', label: 'Scoring subject' },
+  { event: 'comps_found', label: 'Pulling comps' },
+  { event: 'evaluation_started', label: 'Evaluating' },
+  { event: 'llm_started', label: 'Selecting comps' },
+  { event: 'llm_complete', label: 'Finalizing' },
+]
+
 // ─── Give Offer fallback — queue disposition when the report can't load ────
 
 function QueueFallback({ queue }: {
@@ -216,6 +226,9 @@ export function ReportPageView({ params, queue }: {
   } | null>(null)
   const [refreshStreamUrl, setRefreshStreamUrl] = useState<string | null>(null)
   const [refreshToken, setRefreshToken] = useState<string | null>(null)
+  // Stage index (1-based into RERUN_STAGES), or a transient Done/Failed, on the Re-run control
+  const [rerunStage, setRerunStage] = useState<number | 'done' | 'error' | null>(null)
+  const rerunStageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
@@ -421,12 +434,24 @@ export function ReportPageView({ params, queue }: {
 
   useEffect(() => {
     fetchReport()
-    return () => { reportRequestRef.current++ }
+    return () => {
+      reportRequestRef.current++
+      if (rerunStageTimerRef.current) clearTimeout(rerunStageTimerRef.current)
+    }
   }, [fetchReport])
 
   // SSE handler for refresh streaming
   const handleRefreshEvent = useCallback((event: EnrichmentEvent) => {
     const { event: eventType, data } = event
+    // Advance the rerun stage line — never backwards (events can interleave)
+    const stageIdx = RERUN_STAGES.findIndex((s) => s.event === eventType)
+    if (stageIdx >= 0) {
+      setRerunStage((prev) => (typeof prev === 'number' && prev > stageIdx + 1 ? prev : stageIdx + 1))
+    }
+    const clearRerunStageSoon = (ms: number) => {
+      if (rerunStageTimerRef.current) clearTimeout(rerunStageTimerRef.current)
+      rerunStageTimerRef.current = setTimeout(() => setRerunStage(null), ms)
+    }
     switch (eventType) {
       case 'subject_found':
       case 'comps_found':
@@ -494,6 +519,8 @@ export function ReportPageView({ params, queue }: {
         setRefreshing(false)
         setRefreshStreamUrl(null)
         setRefreshToken(null)
+        setRerunStage('done')
+        clearRerunStageSoon(2500)
         break
       case 'error':
         setAiAnalyzing(false)
@@ -502,6 +529,8 @@ export function ReportPageView({ params, queue }: {
           setTimeout(() => setRefreshResult(null), 5000)
         }
         setRefreshing(false)
+        setRerunStage('error')
+        clearRerunStageSoon(4000)
         break
     }
   }, [report, jobId])
@@ -546,6 +575,17 @@ export function ReportPageView({ params, queue }: {
     if (!report?.address) return
     setRefreshing(true)
     setRefreshResult(null)
+    setRerunStage(1)
+    const rerunFailed = () => {
+      if (rerunStageTimerRef.current) clearTimeout(rerunStageTimerRef.current)
+      rerunStageTimerRef.current = setTimeout(() => setRerunStage(null), 4000)
+      setRerunStage('error')
+    }
+    const rerunDone = () => {
+      setRerunStage('done')
+      if (rerunStageTimerRef.current) clearTimeout(rerunStageTimerRef.current)
+      rerunStageTimerRef.current = setTimeout(() => setRerunStage(null), 2500)
+    }
 
     try {
       const response = await queueAnalysis({
@@ -574,17 +614,22 @@ export function ReportPageView({ params, queue }: {
           setRefreshing(false)
           setRefreshResult({ type: 'success', message: 'Data refreshed' })
           setTimeout(() => setRefreshResult(null), 10000)
+          rerunDone()
+        } else if (!response.enrichment) {
+          rerunDone()
         }
       } else {
         setRefreshResult({ type: 'error', message: response.error || 'Refresh failed' })
         setTimeout(() => setRefreshResult(null), 5000)
         setRefreshing(false)
+        rerunFailed()
       }
     } catch (err) {
       if (reloadForStaleAction(err)) return
       setRefreshResult({ type: 'error', message: err instanceof Error ? err.message : 'Refresh failed' })
       setTimeout(() => setRefreshResult(null), 5000)
       setRefreshing(false)
+      rerunFailed()
     }
   }, [report, jobId])
 
@@ -898,6 +943,10 @@ export function ReportPageView({ params, queue }: {
           valuationCardRef={valuationCardRef}
           onRerun={handleRefresh}
           rerunning={refreshing}
+          rerunStatus={rerunStage === null ? null
+            : rerunStage === 'done' ? { text: 'Done', tone: 'done' as const }
+            : rerunStage === 'error' ? { text: 'Failed', tone: 'error' as const }
+            : { text: `${RERUN_STAGES[rerunStage - 1]?.label ?? 'Working'} · ${rerunStage}/${RERUN_STAGES.length}` }}
           onOfferWorkflow={handleOfferWorkflow}
           notesSlot={realtorNotesCard}
           disposition={queue?.disposition ?? null}

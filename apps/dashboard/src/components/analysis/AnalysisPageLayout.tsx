@@ -12,6 +12,7 @@ import { RiskLine } from './MapOverlay'
 import { CompHoverPanel } from './CompHoverPanel'
 import { PropertyMap } from './PropertyMap'
 import { AnalysisResultLayout } from './AnalysisResultLayout'
+import type { RerunStatus } from './DealActions'
 import { DealSummaryHero } from './DealSummaryHero'
 import {
   SubjectPropertySkeleton,
@@ -48,6 +49,8 @@ export interface AnalysisPageLayoutProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
+  /** Live stage line for the rerun control */
+  rerunStatus?: RerunStatus | null
   /**
    * True from the click of a run until its last result has landed · the page's own run state, which
    * moves in the same step as the results. The steady hold keys on this: the evaluation atom's
@@ -78,6 +81,7 @@ export function AnalysisPageLayout({
   notesSlot,
   onRerun,
   rerunning,
+  rerunStatus,
   busy,
   onOfferWorkflow,
   disposition,
@@ -131,6 +135,7 @@ export function AnalysisPageLayout({
     notesSlot,
     onRerun,
     rerunning,
+    rerunStatus,
     onOfferWorkflow,
     disposition,
     evaluation: held.value,

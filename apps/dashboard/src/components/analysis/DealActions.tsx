@@ -11,6 +11,12 @@ const ACTION_HOVER = 'hover:text-foreground hover:bg-secondary'
 /** Thin line between action groups · the same mark as between Investor and Report */
 const DIVIDER = 'w-px h-3 bg-border mx-0.5 flex-shrink-0'
 
+/** One compact status line for the rerun control — stage text + progress hint */
+export interface RerunStatus {
+  text: string
+  tone?: 'progress' | 'done' | 'error'
+}
+
 interface DealActionsProps {
   /** The price an offer goes out at · wholesale, else buy price */
   offerPrice?: number | null
@@ -20,6 +26,8 @@ interface DealActionsProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
+  /** Live stage line for the rerun ("Pulling comps · 3/6"), or a brief Done/Failed */
+  rerunStatus?: RerunStatus | null
   onOpenSettings?: () => void
   /** No border or padding of its own · it sits in a strip with other content */
   bare?: boolean
@@ -31,7 +39,7 @@ interface DealActionsProps {
  * card's foot: decide (prep offer, no margin, no offer), then tools (re-run,
  * evaluation settings), set apart by a thin line.
  */
-export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, onOpenSettings, bare = false, className }: DealActionsProps) {
+export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, rerunStatus, onOpenSettings, bare = false, className }: DealActionsProps) {
   // Offer-button state machine: idle (buttons) → busy → done (result
   // chip) → back to idle. The result fades in over the buttons' own space.
   // Both workflows dispatch immediately — no price editing.
@@ -123,6 +131,21 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
       )}
       {onOfferWorkflow && (onRerun || onOpenSettings) && <span className={DIVIDER} aria-hidden />}
       <div className="flex flex-wrap items-center justify-end gap-1">
+        {rerunStatus && (
+          <span
+            role="status"
+            className={cn(
+              'text-[11px] whitespace-nowrap truncate max-w-[10rem]',
+              rerunStatus.tone === 'done'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : rerunStatus.tone === 'error'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-foreground-tertiary',
+            )}
+          >
+            {rerunStatus.text}
+          </span>
+        )}
         {onRerun && (
           <button
             type="button"
