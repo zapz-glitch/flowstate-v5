@@ -75,14 +75,19 @@ dev.post('/comp-condition-batch', async (c) => {
     squareFeet: b.squareFeet as number | undefined,
   }))
   if (!comps.length) return c.json({ error: 'comps required' }, 400)
+  // Bounded — this route is unauthenticated on dev workers and every comp
+  // fans out paid listing + model calls.
+  if (comps.length > 40) return c.json({ error: 'comps limited to 40 per probe' }, 400)
   const { startCompEvidenceBatch } = await import('../services/comp-evidence')
   const gatherOnly = body.gatherOnly === true
+  const lanes = typeof body.lanes === 'number' ? Math.max(1, Math.min(15, Math.floor(body.lanes))) : undefined
+  const perCompTimeoutMs = typeof body.perCompTimeoutMs === 'number' ? Math.max(1000, Math.min(60000, body.perCompTimeoutMs)) : undefined
   const t0 = Date.now()
   const out = await startCompEvidenceBatch(c.env, comps, {
     subject: { squareFeet: 1800 },
     gatherOnly,
-    perCompTimeoutMs: body.perCompTimeoutMs as number | undefined,
-    lanes: body.lanes as number | undefined,
+    perCompTimeoutMs,
+    lanes,
   })
   const wallMs = Date.now() - t0
   return c.json({

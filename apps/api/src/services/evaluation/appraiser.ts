@@ -377,7 +377,7 @@ export async function runOpusAppraiser(
     if (sel) {
       // Same coherence bounds the /harness/selection endpoint enforces —
       // enabled comps only, ARV inside the pick-price envelope.
-      const vfails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
+      const vfails = validateAgentSelection(sel, ctx.appraisalResult.comparables, ctx.bundle.property.squareFeet)
       if (vfails.length > 0) {
         const grade: VerdictGrade = {
           checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass' },

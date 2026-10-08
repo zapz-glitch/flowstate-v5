@@ -50,9 +50,10 @@ export type ZillowFetcher = ScrapflyZillowFetcher | FirecrawlZillowFetcher | Gem
  * Requires Firecrawl API key. OpenRouter is optional (fallback for LLM parsing).
  */
 export function isZillowFetcherAvailable(env: Env): boolean {
-  if (env.SCRAPFLY_API_KEY) return true
-  if (env.FIRECRAWL_API_KEY) return true
-  return false
+  // Must mirror createZillowFetcher — it only builds on Firecrawl, so
+  // advertising availability on Scrapfly alone yields a null fetcher and
+  // PROVIDER_UNAVAILABLE for every property.
+  return !!env.FIRECRAWL_API_KEY
 }
 
 /**

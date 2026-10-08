@@ -409,9 +409,14 @@ export async function gatherCompConditionEvidence(
       })
       if (res.ok) {
         const data = (await res.json()) as { data?: { images?: Array<{ imageUrl?: string }> } }
+        // Only trust images hosted on listing-site CDNs — arbitrary web
+        // images for a shared street name or wrong city would silently
+        // contaminate the condition classification.
+        const LISTING_IMG_HOSTS = /(^|\.)(zillowstatic\.com|z-img\.com|rdcpix\.com|redfin\.com|ssl\.cdn-redfin\.com|realtor\.com|homes\.com|images\.homes\.com|trulia\.com|apartments\.com|brightmls\.com|mlsgrid\.com|harstatic\.com|ntreis\.net|matrix\.mls\.com|movoto\.com|estately\.com|listingp\.photos)$/i
         const urls = (data.data?.images ?? [])
           .map((i) => i.imageUrl)
           .filter((u): u is string => !!u && /^https?:\/\//.test(u))
+          .filter((u) => { try { return LISTING_IMG_HOSTS.test(new URL(u).hostname) } catch { return false } })
           .slice(0, MAX_IMAGES)
         if (urls.length) {
           photos = { propertyId: comp.propertyId, photos: urls, source: 'google-images', fetchedAt: new Date().toISOString() }
@@ -501,11 +506,16 @@ async function finishListing(
 
   const imagesEmbedded = photos.photos.length > 0 ? images : []
 
+  // Always retain the embedded images on the evidence record — the
+  // pool-level haiku pass re-classifies stale-lane stamps and needs the
+  // photos the inline classify saw. Transient: `_images` is stripped
+  // from the KV persist below and deleted after pool classification.
+  evidence._images = imagesEmbedded
+
   // Batch lane (Decisions): classification is deferred to the pool-level
   // pass in startCompEvidenceBatch — the model reads every comp together,
   // which calibrates 'renovated' against siblings instead of in isolation.
   if (opts?.deferClassify) {
-    evidence._images = imagesEmbedded
     return evidence
   }
 

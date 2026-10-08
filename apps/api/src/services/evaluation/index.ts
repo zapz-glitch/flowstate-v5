@@ -2141,7 +2141,7 @@ export interface AgentSelection {
 
 /** Server-side bounds on the agent verdict — coherence checks, never an
  *  outcome appeal. Returns the list of failures; empty = accepted. */
-export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComparable[]): string[] {
+export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComparable[], subjectSquareFeet?: number | null): string[] {
   const fails: string[] = []
   const enabled = new Map(comps.filter((c) => c.isEnabled && c.id).map((c) => [c.id, c] as const))
   const picks = sel.selectedCompIds ?? []
@@ -2170,10 +2170,27 @@ export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComp
     if (pickPrices.length === 0) {
       fails.push('no selected comp carries a positive sale price — nothing anchors the ARV')
     } else {
-      const lo = Math.min(...pickPrices) * 0.75
-      const hi = Math.max(...pickPrices) * 1.25
-      if (sel.arv < lo || sel.arv > hi) {
-        fails.push(`arv ${sel.arv} outside the selected-evidence envelope ${Math.round(lo)}–${Math.round(hi)}`)
+      // When the subject's size and every pick's size are known, bound the
+      // ARV on $/sqft scaled to the subject — otherwise picks that differ
+      // in size reject a correct subject-sized ARV (or admit a wrong one).
+      const pickPsfs = picks
+        .map((id) => enabled.get(id))
+        .filter((c): c is AppraisedComparable => !!c && c.salePrice != null && c.salePrice > 0 && c.squareFeet != null && c.squareFeet > 0)
+        .map((c) => c.salePrice! / c.squareFeet!)
+      const usePsf = subjectSquareFeet != null && subjectSquareFeet > 0 && pickPsfs.length > 0
+      if (usePsf) {
+        const arvPsf = sel.arv / subjectSquareFeet!
+        const lo = Math.min(...pickPsfs) * 0.75
+        const hi = Math.max(...pickPsfs) * 1.25
+        if (arvPsf < lo || arvPsf > hi) {
+          fails.push(`arv $/sqft ${Math.round(arvPsf)} outside the selected-evidence envelope ${Math.round(lo)}–${Math.round(hi)}`)
+        }
+      } else {
+        const lo = Math.min(...pickPrices) * 0.75
+        const hi = Math.max(...pickPrices) * 1.25
+        if (sel.arv < lo || sel.arv > hi) {
+          fails.push(`arv ${sel.arv} outside the selected-evidence envelope ${Math.round(lo)}–${Math.round(hi)}`)
+        }
       }
     }
   }

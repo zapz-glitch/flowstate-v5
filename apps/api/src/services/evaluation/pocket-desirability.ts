@@ -87,6 +87,11 @@ async function gatherWebSignal(env: Env, query: string): Promise<string[]> {
   const flyKey = env.SCRAPFLY_API_KEY
   const flyUrl = env.SCRAPFLY_URL || 'https://api.scrapfly.io/scrape'
   if (!flyKey) return []
+  // The API key travels in the query string — never send it to a host
+  // that isn't Scrapfly, even if SCRAPFLY_URL is misconfigured.
+  try {
+    if (!new URL(flyUrl).hostname.endsWith('scrapfly.io')) return []
+  } catch { return [] }
   const target = `https://www.google.com/search?q=${encodeURIComponent(query)}`
   const res = await fetch(
     `${flyUrl}?key=${encodeURIComponent(flyKey)}&url=${encodeURIComponent(target)}&render_js=true`,

@@ -1740,7 +1740,7 @@ export class AnalysisJobDO {
       return Response.json({ error: 'Body must be { selection: AgentSelection }' }, { status: 400 })
     }
     const ctx = JSON.parse(js.harnessContext) as Phase1Context
-    const fails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
+    const fails = validateAgentSelection(sel, ctx.appraisalResult.comparables, ctx.bundle.property.squareFeet)
     const evidence = buildHarnessEvidence(ctx)
     const grade = gradeVerdict(evidence, sel)
     const consult = fails.length === 0
@@ -1878,7 +1878,7 @@ export class AnalysisJobDO {
     }
 
     const sel = (body.selection ?? body) as AgentSelection
-    const fails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
+    const fails = validateAgentSelection(sel, ctx.appraisalResult.comparables, ctx.bundle.property.squareFeet)
     if (fails.length) {
       return Response.json({ error: 'Selection rejected', fails }, { status: 422 })
     }

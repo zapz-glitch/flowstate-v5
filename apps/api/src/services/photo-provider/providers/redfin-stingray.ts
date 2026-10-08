@@ -46,6 +46,11 @@ async function getStingray(env: Env, url: string, timeoutMs = 9000): Promise<Rec
   const flyKey = env.SCRAPFLY_API_KEY
   if (!flyKey) return null
   const flyUrl = env.SCRAPFLY_URL || 'https://api.scrapfly.io/scrape'
+  // The API key travels in the query string — never send it to a host
+  // that isn't Scrapfly, even if SCRAPFLY_URL is misconfigured.
+  try {
+    if (!new URL(flyUrl).hostname.endsWith('scrapfly.io')) return null
+  } catch { return null }
   // ASP is required — redfin sits behind CloudFront bot defense; plain
   // Scrapfly scrapes get the same 403 as a direct fetch.
   const proxied = await fetch(
