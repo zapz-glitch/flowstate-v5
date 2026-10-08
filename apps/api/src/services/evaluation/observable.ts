@@ -168,6 +168,11 @@ const SUBJECT_QUESTIONS = {
     criteria: { WATERFRONT: 'waterfront or water-adjacent lot', OVERSIZED_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac premium lot', POOL: 'pool visible on property', NONE: 'no premium lot features evident', UNVERIFIED: 'imagery insufficient to tell' },
     instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? Satellite imagery counts as evidence — look for waterfront, oversized or corner lots, cul-de-sac position, or a visible pool.',
   },
+  s9_site_exposure: {
+    type: 'choice' as const,
+    criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
+    instructions: 'From the aerial/satellite image (roads and business labels are overlaid), does the SUBJECT have adverse site exposure? Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
+  },
 }
 
 const COMP_QUESTIONS = {
@@ -207,6 +212,11 @@ const COMP_QUESTIONS = {
     criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
     instructions: "Does the description, cover photo, or supplied property data indicate a premium lot attribute that could explain a price premium — waterfront, oversized/corner lot, cul-de-sac, view, or pool? Pick the strongest single attribute; NONE if none is evident. This explains non-condition price premiums.",
   },
+  c9_site_exposure: {
+    type: 'choice' as const,
+    criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
+    instructions: 'When a satellite image is supplied (roads/business labels overlaid), does the COMP have adverse site exposure? Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. UNVERIFIED when no satellite image is present; do not infer exposure from price or description alone.',
+  },
 }
 
 // ─── Answer shapes ───────────────────────────────────────────────────────
@@ -224,6 +234,8 @@ export interface SubjectObservables {
   priceConditionAgreement: string | null
   /** Premium lot attribute from satellite + photos (waterfront/pool/corner etc.). */
   lotPremium: string | null
+  /** Adverse site exposure from satellite (arterial/commercial/freeway). */
+  siteExposure: string | null
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
@@ -245,6 +257,8 @@ export interface CompObservables {
   finalTier: string | null
   /** Non-condition premium driver (waterfront/lot/pool/view) — explains c6 flags. */
   premiumAttributes: string | null
+  /** Adverse site exposure from satellite (arterial/commercial/freeway). */
+  siteExposure: string | null
   confidence: Record<string, number>
   model: string
   durationMs: number
@@ -267,9 +281,9 @@ const DECISIONS_IMG_CAP = 128
  *  feeds the s8 lot-premium question. Null when the key/coords/fetch miss. */
 async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
   const key = env.GOOGLE_MAPS_KEY
-  const lat = subject.latitude, lng = subject.longitude
+  const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
   if (!key || typeof lat !== 'number' || typeof lng !== 'number') return null
-  const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&maptype=satellite&key=${key}`
+  const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&maptype=hybrid&key=${key}`
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
   if (!res.ok) return null
   const mime = res.headers.get('content-type') ?? 'image/png'
@@ -359,6 +373,7 @@ export async function decisionsSubjectObservables(
     askPriceSupport: choiceOf(merged, 's6_ask_price_support'),
     priceConditionAgreement: choiceOf(merged, 's7_price_condition'),
     lotPremium: choiceOf(merged, 's8_lot_premium'),
+    siteExposure: choiceOf(merged, 's9_site_exposure'),
     confidence: confs(merged),
     photosRead: imgs.length,
     photosTotal: urls.length,
@@ -379,6 +394,9 @@ export async function decisionsCompObservables(
     /** Pre-fetched cover image; falls back to coverPhotoUrl fetch. */
     coverImage?: { base64: string; content_type?: string } | null
     coverPhotoUrl?: string | null
+    /** Comp coordinates for the satellite tile feeding c9. */
+    latitude?: number | null
+    longitude?: number | null
     benchmark: PocketBenchmark | null
   },
 ): Promise<CompObservables | null> {
@@ -390,6 +408,7 @@ export async function decisionsCompObservables(
     const fetched = await fetchImageAsBase64(input.coverPhotoUrl).catch(() => null)
     if (fetched) img = { base64: fetched.base64, content_type: fetched.mimeType }
   }
+  const satImg = await fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null)
 
   const state = {
     role: 'COMPARABLE closed sale — evaluate ONLY this property.',
@@ -410,7 +429,10 @@ export async function decisionsCompObservables(
   const res = await decisionsRun(env, {
     state,
     questions: COMP_QUESTIONS,
-    images: img ? [{ content_type: img.content_type, base64: img.base64 }] : [],
+    images: [
+      ...(img ? [{ content_type: img.content_type, base64: img.base64 }] : []),
+      ...(satImg ? [{ content_type: satImg.content_type, base64: satImg.base64 }] : []),
+    ],
   }).catch(() => null)
   const a = (res?.answers ?? {}) as DecisionsAnswers
   if (Object.keys(a).length === 0) return null
@@ -426,6 +448,7 @@ export async function decisionsCompObservables(
     unexplainedPremiumP: probOf(a, 'c6_unexplained_premium'),
     finalTier: choiceOf(a, 'c7_final_tier'),
     premiumAttributes: choiceOf(a, 'c8_premium_attributes'),
+    siteExposure: choiceOf(a, 'c9_site_exposure'),
     confidence: confs(a),
     model: env.DECISIONS_MODEL || 'gpt-6-luna',
     durationMs: Date.now() - started,

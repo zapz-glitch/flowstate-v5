@@ -846,6 +846,13 @@ export async function performAnalysisPhase1(
     ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
     : null
   const compObservables: Record<string, CompObservables> = {}
+  // c9 site-exposure answer → the siteInfluence strings the preset's
+  // traffic_* deductions parse (fronting/siding/backing).
+  const EXPOSURE_TO_INFLUENCE: Record<string, string> = {
+    FRONTING: 'fronts_traffic',
+    SIDING: 'sides_traffic',
+    BACKING: 'backs_traffic',
+  }
   // Subject S1-S7 — ALL listing photos (100% coverage) + description +
   // the pocket benchmark. Runs beside the comp observable lane.
   const subjectObservablesPromise: Promise<SubjectObservables | null> = observablesOn
@@ -921,10 +928,19 @@ export async function performAnalysisPhase1(
                   description: ev.listing?.description ?? null,
                   coverImage: ev._images?.[0] ?? null,
                   coverPhotoUrl: ev.listing?.coverPhotoUrl ?? null,
+                  latitude: (comp as { latitude?: number }).latitude ?? null,
+                  longitude: (comp as { longitude?: number }).longitude ?? null,
                   benchmark: marketBenchmark,
                 }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
                 if (ob) compObservables[comp.propertyId] = ob
                 else console.warn('[observables] no observables for', comp.propertyId)
+                // Satellite site-exposure → siteInfluence: feeds the preset's
+                // traffic_fronting/siding/backing deductions when the provider
+                // left the field empty. Observable never overrides provider data.
+                if (ob?.siteExposure && !(comp as { siteInfluence?: string }).siteInfluence) {
+                  const inf = EXPOSURE_TO_INFLUENCE[ob.siteExposure]
+                  if (inf) (comp as { siteInfluence?: string }).siteInfluence = inf
+                }
               }
             }
             await Promise.all(Array.from({ length: Math.min(12, classifyInputs.length) }, () => lane()))
