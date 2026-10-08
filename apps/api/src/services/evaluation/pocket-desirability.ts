@@ -60,19 +60,36 @@ const DESIRABILITY_SCHEMA = {
 
 async function gatherWebSignal(env: Env, query: string): Promise<string[]> {
   const serper = env.SERPER_API_KEY
-  if (!serper) return []
-  const res = await fetch('https://google.serper.dev/search', {
-    method: 'POST',
-    headers: { 'X-API-KEY': serper, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q: query, num: 6 }),
-    signal: AbortSignal.timeout(10000),
-  }).catch(() => null)
+  if (serper) {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'X-API-KEY': serper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: 6 }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null)
+    const data = res?.ok
+      ? await res.json<{ organic?: Array<{ title?: string; snippet?: string }> }>().catch(() => null)
+      : null
+    const snippets = (data?.organic ?? [])
+      .map((o) => `${o.title ?? ''}: ${o.snippet ?? ''}`.trim())
+      .filter(Boolean)
+      .slice(0, 6)
+    if (snippets.length) return snippets
+  }
+  // Serper missing/empty (e.g. out of credits) — scrape the same SERP via
+  // Scrapfly and let haiku pull signal from the stripped page text.
+  const flyKey = env.SCRAPFLY_API_KEY
+  const flyUrl = env.SCRAPFLY_URL || 'https://api.scrapfly.io/scrape'
+  if (!flyKey) return []
+  const target = `https://www.google.com/search?q=${encodeURIComponent(query)}`
+  const res = await fetch(
+    `${flyUrl}?key=${encodeURIComponent(flyKey)}&url=${encodeURIComponent(target)}&render_js=true`,
+    { signal: AbortSignal.timeout(20000) },
+  ).catch(() => null)
   if (!res?.ok) return []
-  const data = await res.json<{ organic?: Array<{ title?: string; snippet?: string }> }>().catch(() => null)
-  return (data?.organic ?? [])
-    .map((o) => `${o.title ?? ''}: ${o.snippet ?? ''}`.trim())
-    .filter(Boolean)
-    .slice(0, 6)
+  const data = await res.json<{ result?: { content?: string } }>().catch(() => null)
+  const clean = (data?.result?.content ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return clean ? [clean.slice(0, 4000)] : []
 }
 
 export async function ratePocketDesirability(env: Env, property: NormalizedProperty): Promise<PocketDesirability | null> {
