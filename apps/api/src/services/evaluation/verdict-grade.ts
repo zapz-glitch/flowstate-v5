@@ -75,21 +75,21 @@ const flaggedOutlier = (c: GradeComp): boolean =>
     (c.evidenceVerification?.flags ?? []).some((f) => /nominal|typo|outlier|data_error/i.test(f)))
 
 /** Renovated/updated sale — real ARV evidence. Reads the haiku condition
- *  classification (label / tier), the keyword classifier, and the curb-
- *  appeal read — any of them can carry the flag. */
+ *  classification (label / tier), the keyword classifier, and the verified-
+ *  flip flag. curbAppeal is Clef shadow evidence — display only, never a
+ *  gate input. */
 const carriesArvEvidence = (c: GradeComp): boolean =>
   c.verifiedFlip === true ||
   c.classification?.type === 'after_renovation' ||
-  c.curbAppeal?.condition === 'renovated' ||
   c.conditionLabel === 'Renovated' ||
   c.conditionLabel === 'Updated' ||
   c.compTier === 'arv'
 
 /** As-is/distressed sale — can never drive an ARV verdict. Anchored on
- *  the condition classification directly (no band labels). */
+ *  the condition classification directly (no band labels, no Clef shadow
+ *  stamps). */
 const asIsClassified = (c: GradeComp): boolean =>
   c.classification?.type === 'as_is' ||
-  c.curbAppeal?.condition === 'distressed' ||
   c.conditionLabel === 'Poor' ||
   c.compTier === 'investor' ||
   (c.conditionAsIs === true)

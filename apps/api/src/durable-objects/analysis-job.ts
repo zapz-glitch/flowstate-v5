@@ -1437,7 +1437,9 @@ export class AnalysisJobDO {
         delete ctx.photoBundlePromise
         await marketContextPromise.catch(() => { /* display-only */ })
         const evidence = buildHarnessEvidence(ctx)
+        const appraiserStart = Date.now()
         const appraisal = await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+        const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
         const appraiserNote = appraisal == null
           ? 'appraiser unavailable — deterministic engine completes'
@@ -1460,9 +1462,61 @@ export class AnalysisJobDO {
           jobId: config.jobId, model: appraisal?.model ?? null, accepted: decision != null,
           attempts: appraisal?.attempts.length ?? 0, clarifications: appraisal?.clarifications.length ?? 0,
         })
+        const phase2Start = Date.now()
         evalResult = await performAnalysisPhase2(ctx, { jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) },
           decision ?? undefined)
+        const phase2Ms = Date.now() - phase2Start
+        // Per-run observability — the trace block persists on the report:
+        // what haiku classified, what Opus decided, what the gate returned.
+        if (evalResult?.response) {
+          const reno = evidence.renovationEvidence
+          const trace = {
+            haiku: {
+              subject: reno
+                ? {
+                    zoneGrades: reno.zoneGrades ?? null,
+                    pathGate: reno.pathGate ?? null,
+                    descriptionClaims: reno.descriptionClaims?.length ?? 0,
+                  }
+                : null,
+              comps: Object.fromEntries(
+                Object.entries(ctx.compConditions ?? {}).map(([id, c]) => [id, {
+                  conditionLabel: c.conditionLabel ?? null,
+                  tier: c.tier ?? null,
+                  asIs: c.asIs ?? null,
+                  summary: c.summary ?? null,
+                  rulesCheck: c.rulesCheck ?? null,
+                }]),
+              ),
+            },
+            opus: {
+              model: appraisal?.model ?? null,
+              unavailable: appraisal?.unavailable ?? false,
+              clarifications: appraisal?.clarifications ?? [],
+              debugNotes: appraisal?.debugNotes ?? [],
+              attempts: (appraisal?.attempts ?? []).map((a) => ({
+                decision: a.decision,
+                at: a.at,
+                arv: a.selection.arv,
+                conf: a.selection.conf,
+                selectedCompIds: a.selection.selectedCompIds,
+                drivers: a.selection.drivers ?? null,
+                notes: a.selection.notes ?? null,
+              })),
+              selection: decision
+                ? { arv: decision.arv, conf: decision.conf, selectedCompIds: decision.selectedCompIds, drivers: decision.drivers ?? null, notes: decision.notes ?? null }
+                : null,
+            },
+            gate: {
+              attempts: (appraisal?.attempts ?? []).map((a) => a.grade),
+              finalDecision: decision != null ? 'accepted' : appraisal?.unavailable ? 'appraiser_unavailable' : 'rejected_deterministic_fallback',
+            },
+            latency: { appraiserMs, phase2Ms },
+          }
+          const resp = evalResult.response as unknown as Record<string, unknown>
+          resp.harness = { ...((resp.harness as Record<string, unknown> | undefined) ?? { source: 'agent' }), trace }
+        }
         // Trust floor — same rule the parked-resume path enforced: a weak
         // gate grade (<0.7 composite) at low confidence routes to the hold
         // list; every other accepted verdict is the explicit auto-clear.

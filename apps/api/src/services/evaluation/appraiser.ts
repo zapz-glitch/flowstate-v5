@@ -146,14 +146,14 @@ function appraiserCompRows(evidence: HarnessEvidence) {
     neighborhoodName: c.neighborhoodName ?? null,
     yearBuilt: c.yearBuilt ?? null,
     isEnabled: c.isEnabled !== false,
-    // Haiku's classification — the appraiser's condition evidence.
+    // Haiku's classification — the appraiser's condition evidence. Clef's
+    // curbAppeal shadow stamp stays out of the appraiser prompt.
     condition: {
       label: c.conditionLabel ?? null,
       tier: c.compTier ?? null,
       asIs: c.conditionAsIs ?? null,
-      curbAppeal: c.curbAppeal?.condition ?? null,
       listingType: c.classification?.type ?? null,
-      summary: c.conditionSummary ?? c.curbAppeal?.summary ?? null,
+      summary: c.conditionSummary ?? null,
     },
     rulesCheck: c.rulesCheck ?? null,
     verifiedFlip: c.verifiedFlip ?? null,

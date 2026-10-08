@@ -54,7 +54,6 @@ ${COMP_DOCTRINE}
 `
 
 function compactComp(c: Record<string, unknown>) {
-  const cond = c.curbAppeal as { condition?: string; label?: string; tier?: string } | undefined
   const ver = c.evidenceVerification as { transactionCheck?: string; priceSanity?: string } | undefined
   const cls = c.classification as { type?: string } | undefined
   return {
@@ -73,10 +72,10 @@ function compactComp(c: Record<string, unknown>) {
     neighborhoodName: c.neighborhoodName,
     conditionLabel: c.conditionLabel ?? null,
     compTier: c.compTier ?? null,
+    conditionAsIs: c.conditionAsIs ?? null,
+    conditionSummary: c.conditionSummary ?? null,
     rulesCheck: c.rulesCheck ?? null,
     classification: cls?.type ?? null,
-    condition: cond?.condition ?? cond?.label ?? null,
-    conditionTier: cond?.tier ?? null,
     verification: ver ? { transactionCheck: ver.transactionCheck ?? null, priceSanity: ver.priceSanity ?? null } : null,
     coverPhotoUrl: c.coverPhotoUrl ?? null,
     isEnabled: c.isEnabled,
