@@ -152,6 +152,38 @@ export default dev
 
 /** Token warm probe — runs the same scheduled-handler path live so token
  *  health is verifiable without waiting for a cron tick. */
+/** Direct probe for the Decisions observable lane — one comp call + one
+ *  subject call with tiny fixtures; surfaces the real error instead of the
+ *  eval lane's swallowed catch. */
+dev.post('/observable-probe', async (c) => {
+  const { decisionsCompObservables, decisionsSubjectObservables, computePocketBenchmark } = await import('../services/evaluation/observable')
+  const bench = computePocketBenchmark(
+    { id: 'subj', censusBlockGroup: '1', censusTract: 't' } as never,
+    [
+      { id: 'c1', salePrice: 400000, squareFeet: 1500, pricePerSqft: 267, sameBlockGroup: true },
+      { id: 'c2', salePrice: 500000, squareFeet: 1600, pricePerSqft: 312, sameBlockGroup: true },
+      { id: 'c3', salePrice: 300000, squareFeet: 1400, pricePerSqft: 214, sameBlockGroup: true },
+      { id: 'c4', salePrice: 380000, squareFeet: 1450, pricePerSqft: 262, sameBlockGroup: false, censusTract: 't' },
+    ] as never[],
+  )
+  const out: Record<string, unknown> = { benchmark: bench }
+  try {
+    out.comp = await decisionsCompObservables(c.env, {
+      comp: { propertyId: 'c1', address: '1 Main St', salePrice: 400000, squareFeet: 1500 },
+      salePrice: 400000, ppsf: 267,
+      description: 'Updated 3/2 with new kitchen.', benchmark: bench,
+    })
+  } catch (e) { out.compError = String(e) }
+  try {
+    out.subject = await decisionsSubjectObservables(c.env, {
+      subject: { address: '1 Main St', squareFeet: 1400, bedrooms: 3, bathrooms: 2 },
+      photoUrls: [], coverPhotoUrl: null, description: 'Needs work.',
+      benchmark: bench, askPrice: 350000, askPpsf: 250,
+    })
+  } catch (e) { out.subjectError = String(e) }
+  return c.json(out)
+})
+
 dev.post('/attom-token-warm', async (c) => {
   const { warmAttomMcpToken } = await import('../services/property-api/providers/attom-mcp')
   await warmAttomMcpToken(c.env)

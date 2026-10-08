@@ -845,6 +845,32 @@ export async function performAnalysisPhase1(
   const marketBenchmark = observablesOn
     ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
     : null
+  const compObservables: Record<string, CompObservables> = {}
+  // Subject S1-S7 — ALL listing photos (100% coverage) + description +
+  // the pocket benchmark. Runs beside the comp observable lane.
+  const subjectObservablesPromise: Promise<SubjectObservables | null> = observablesOn
+    ? photoBundlePromise.then((pb) => {
+        const entry = pb?.subject
+        const photos = entry?.photos ?? []
+        const listPrice = (entry?.metadata?.listPrice as number | undefined) ?? (bundle.property.listingDetails?.listPrice as number | undefined) ?? null
+        return decisionsSubjectObservables(env, {
+          subject: {
+            address: bundle.property.address, city: bundle.property.city, state: bundle.property.state,
+            zipCode: bundle.property.zipCode, bedrooms: bundle.property.bedrooms, bathrooms: bundle.property.bathrooms,
+            squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
+            lotSizeAcres: bundle.property.lotSizeAcres, censusBlockGroup: bundle.property.censusBlockGroup,
+            censusTract: bundle.property.censusTract, neighborhoodName: bundle.property.neighborhoodName,
+            subdivision: bundle.property.subdivision, propertyType: bundle.property.propertyType,
+          },
+          photoUrls: photos,
+          coverPhotoUrl: photos[0] ?? null,
+          description: entry?.description ?? null,
+          benchmark: marketBenchmark,
+          askPrice: listPrice,
+          askPpsf: listPrice != null && bundle.property.squareFeet ? listPrice / bundle.property.squareFeet : null,
+        })
+      }).catch((err) => { console.warn('[observables] subject call failed', err?.message ?? err); return null })
+    : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
     (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
@@ -873,6 +899,7 @@ export async function performAnalysisPhase1(
           if (observablesOn) {
             // C1-C7 per comp — cover photo + description + closed price vs
             // the code-computed pocket benchmark. Parallel lanes.
+            console.log(`[observables] comp lane start — ${classifyInputs.length} comps, benchmark ${marketBenchmark?.scope ?? 'null'} n=${marketBenchmark?.n ?? 0}`)
             let oi = 0
             const lane = async () => {
               while (oi < classifyInputs.length) {
@@ -892,8 +919,9 @@ export async function performAnalysisPhase1(
                   coverImage: ev._images?.[0] ?? null,
                   coverPhotoUrl: ev.listing?.coverPhotoUrl ?? null,
                   benchmark: marketBenchmark,
-                }).catch(() => null)
+                }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
                 if (ob) compObservables[comp.propertyId] = ob
+                else console.warn('[observables] no observables for', comp.propertyId)
               }
             }
             await Promise.all(Array.from({ length: Math.min(12, classifyInputs.length) }, () => lane()))
@@ -908,6 +936,7 @@ export async function performAnalysisPhase1(
               { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
             ).catch(() => null)
           }
+          console.log(`[observables] comp lane done — ${Object.keys(compObservables).length}/${clefInputs.length} answered`)
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null
@@ -1134,33 +1163,7 @@ export async function performAnalysisPhase1(
   // them as evidence alongside the condition tier (vision-capable).
   const compCoverPhotos: Record<string, string> = {}
   const compConditions: Record<string, CompConditionResult> = {}
-  const compObservables: Record<string, CompObservables> = {}
   const clefEvidenceDebug: NonNullable<Phase1Context['clefEvidenceDebug']> = []
-  // Subject S1-S7 — ALL listing photos (100% coverage) + description +
-  // the pocket benchmark. Runs beside the comp observable lane.
-  const subjectObservablesPromise: Promise<SubjectObservables | null> = observablesOn
-    ? photoBundlePromise.then((pb) => {
-        const entry = pb?.subject
-        const photos = entry?.photos ?? []
-        const listPrice = (entry?.metadata?.listPrice as number | undefined) ?? (bundle.property.listingDetails?.listPrice as number | undefined) ?? null
-        return decisionsSubjectObservables(env, {
-          subject: {
-            address: bundle.property.address, city: bundle.property.city, state: bundle.property.state,
-            zipCode: bundle.property.zipCode, bedrooms: bundle.property.bedrooms, bathrooms: bundle.property.bathrooms,
-            squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
-            lotSizeAcres: bundle.property.lotSizeAcres, censusBlockGroup: bundle.property.censusBlockGroup,
-            censusTract: bundle.property.censusTract, neighborhoodName: bundle.property.neighborhoodName,
-            subdivision: bundle.property.subdivision, propertyType: bundle.property.propertyType,
-          },
-          photoUrls: photos,
-          coverPhotoUrl: photos[0] ?? null,
-          description: entry?.description ?? null,
-          benchmark: marketBenchmark,
-          askPrice: listPrice,
-          askPpsf: listPrice != null && bundle.property.squareFeet ? listPrice / bundle.property.squareFeet : null,
-        })
-      }).catch(() => null)
-    : Promise.resolve(null)
   // What the classifier could read per comp — the appraiser weighs
   // photo-verified reads above description-only ones.
   const compEvidenceCoverage: Record<string, 'photo+desc' | 'photo' | 'desc'> = {}

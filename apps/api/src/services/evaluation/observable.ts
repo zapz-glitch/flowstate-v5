@@ -153,9 +153,10 @@ const SUBJECT_QUESTIONS = {
     criteria: { SUPPORTS: 'description supports the photo condition', CONTRADICTS: 'description contradicts the photos', INSUFFICIENT: 'description too thin to verify' },
     instructions: 'Does the listing description support, contradict, or fail to verify the condition visible in the photographs?',
   },
-  s6_ask_price_position: {
-    type: 'choice' as const, criteria: TIER_CHOICES,
-    instructions: "Compare the SUBJECT's current asking price per square foot with the supplied matched-neighborhood price distribution. Which market price tier does the asking price occupy? This measures asking-price position only — it does not establish market value or ARV.",
+  s6_ask_price_support: {
+    type: 'choice' as const,
+    criteria: { SUPPORTS: 'evidence supports the code-assigned asking-price position', CONTRADICTS: 'evidence contradicts it', INSUFFICIENT: 'evidence too thin to judge' },
+    instructions: "The asking price's market tier is already code-assigned from the supplied percentile boundaries — do not locate the price yourself. Does the photographic and descriptive evidence support that asking-price position? This measures evidence support only — it does not establish market value or ARV.",
   },
   s7_price_condition: {
     type: 'choice' as const,
@@ -165,9 +166,10 @@ const SUBJECT_QUESTIONS = {
 }
 
 const COMP_QUESTIONS = {
-  c1_price_position: {
-    type: 'choice' as const, criteria: TIER_CHOICES,
-    instructions: "Compare the COMP's closed sale price per square foot with the supplied matched-neighborhood price distribution. Which tier does this sale occupy? Use the supplied price boundaries. Do not calculate new boundaries.",
+  c1_price_support: {
+    type: 'choice' as const,
+    criteria: { SUPPORTS: 'evidence supports the code-assigned price position', CONTRADICTS: 'evidence contradicts it', INSUFFICIENT: 'evidence too thin to judge' },
+    instructions: "The COMP's price tier is already code-assigned from the supplied percentile boundaries — do not locate the price yourself. Does the limited visual and descriptive evidence support this market position?",
   },
   c2_desc_condition: {
     type: 'choice' as const, criteria: COND_CHOICES,
@@ -205,7 +207,10 @@ export interface SubjectObservables {
   repairLevel: string | null
   interiorDocQuality: string | null
   descAgreement: string | null
+  /** Code-assigned asking-price tier (p25/p75 boundaries) — not a model call. */
   askPricePosition: string | null
+  /** Whether the evidence supports that code-assigned position. */
+  askPriceSupport: string | null
   priceConditionAgreement: string | null
   confidence: Record<string, number>
   photosRead: number
@@ -215,7 +220,10 @@ export interface SubjectObservables {
 }
 
 export interface CompObservables {
+  /** Code-assigned price tier (p25/p75 boundaries) — not a model call. */
   pricePosition: string | null
+  /** Whether the limited visual+descriptive evidence supports it. */
+  priceSupport: string | null
   codePosition: PriceTier
   descCondition: string | null
   coverPhotoEvidence: string | null
@@ -307,7 +315,8 @@ export async function decisionsSubjectObservables(
     repairLevel: choiceOf(merged, 's3_repair_level'),
     interiorDocQuality: choiceOf(merged, 's4_interior_quality'),
     descAgreement: choiceOf(merged, 's5_desc_agreement'),
-    askPricePosition: choiceOf(merged, 's6_ask_price_position'),
+    askPricePosition: askPos?.tier ?? null,
+    askPriceSupport: choiceOf(merged, 's6_ask_price_support'),
     priceConditionAgreement: choiceOf(merged, 's7_price_condition'),
     confidence: confs(merged),
     photosRead: imgs.length,
@@ -366,7 +375,8 @@ export async function decisionsCompObservables(
   if (Object.keys(a).length === 0) return null
 
   return {
-    pricePosition: choiceOf(a, 'c1_price_position'),
+    pricePosition: pos.tier,
+    priceSupport: choiceOf(a, 'c1_price_support'),
     codePosition: pos.tier,
     descCondition: choiceOf(a, 'c2_desc_condition'),
     coverPhotoEvidence: choiceOf(a, 'c3_cover_evidence'),
