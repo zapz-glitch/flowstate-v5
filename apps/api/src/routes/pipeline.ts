@@ -14,10 +14,10 @@ import type { AuthContext } from '../middleware/auth'
 
 const ENGINE_BASE = 'https://flowstate-workers.weareflowstate1.workers.dev'
 
-async function engineGet(env: Env, path: string): Promise<Response | null> {
+async function engineGet(env: Env, path: string, timeoutMs = 10_000): Promise<Response | null> {
   if (!env.ENGINE_API_KEY) return null
   return fetch(`${ENGINE_BASE}${path}`, {
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { Authorization: `Bearer ${env.ENGINE_API_KEY}` },
   }).catch((e) => {
     console.error('[Pipeline] engine fetch failed:', path, e)
@@ -35,8 +35,13 @@ const proxyKey = (path: string) => `engine-proxy:${path}`
 
 type ProxyTransform = (env: Env, body: unknown) => Promise<unknown>
 
+/** The queue refresh runs in waitUntil against a fan-out that scales with
+ *  queue depth (one Close call per lead) — 10s starves it past ~50 items
+ *  and the stale snapshot serves forever. Give the background refresh room. */
+const REFRESH_TIMEOUT_MS = 120_000
+
 async function refreshProxy(env: Env, path: string, transform?: ProxyTransform): Promise<void> {
-  const res = await engineGet(env, path)
+  const res = await engineGet(env, path, REFRESH_TIMEOUT_MS)
   if (!res?.ok) return
   let body = await res.json().catch(() => null)
   if (body == null) return
@@ -56,7 +61,9 @@ async function engineJsonCached(
     }
     return { ok: true, body: cached.body }
   }
-  const res = await engineGet(c.env, path)
+  // Cold path: no cached body to fall back on — a slow-but-successful read
+  // beats a 502, and this is a once-per-30s caller anyway.
+  const res = await engineGet(c.env, path, 60_000)
   if (!res) return null
   let body = await res.json().catch(() => null)
   if (res.ok && body != null) {
