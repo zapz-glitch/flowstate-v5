@@ -55,6 +55,7 @@ import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
 import { startCompEvidenceBatch } from '../services/comp-evidence'
 import { startCompDigestBatch, type CompDigest, type DigestComp, type DigestSubject } from '../services/comp-evidence/digest'
 import { isClefAvailable } from '../services/clef'
+import { isReasoningProviderAvailable } from '../services/llm'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
@@ -594,12 +595,19 @@ export class AnalysisJobDO {
     const digestBPromiseParts: Promise<Map<string, CompDigest>>[] = []
     const digestCPromiseParts: Promise<Map<string, CompDigest>>[] = []
     const clefDigestsOn = this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(this.env)
+    // Comp evidence (listing fetch + condition classify) is core input to
+    // the agent harness — Opus's per-comp tier/coverage reads come from
+    // it. The CLEF flag gates only the legacy shadow lane; an agent run
+    // needs any condition reader (Anthropic haiku, OpenRouter, Clef).
+    const compEvidenceOn =
+      clefDigestsOn ||
+      (config.harness === 'agent' && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
 
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
     // search→scrape→Clef runs beside geo/enrich instead of behind it.
     const prefetchedCompEvidence = compsPromise.then(async (res) => {
       try {
-        if (!res.success || this.env.CLEF_COMP_CONDITION_ENABLED !== 'true' || !isClefAvailable(this.env)) return null
+        if (!res.success || !compEvidenceOn) return null
         const inputs = res.data.comparables.slice(0, Number(this.env.CLEF_COMP_MAX) || Infinity).map((c) => ({
           propertyId: c.id,
           address: c.address,

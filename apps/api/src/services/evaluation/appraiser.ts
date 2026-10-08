@@ -39,7 +39,9 @@ const APPRAISER_PROMPT = `You are the appraiser — the final decision maker on 
 
 You receive the COMPLETE dataset: the subject property with its haiku-assigned condition tier, the full comp pool each with a haiku condition classification (label, tier, evidence summary, and a comp-rules check noting any rules a comp fails or fields it lacks), geo stamps, verification flags, and cover-photo URLs you may cite.
 
-Your job: choose the comps that set the ARV (the genuinely renovated retail evidence — never as-is/investor-marketed stock), name which picks drove the number, and post the ARV. Prefer in-pocket comps (same block group > neighborhood > census tract). Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence.
+You also receive the block-group PRICE LADDER (blockLadder): the pocket's sales split by $/sf into natural top/middle/bottom clusters — the top-cluster median is the ARV band, the bottom-cluster median is the as-is/investor band. Each comp carries its ladder rung and $/sf ratios (priceLadder.ppsfVsMedian, priceLadder.ppsfVsTop) plus evidenceCoverage ('photo+desc' | 'photo' | 'desc' | null) saying what the classifier could actually see — weigh photo-verified reads above description-only ones, and treat 'desc'-only or null coverage as weak condition evidence.
+
+Your job: choose the comps that set the ARV (the genuinely renovated retail evidence — never as-is/investor-marketed stock), name which picks drove the number, and post the ARV. Prefer in-pocket comps (same block group > neighborhood > census tract) whose $/sf sits in the top ladder rung at or near the top-cluster median — that is ARV pricing the market itself proved. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence.
 
 If anything is missing or ambiguous, you may ask your haiku sub-agent to clarify or classify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Haiku answers; you decide.
 
@@ -179,6 +181,8 @@ function appraiserCompRows(evidence: HarnessEvidence) {
       ? (() => { const { flags: _flags, ...fields } = c.evidenceVerification; return fields })()
       : null,
     coverPhotoUrl: c.coverPhotoUrl ?? null,
+    evidenceCoverage: c.evidenceCoverage ?? null,
+    priceLadder: c.priceLadder ?? null,
     adjustedPrice: c.adjustedPrice ?? null,
   }))
 }
@@ -325,6 +329,7 @@ export async function runOpusAppraiser(
       asIsThresholdPercent: evidence.rules.asIsThresholdPercent,
     },
     classificationSummary: evidence.classificationSummary ?? null,
+    blockLadder: evidence.blockLadder ?? null,
     comps: appraiserCompRows(evidence),
   }
 
