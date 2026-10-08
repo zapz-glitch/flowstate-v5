@@ -40,13 +40,32 @@ type ProxyTransform = (env: Env, body: unknown) => Promise<unknown>
  *  and the stale snapshot serves forever. Give the background refresh room. */
 const REFRESH_TIMEOUT_MS = 120_000
 
+/** Single-flight marker — one engine fan-out at a time per path. Without it
+ *  a ~60s cold read lets every dashboard poll (5s) spawn its own engine call
+ *  (thundering herd on Close), and if a background refresh dies mid-flight
+ *  the lock's expiry lets the next poll retry instead of wedging forever. */
+const REFRESH_LOCK_MS = 150_000
+const refreshLockKey = (path: string) => `engine-proxy-refresh:${path}`
+
 async function refreshProxy(env: Env, path: string, transform?: ProxyTransform): Promise<void> {
-  const res = await engineGet(env, path, REFRESH_TIMEOUT_MS)
-  if (!res?.ok) return
-  let body = await res.json().catch(() => null)
-  if (body == null) return
-  if (transform) body = await transform(env, body)
-  await env.API_CACHE.put(proxyKey(path), JSON.stringify({ t: Date.now(), body }))
+  try {
+    const res = await engineGet(env, path, REFRESH_TIMEOUT_MS)
+    if (!res?.ok) return
+    let body = await res.json().catch(() => null)
+    if (body == null) return
+    if (transform) body = await transform(env, body)
+    await env.API_CACHE.put(proxyKey(path), JSON.stringify({ t: Date.now(), body }))
+  } finally {
+    await env.API_CACHE.delete(refreshLockKey(path)).catch(() => {})
+  }
+}
+
+/** Non-blocking lock acquire — true when this caller owns the refresh. */
+async function acquireRefresh(env: Env, path: string): Promise<boolean> {
+  const held = await env.API_CACHE.get(refreshLockKey(path)).catch(() => null)
+  if (held) return false
+  await env.API_CACHE.put(refreshLockKey(path), '1', { expirationTtl: Math.ceil(REFRESH_LOCK_MS / 1000) }).catch(() => {})
+  return true
 }
 
 async function engineJsonCached(
@@ -56,23 +75,29 @@ async function engineJsonCached(
 ): Promise<{ ok: boolean; body: unknown } | null> {
   const cached = await c.env.API_CACHE.get<{ t: number; body: unknown }>(proxyKey(path), 'json')
   if (cached) {
-    if (Date.now() - cached.t >= PROXY_FRESH_MS) {
+    if (Date.now() - cached.t >= PROXY_FRESH_MS && await acquireRefresh(c.env, path)) {
       c.executionCtx.waitUntil(refreshProxy(c.env, path, transform))
     }
     return { ok: true, body: cached.body }
   }
   // Cold path: no cached body to fall back on — a slow-but-successful read
-  // beats a 502, and this is a once-per-30s caller anyway.
-  const res = await engineGet(c.env, path, 60_000)
-  if (!res) return null
-  let body = await res.json().catch(() => null)
-  if (res.ok && body != null) {
-    if (transform) body = await transform(c.env, body)
-    c.executionCtx.waitUntil(
-      c.env.API_CACHE.put(proxyKey(path), JSON.stringify({ t: Date.now(), body })),
-    )
+  // beats a 502, and this is a once-per-30s caller anyway. When another
+  // request already holds the refresh, fail fast and let the poll retry.
+  if (!await acquireRefresh(c.env, path)) return { ok: false, body: null }
+  try {
+    const res = await engineGet(c.env, path, 60_000)
+    if (!res) return null
+    let body = await res.json().catch(() => null)
+    if (res.ok && body != null) {
+      if (transform) body = await transform(c.env, body)
+      c.executionCtx.waitUntil(
+        c.env.API_CACHE.put(proxyKey(path), JSON.stringify({ t: Date.now(), body })),
+      )
+    }
+    return res.ok ? { ok: true, body } : { ok: false, body }
+  } finally {
+    c.executionCtx.waitUntil(c.env.API_CACHE.delete(refreshLockKey(path)).catch(() => {}))
   }
-  return res.ok ? { ok: true, body } : { ok: false, body }
 }
 
 /** Attach each queue item's asking price — the engine only sends
@@ -90,13 +115,19 @@ async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> 
   const jobIds = [...new Set(items.map(jobIdOf).filter((x): x is string => x != null))]
   if (jobIds.length === 0) return body
 
-  const rows = await env.DB.prepare(
-    `SELECT job_id, property_address, full_response_json FROM saved_reports WHERE job_id IN (${jobIds.map(() => '?').join(',')})`,
-  ).bind(...jobIds).all<{ job_id: string; property_address: string | null; full_response_json: string | null }>()
-    .catch((e) => {
-      console.error('[Pipeline] listPrice enrichment failed:', e)
-      return null
-    })
+  // D1 caps ~100 binds per query — chunk like attachPockets.
+  const rows: { results: Array<{ job_id: string; property_address: string | null; full_response_json: string | null }> } = { results: [] }
+  for (let i = 0; i < jobIds.length; i += 90) {
+    const chunk = jobIds.slice(i, i + 90)
+    const r = await env.DB.prepare(
+      `SELECT job_id, property_address, full_response_json FROM saved_reports WHERE job_id IN (${chunk.map(() => '?').join(',')})`,
+    ).bind(...chunk).all<{ job_id: string; property_address: string | null; full_response_json: string | null }>()
+      .catch((e) => {
+        console.error('[Pipeline] listPrice enrichment failed:', e)
+        return null
+      })
+    if (r?.results) rows.results.push(...r.results)
+  }
 
   const priceByJob = new Map<string, number>()
   const addrByJob = new Map<string, string>()
@@ -128,20 +159,25 @@ async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> 
     items.filter((i) => i.listPrice == null && i.leadId).map((i) => i.leadId as string),
   )]
   if (missingLeads.length > 0) {
-    const lrows = await env.DB.prepare(
-      `SELECT json_extract(full_response_json, '$.leadId') AS lead_id,
-              COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
-                       json_extract(full_response_json, '$.valuation.listPrice')) AS lp
-         FROM saved_reports
-        WHERE json_extract(full_response_json, '$.leadId') IN (${missingLeads.map(() => '?').join(',')})
-          AND COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
-                       json_extract(full_response_json, '$.valuation.listPrice')) IS NOT NULL
-        ORDER BY created_at DESC`,
-    ).bind(...missingLeads).all<{ lead_id: string | null; lp: number | null }>()
-      .catch((e) => {
-        console.error('[Pipeline] listPrice leadId fallback failed:', e)
-        return null
-      })
+    const lrows: { results: Array<{ lead_id: string | null; lp: number | null }> } = { results: [] }
+    for (let i = 0; i < missingLeads.length; i += 90) {
+      const chunk = missingLeads.slice(i, i + 90)
+      const r = await env.DB.prepare(
+        `SELECT json_extract(full_response_json, '$.leadId') AS lead_id,
+                COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
+                         json_extract(full_response_json, '$.valuation.listPrice')) AS lp
+           FROM saved_reports
+          WHERE json_extract(full_response_json, '$.leadId') IN (${chunk.map(() => '?').join(',')})
+            AND COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
+                         json_extract(full_response_json, '$.valuation.listPrice')) IS NOT NULL
+          ORDER BY created_at DESC`,
+      ).bind(...chunk).all<{ lead_id: string | null; lp: number | null }>()
+        .catch((e) => {
+          console.error('[Pipeline] listPrice leadId fallback failed:', e)
+          return null
+        })
+      if (r?.results) lrows.results.push(...r.results)
+    }
 
     const priceByLead = new Map<string, number>()
     for (const r of lrows?.results ?? []) {
