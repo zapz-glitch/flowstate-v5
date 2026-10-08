@@ -116,14 +116,16 @@ async function resolvePropertyId(env: Env, comp: CompEvidenceInput): Promise<{ p
 
   const streetNum = (comp.address ?? '').match(/^\s*(\d+)/)?.[1] ?? ''
   const slug = comp.address.split(',')[0].replace(/^\s*\d+\s*/, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase()
-  // exactMatch is authoritative; otherwise prefer the row whose URL
-  // carries the street number or street slug.
+  // exactMatch is authoritative; otherwise require BOTH street number and
+  // street slug in the row URL — a slug alone matches every house on the
+  // street. Without either, only fall back when there is a single row to
+  // choose from (a second house's photos must never become this comp's
+  // evidence).
   const matched = rows.find(
-    (r) =>
-      (r.url && streetNum && r.url.includes(`-${streetNum}-`)) ||
-      (r.url && slug && r.url.toLowerCase().includes(slug)),
+    (r) => r.url && streetNum && slug && r.url.includes(`-${streetNum}-`) && r.url.toLowerCase().includes(slug),
   )
-  const row = payload?.exactMatch ?? matched ?? rows.find((r) => r.url?.includes('/home/')) ?? rows[0]
+  const homeRows = rows.filter((r) => r.url?.includes('/home/'))
+  const row = payload?.exactMatch ?? matched ?? (homeRows.length === 1 ? homeRows[0] : undefined) ?? (rows.length === 1 ? rows[0] : undefined)
   if (!row) return null
   const fromId = row.id?.match(/^\d+_(\d+)$/)?.[1]
   const fromUrl = row.url?.match(/\/home\/(\d+)/)?.[1]
@@ -142,6 +144,10 @@ export async function fetchRedfinListing(env: Env, comp: CompEvidenceInput): Pro
     getStingray(env, `${REDFIN}/stingray/api/home/details/aboveTheFold?propertyId=${propertyId}&accessLevel=1`),
     getStingray(env, `${REDFIN}/stingray/api/home/details/belowTheFold?propertyId=${propertyId}&accessLevel=1`),
   ])
+  // When the details payload fails entirely the listing has no remark
+  // channel at all — bail to the Zillow chain rather than classifying a
+  // comp on photos alone.
+  if (below == null) return null
   const abovePayload = (above?.payload ?? {}) as {
     mediaBrowserInfo?: { photos?: Array<{ photoUrls?: { fullScreenPhotoUrl?: string; nonFullScreenPhotoUrl?: string } }> }
   }
@@ -153,13 +159,28 @@ export async function fetchRedfinListing(env: Env, comp: CompEvidenceInput): Pro
     .slice(0, 8)
   if (photos.length === 0) return null
 
-  // MLS listing remarks live on the property-history events — the first
-  // event carrying marketingRemarks is the current listing's copy.
-  const events = ((belowPayload.propertyHistoryInfo as { events?: Array<{ marketingRemarks?: Array<{ marketingRemark?: string }> }> })?.events) ?? []
-  const description = events
-    .map((e) => e.marketingRemarks?.[0]?.marketingRemark)
-    .find((r): r is string => typeof r === 'string' && r.length > 0)
-    ?? findText(belowPayload, ['propertydescription', 'description', 'remarks'])
+  // MLS listing remarks live on the property-history events. Pick the
+  // remark-bearing event nearest the comp's OWN sale date — a home sold
+  // twice keeps both listings' remarks, and the wrong era's copy
+  // misclassifies this comp. No sale date → most recent remark.
+  const events = ((belowPayload.propertyHistoryInfo as {
+    events?: Array<{ eventDate?: number | string; marketingRemarks?: Array<{ marketingRemark?: string }> }>
+  })?.events) ?? []
+  const remarkEvents = events
+    .map((e) => ({
+      date: Number(e.eventDate) || 0,
+      remark: e.marketingRemarks?.[0]?.marketingRemark,
+    }))
+    .filter((e): e is { date: number; remark: string } => typeof e.remark === 'string' && e.remark.length > 0)
+  let description: string | undefined
+  if (remarkEvents.length) {
+    const saleMs = comp.saleDate ? Date.parse(comp.saleDate) || 0 : 0
+    description = (saleMs > 0
+      ? remarkEvents.reduce((a, b) => (Math.abs(b.date - saleMs) < Math.abs(a.date - saleMs) ? b : a))
+      : remarkEvents.reduce((a, b) => (b.date > a.date ? b : a))
+    ).remark
+  }
+  description ??= findText(belowPayload, ['propertydescription', 'description', 'remarks'])
   return {
     propertyId: comp.propertyId,
     photos,
