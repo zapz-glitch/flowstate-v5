@@ -872,6 +872,10 @@ export interface AnalysisResponse {
       /** Gap as % of ask — ≤10% high, ≤20% medium, else low */
       gapPercent: number
       verdict: 'high' | 'medium' | 'low'
+      /** Offer check: the wholesale ceiling computed ABOVE the asking price.
+       *  Deal-flow anomaly — never lead an offer at wholesale over ask; the
+       *  disposition path should negotiate down from the ask instead. */
+      wholesaleAboveAsk: boolean
     } | null
     recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
     recommendationReason?: string
@@ -880,6 +884,9 @@ export interface AnalysisResponse {
     confidenceReasons?: string[]
     /** True unless HIGH — medium flags for review, low withholds the call */
     requiresHumanReview?: boolean
+    /** Trust floor (agent runs only) — 'hold' routes the verdict to the
+     *  human hold list; 'clear' is the explicit auto-clear to offers. */
+    trustFloor?: 'hold' | 'clear'
   } | null
   comps: {
     /** Total number of comps returned from API */
@@ -1154,6 +1161,14 @@ export interface AnalysisResponse {
   rehabAdvisories?: import('../seller-notes').RehabAdvisory[]
   /** Evaluation engine that produced this response */
   evaluationEngine?: string
+  /** Present when the Evaluation Agent drove comp selection — its verdict
+   *  plus the pocket/deal-economics classification it was assigned. */
+  harness?: {
+    source: 'agent'
+    pocketScore?: number | null
+    dealEconomics?: string | null
+    notes?: string
+  }
 }
 export interface ApiCallStats {
   corelogic: {
@@ -1281,6 +1296,7 @@ function listPriceRealismVerdict(
   gapDollars: number
   gapPercent: number
   verdict: 'high' | 'medium' | 'low'
+  wholesaleAboveAsk: boolean
 } | null {
   if (listPrice == null || !(listPrice > 0) || wholesalePrice == null) return null
   const gapDollars = Math.round(listPrice - wholesalePrice)
@@ -1291,6 +1307,7 @@ function listPriceRealismVerdict(
     gapDollars,
     gapPercent,
     verdict: gapPercent <= 10 ? 'high' : gapPercent <= 20 ? 'medium' : 'low',
+    wholesaleAboveAsk: gapDollars < 0,
   }
 }
 

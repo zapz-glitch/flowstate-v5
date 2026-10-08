@@ -120,11 +120,13 @@ const stateOf = async (job: AnalysisJobDO) =>
   const res = await job.fetch(startReq('job_verdict_1', key))
   assert.equal(res.status, 200)
   await res.text()
-  await state.waited[0]
+  // markEvalActive registers a waitUntil before the pipeline — await all of them
+  await Promise.all(state.waited)
 
   const s = await stateOf(job)
   const errEvt = s.events.findLast((e) => e.event === 'error')
   assert.equal(errEvt?.data.message, 'no comps', 'cached verdict message replays')
+
   assert.equal(errEvt?.data.code, 'INSUFFICIENT_COMPS')
   assert.ok(
     !s.events.some((e) => e.event === 'property_fetch'),
@@ -144,7 +146,8 @@ const stateOf = async (job: AnalysisJobDO) =>
   const res = await job.fetch(startReq('job_verdict_2', key, /* skipCache */ true))
   assert.equal(res.status, 200)
   await res.text()
-  await state.waited[0]
+  // markEvalActive registers a waitUntil before the pipeline — await all of them
+  await Promise.all(state.waited)
 
   const s = await stateOf(job)
   assert.ok(

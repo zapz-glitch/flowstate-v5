@@ -143,6 +143,7 @@ class PropertyValuationService implements ValuationService {
       compAvgSqft = subjectSqft,
       rehabLevelIndex = 2,
       skipBaseRehab = false,
+      rehabBaseOverride,
       majorItems = [],
       additionPlay = 0,
       closingCostsPercent = 8,
@@ -161,7 +162,8 @@ class PropertyValuationService implements ValuationService {
 
     // Calculate costs
     const pricePerSqft = subjectSqft > 0 ? Math.round(arv / subjectSqft) : (compAvgSqft > 0 ? Math.round(arv / compAvgSqft) : 0)
-    const baseRehabCost = skipBaseRehab ? 0 : (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
+    // An agent-posted priced scope replaces the flat tier math outright.
+    const baseRehabCost = rehabBaseOverride ?? (skipBaseRehab ? 0 : (subjectSqft || compAvgSqft) * rehabEstimate.perSqft)
     const majorItemsCost = majorItems
       .filter((item) => item.enabled)
       .reduce((sum, item) => sum + item.cost, 0)

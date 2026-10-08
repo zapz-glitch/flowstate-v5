@@ -53,6 +53,57 @@ dev.post('/comp-condition', async (c) => {
   return c.json({ success: true, data: evidence })
 })
 
+/** Batch probe — the production fan-out (startCompEvidenceBatch, 15 lanes)
+ *  with wall-clock timings so latency work is measurable. Body:
+ *  { comps: [{address, city, state, zipCode, propertyId?, ...}] } */
+dev.post('/comp-condition-batch', async (c) => {
+  const body = await c.req.json<{
+    comps?: Array<Record<string, unknown>>
+    gatherOnly?: boolean
+    perCompTimeoutMs?: number
+    lanes?: number
+  }>()
+  const comps = (body.comps ?? []).map((b, i) => ({
+    propertyId: (b.propertyId as string) ?? `dev-b${i}`,
+    address: b.address as string,
+    city: b.city as string,
+    state: b.state as string,
+    zipCode: b.zipCode as string,
+    salePrice: b.salePrice as number | undefined,
+    saleDate: b.saleDate as string | undefined,
+    yearBuilt: b.yearBuilt as number | undefined,
+    squareFeet: b.squareFeet as number | undefined,
+  }))
+  if (!comps.length) return c.json({ error: 'comps required' }, 400)
+  const { startCompEvidenceBatch } = await import('../services/comp-evidence')
+  const gatherOnly = body.gatherOnly === true
+  const t0 = Date.now()
+  const out = await startCompEvidenceBatch(c.env, comps, {
+    subject: { squareFeet: 1800 },
+    gatherOnly,
+    perCompTimeoutMs: body.perCompTimeoutMs as number | undefined,
+    lanes: body.lanes as number | undefined,
+  })
+  const wallMs = Date.now() - t0
+  return c.json({
+    success: true,
+    wallMs,
+    gatherOnly,
+    data: comps.map((cp) => {
+      const ev = out.get(cp.propertyId)
+      return {
+        propertyId: cp.propertyId,
+        source: ev?.listing?.source ?? null,
+        photoCount: ev?.listing?.photoCount ?? 0,
+        tier: ev?.condition?.tier ?? null,
+        model: ev?.condition?.model ?? null,
+        classifyMs: ev?.condition?.durationMs ?? null,
+        skipped: ev?.skippedReason ?? (ev == null ? 'lane timeout' : null),
+      }
+    }),
+  })
+})
+
 export default dev
 
 /** Token warm probe — runs the same scheduled-handler path live so token
