@@ -9,7 +9,7 @@ import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection, type CompSelectionStats } from './ComparablesSection'
 import { DecisionTrail } from './DecisionTrail'
 import { DealSummaryHero } from './DealSummaryHero'
-import { DealActions } from './DealActions'
+import { DealActions, type RerunStatus } from './DealActions'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
@@ -30,6 +30,8 @@ export interface AnalysisResultLayoutProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
+  /** Live stage line for the rerun control */
+  rerunStatus?: RerunStatus | null
   /** Fire an offer workflow — returns the outcome the hero flashes */
   onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
@@ -55,6 +57,7 @@ export function AnalysisResultLayout({
   notesSlot,
   onRerun,
   rerunning,
+  rerunStatus,
   onOfferWorkflow,
   disposition,
   valuationPlacement = 'inline',
@@ -114,6 +117,7 @@ export function AnalysisResultLayout({
               onOfferWorkflow={onOfferWorkflow}
               onRerun={onRerun}
               rerunning={rerunning}
+              rerunStatus={rerunStatus}
               onOpenSettings={onOpenSettings}
             />
           ) : null}
