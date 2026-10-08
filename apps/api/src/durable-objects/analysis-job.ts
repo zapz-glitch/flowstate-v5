@@ -66,7 +66,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport, bMetricsFromValuation, recordRunTelemetry } from '../services/report-upsert'
 import { notifyEvalComplete } from '../routes/offers'
-import { analysisRuns, savedReports } from '../db/schema'
+import { analysisRuns, harnessQueue, savedReports } from '../db/schema'
 import {
   EVAL_ERROR_TTL_SECONDS,
   decodeVerdict,
@@ -159,6 +159,9 @@ export interface StartStreamingRequest {
    *  persisted report so it can be written back to the CRM */
   leadId?: string
   opportunityId?: string
+  /** Caller's eval-ledger id (Idempotency-Key) — plumbed to the queue row
+   *  so a drainer can post /engine/eval/complete against it. */
+  callerRef?: string
   llmOptions?: {
     includePhotos?: boolean
     compSelectionModel?: string
@@ -2410,6 +2413,48 @@ export class AnalysisJobDO {
     }).catch(() => { /* best-effort */ })
   }
 
+  /** Enqueue the parked job into the harness work queue so drainer
+   *  sessions can discover + claim it. Idempotent upsert — a job parks once. */
+  private async enqueueHarnessJob(config: StartStreamingRequest): Promise<void> {
+    const db = drizzle(this.env.DB)
+    const now = new Date().toISOString()
+    const deadline = this.jobState?.harnessDeadline ? new Date(this.jobState.harnessDeadline).toISOString() : null
+    await db.insert(harnessQueue).values({
+      jobId: config.jobId,
+      userId: config.userId,
+      propertyAddress: config.search.address ?? config.search.streetAddress ?? null,
+      propertyCity: config.search.city ?? null,
+      propertyState: config.search.state ?? null,
+      propertyZip: config.search.zipCode ?? null,
+      callerRef: config.callerRef ?? null,
+      leadId: config.leadId ?? null,
+      status: 'awaiting_agent',
+      deadlineAt: deadline,
+      parkedAt: now,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: harnessQueue.jobId,
+      set: {
+        status: 'awaiting_agent',
+        claimedBy: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        rounds: 0,
+        deadlineAt: deadline,
+        parkedAt: now,
+        updatedAt: now,
+      },
+    })
+  }
+
+  /** Mirror the terminal outcome onto the queue row (complete | error). */
+  private async dequeueHarnessJob(config: StartStreamingRequest, status: 'complete' | 'error'): Promise<void> {
+    const db = drizzle(this.env.DB)
+    await db.update(harnessQueue)
+      .set({ status, updatedAt: new Date().toISOString() })
+      .where(and(eq(harnessQueue.jobId, config.jobId), eq(harnessQueue.userId, config.userId)))
+  }
+
   private async recordRun(
     config: StartStreamingRequest,
     outcome: {
@@ -2536,6 +2581,10 @@ export class AnalysisJobDO {
       }
     } catch (err) {
       console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
+    } finally {
+      // Terminal outcome → mirror onto the queue row even when persistence
+      // above failed, else a finished job stays claimable forever.
+      await this.dequeueHarnessJob(config, outcome.status === 'completed' ? 'complete' : 'error').catch(() => { /* queue mirror is best-effort */ })
     }
 
     // Terminal state → tell the engine so underwriting→Give Offer moves
