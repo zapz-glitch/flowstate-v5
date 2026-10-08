@@ -554,6 +554,27 @@ export async function classifyCompPoolHaiku(
   subject?: { squareFeet?: number; address?: string },
   lanes = 8,
 ): Promise<void> {
+  // A cached condition is only valid when the current classifier wrote it —
+  // stamps from a previous lane (luna/Decisions/Clef) are dropped so the
+  // active classifier re-reads the cached evidence. Keeps old models out of
+  // the eval without throwing away the expensive listing/photo fetch.
+  // `model` is the provider that actually ran; `modelVersion` is only the
+  // requested fallback string, so model wins. Stamps predating the
+  // comp-rules notation (no rulesCheck) are stale too.
+  const want = (env.ANTHROPIC_API_KEY
+    ? (env.REASONING_MODEL || 'claude-haiku-5-5')
+    : (env.VISION_MODEL || env.OPENROUTER_MODEL || LUNA_COMP_MODEL)).split('/').pop()
+  const norm = (s?: string | null) => (s ?? '').split('/').pop()
+  for (const { evidence } of evidences) {
+    const c = evidence.condition
+    if (c && (norm(c.model ?? c.modelVersion) !== want || c.rulesCheck === undefined)) {
+      evidence.condition = null
+      delete evidence.skippedReason
+      evidence.investorSignalSources = []
+      evidence.investorSignal = false
+      delete evidence.hint
+    }
+  }
   const classifiable = evidences.filter((e) => e.evidence.listing != null && !e.evidence.condition)
   if (classifiable.length === 0) return
 
