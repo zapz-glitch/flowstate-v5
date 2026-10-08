@@ -1,42 +1,29 @@
 /**
- * Decision-level verdict grading — docs/BANDING-VERIFICATION-SPEC.md §1, §4.
+ * Decision-level verdict grading — the deterministic gate.
  *
- * Pure recomputation over the frozen evidence bundle the agent saw: the
- * seven decision checks plus the band-geometry check (ε ≤ 0.10 per edge,
- * IoU ≥ 0.70, skip-not-pass disregard scoring). Fail-open by contract —
- * the grade records on the run, never blocks or retries the verdict.
- *
+ * Pure recomputation over the frozen evidence bundle the appraiser saw.
  * No model in the loop: every check reads fields the pipeline already
- * computed (census stamps, Clef digests, verification flags, the
- * deterministic band module).
+ * computed (census stamps, condition classifications, verification
+ * flags). There are no bands — condition classification + a
+ * deterministic price-coherence trim are the referee. Fail-open by
+ * contract: the grade records on the run; gateFails + gateFeedback are
+ * what the revision loop feeds back to the appraiser.
+ *
+ * Checks:
+ *   d1  pricing weight stays in the pocket (block group first)
+ *   d2  no flagged/non-market picks
+ *   d4  no as-is drivers; ARV evidence used when it exists
+ *   d5  no coherence-outlier picks; strong anchors not skipped
+ *   d6  missing-evidence surfaced in flags
+ *   d7  ARV inside the renovated-comps price envelope (±10%)
  */
 
-import { computeEvidenceBands, bandEdgeCheck, type BandName, type EvidenceBands } from '@flowstate-api/shared/appraisal'
 import type { HarnessEvidence, AgentSelection } from './index'
 
 export type CheckResult = 'pass' | 'fail' | 'warn' | 'skipped'
 
-export interface StatedBand {
-  low: number
-  high: number
-  mid: number
-  compIds: string[]
-}
-
-export interface BandEdgeGrade {
-  stated: StatedBand | null
-  evidence: { low: number; high: number; mid: number } | null
-  epsLow: number | null
-  epsHigh: number | null
-  iou: number | null
-  result: CheckResult
-  /** Evidence-band method (ok | insufficient_data | extreme_variance | stale | bimodal | missing). */
-  method: string
-}
-
 export interface VerdictGrade {
-  checks: Record<'d1' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6' | 'd7' | 'd8', CheckResult>
-  bandGrades: Record<BandName, BandEdgeGrade>
+  checks: Record<'d1' | 'd2' | 'd4' | 'd5' | 'd6' | 'd7', CheckResult>
   /** pass=1, warn=0.5 over non-skipped checks, minus flat soft penalties. */
   score: number
   /** Machine-readable failure classes — the 'improve' loop input. */
@@ -46,18 +33,13 @@ export interface VerdictGrade {
   /** Flat soft-penalty deducted from the composite (geo bleed = 0.1). */
   scorePenalty: number
   /** Check names whose fail contradicts verified evidence — what the
-   *  revision gate rejects on. Hard fails on d1-d7 always gate; d8 gates
-   *  only when the agent STATED edges that contradict the verified band
-   *  (an unstated band is an invalid disregard — grade fails, gate
-   *  doesn't reject: no contradiction was posted). */
+   *  revision gate rejects on. */
   gateFails: string[]
-  /** Targeted correction feedback for the revision gate — populated for
+  /** Targeted correction feedback for the revision loop — populated for
    *  every gated fail, naming the comp/item and the evidence violated. */
   gateFeedback: string[]
   gradedAt: string
 }
-
-const BAND_NAMES: BandName[] = ['as_is', 'median', 'arv']
 
 const asRec = (v: unknown): Record<string, unknown> | null =>
   v != null && typeof v === 'object' ? (v as Record<string, unknown>) : null
@@ -92,58 +74,50 @@ const flaggedOutlier = (c: GradeComp): boolean =>
   ((c.evidenceVerification?.flags?.length ?? 0) > 0 &&
     (c.evidenceVerification?.flags ?? []).some((f) => /nominal|typo|outlier|data_error/i.test(f)))
 
+/** Renovated/updated sale — real ARV evidence. Reads the haiku condition
+ *  classification (label / tier), the keyword classifier, and the curb-
+ *  appeal read — any of them can carry the flag. */
 const carriesArvEvidence = (c: GradeComp): boolean =>
   c.verifiedFlip === true ||
   c.classification?.type === 'after_renovation' ||
-  c.curbAppeal?.condition === 'renovated'
+  c.curbAppeal?.condition === 'renovated' ||
+  c.conditionLabel === 'Renovated' ||
+  c.conditionLabel === 'Updated' ||
+  c.compTier === 'arv'
 
-// The gate's own band assignment is the authoritative label — the listing
-// class (`cls`) is a display field and lies about as-is stock in mixed
-// pools (the Ash Ln trap: cls=transitional, band=as_is).
+/** As-is/distressed sale — can never drive an ARV verdict. Anchored on
+ *  the condition classification directly (no band labels). */
 const asIsClassified = (c: GradeComp): boolean =>
-  c.band === 'as_is' ||
   c.classification?.type === 'as_is' ||
-  c.curbAppeal?.condition === 'distressed'
+  c.curbAppeal?.condition === 'distressed' ||
+  c.conditionLabel === 'Poor' ||
+  c.compTier === 'investor' ||
+  (c.conditionAsIs === true)
 
-/** Grade one band's stated edges against the evidence band (spec §4, §6.3). */
-function gradeBand(
-  name: BandName,
-  stated: StatedBand | null,
-  evidenceBand: EvidenceBands[BandName],
-): BandEdgeGrade {
-  const method = evidenceBand.method
-  if (method !== 'ok') {
-    // Valid disregard — skipped, omitted from the denominator. When the
-    // band produced an implied envelope (stale/bimodal/extreme_variance),
-    // surface it as evidence context even though it can't verify a stated
-    // band — an unstated implied band stays a valid disregard.
-    const implied = evidenceBand.implied && evidenceBand.low != null && evidenceBand.high != null && evidenceBand.mid != null
-      ? { low: evidenceBand.low, high: evidenceBand.high, mid: evidenceBand.mid }
-      : null
-    return {
-      stated, evidence: implied, epsLow: null, epsHigh: null, iou: null,
-      result: stated ? 'warn' : 'skipped', // agent claimed a band evidence can't support → warn
-      method,
-    }
-  }
-  if (!stated) {
-    // Bands are the gate's referee, not the agent's language — under the
-    // first-principles selection contract the agent posts picks + ARV and
-    // never states band edges. An unstated band is neutral, not a
-    // disregard: skipped, omitted from the denominator.
-    return { stated: null, evidence: null, epsLow: null, epsHigh: null, iou: null, result: 'skipped', method }
-  }
-  const check = bandEdgeCheck(stated.low, stated.high, evidenceBand.low!, evidenceBand.high!)
-  const pass = check.epsLow <= 0.1 && check.epsHigh <= 0.1 && check.iou >= 0.7
-  return {
-    stated,
-    evidence: { low: evidenceBand.low!, high: evidenceBand.high!, mid: evidenceBand.mid! },
-    epsLow: check.epsLow,
-    epsHigh: check.epsHigh,
-    iou: check.iou,
-    result: pass ? 'pass' : 'fail',
-    method,
-  }
+/** Condition group for the coherence trim — arv evidence vs as-is stock
+ *  vs everything else. Deterministic; not a band, just a trim bucket. */
+const conditionGroup = (c: GradeComp): 'as_is' | 'arv' | 'median' =>
+  asIsClassified(c) ? 'as_is' : carriesArvEvidence(c) ? 'arv' : 'median'
+
+const quantile = (sorted: number[], q: number): number =>
+  sorted[Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1)))]!
+
+/**
+ * Price-coherence outliers inside a condition group: 1.5×IQR on sale
+ * price. This is what catches the 'outsized prices' datasets produce —
+ * a $610k comp sitting in a pool of $250k renovated sales is priced
+ * out before it can distort the envelope or be picked.
+ */
+function coherenceOutliers(group: GradeComp[]): Set<string> {
+  const priced = group.filter((c) => c.salePrice != null && c.salePrice > 0)
+  if (priced.length < 4) return new Set() // too thin to trim — trust the pool
+  const prices = priced.map((c) => c.salePrice!).sort((a, b) => a - b)
+  const q1 = quantile(prices, 0.25)
+  const q3 = quantile(prices, 0.75)
+  const iqr = q3 - q1
+  const lo = q1 - 1.5 * iqr
+  const hi = q3 + 1.5 * iqr
+  return new Set(priced.filter((c) => c.salePrice! < lo || c.salePrice! > hi).map((c) => c.id))
 }
 
 export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelection): VerdictGrade {
@@ -152,7 +126,7 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const gateFeedback: string[] = []
   let scorePenalty = 0
   const checks: VerdictGrade['checks'] = {
-    d1: 'pass', d2: 'pass', d3: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass',
+    d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass',
   }
 
   const byId = new Map(evidence.comps.map((c) => [c.id, c] as const))
@@ -162,20 +136,19 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const enabledUnpicked = evidence.comps.filter((c) => priceable(c) && !selection.selectedCompIds.includes(c.id))
   const subjectTract = evidence.subject.censusTract
 
-  // Recompute the bands exactly as the evidence payload showed them —
-  // comp.band already carries reasoning-model adjudication overrides, so
-  // feeding the labels back as overrides keeps the gate's verified band
-  // identical to what the agent was asked to restate (without this the
-  // gate verifies pre-adjudication edges no selection can match).
-  const bandOverrides: Record<string, BandName | null> = {}
-  for (const c of evidence.comps) if (c.band !== undefined) bandOverrides[c.id] = c.band
-  const bands = computeEvidenceBands(evidence.comps, evidence.subject, { bandOverrides })
+  // Coherence trim — computed once for d5/d7, same math for every group.
+  const groups: Record<'as_is' | 'arv' | 'median', GradeComp[]> = { as_is: [], arv: [], median: [] }
+  for (const c of evidence.comps) if (priceable(c)) groups[conditionGroup(c)].push(c)
+  const trimmed = new Set<string>([
+    ...coherenceOutliers(groups.as_is),
+    ...coherenceOutliers(groups.arv),
+    ...coherenceOutliers(groups.median),
+  ])
+  // ARV-qualified comps: renovated-classified, priceable, not flagged,
+  // not coherence-trimmed. The d4/d7 evidence pool.
+  const arvQualified = groups.arv.filter((c) => !flaggedOutlier(c) && !trimmed.has(c.id))
 
   // ── d1: right neighborhood — pricing weight, block group first ───────────
-  // Principle: ANY comp carrying pricing weight outside the operative
-  // pocket while in-pocket comps go unpicked is a violation — position in
-  // the list is irrelevant. Weight = the posted drivers (all of them);
-  // supporting picks off-pocket pass with a geo-bleed warning + penalty.
   const bgPool = new Set(evidence.comps.filter((c) => priceable(c) && inBg(c)).map((c) => c.id))
   const tractPool = new Set(evidence.comps.filter((c) => priceable(c) && inPocket(c, subjectTract)).map((c) => c.id))
   const pocketIds = bgPool.size > 0 ? bgPool : tractPool
@@ -184,12 +157,10 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const offPocketDrivers = drivers.filter((c) => !pocketIds.has(c.id))
   const offPocketSupporting = picks.filter((c) => !weightedIds.has(c.id) && !pocketIds.has(c.id))
   const unpickedPocket = enabledUnpicked.filter((c) => pocketIds.has(c.id))
-  // All-as_is pocket paradox: when every unpicked in-pocket comp sits in the
-  // as_is band, picking it can't satisfy d4 (as-is can't drive ARV) — so d1
-  // must not hard-fail for leaving it unpicked. Warn instead of creating an
+  // All-as_is pocket paradox: when every unpicked in-pocket comp is
+  // as-is-classified, picking it can't satisfy d4 — warn instead of an
   // unsatisfiable d1+d4 contradiction.
-  const asIsMembers = new Set(bands.as_is.memberIds)
-  const pocketAllAsIs = unpickedPocket.length > 0 && unpickedPocket.every((c) => asIsMembers.has(c.id))
+  const pocketAllAsIs = unpickedPocket.length > 0 && unpickedPocket.every(asIsClassified)
   if (offPocketDrivers.length > 0 && unpickedPocket.length > 0 && !pocketAllAsIs) {
     checks.d1 = 'fail'
     failures.push(bgPool.size > 0 ? 'd1_neighborhood_miss' : 'd1_off_tract_pick')
@@ -203,7 +174,7 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     checks.d1 = 'warn'
     failures.push('d1_all_asis_pocket')
     gateFeedback.push(
-      `d1: every unpicked in-pocket comp is as_is-band — it cannot carry ARV weight, so off-${pocketLabel} ` +
+      `d1: every unpicked in-pocket comp is as-is-classified — it cannot carry ARV weight, so off-${pocketLabel} ` +
       `drivers are acceptable here; pick the in-pocket comps as supporting context if useful`,
     )
   } else if (offPocketDrivers.length > drivers.length / 3) {
@@ -226,38 +197,10 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     }
   }
 
-  // ── d3: correct band membership (geometry is d8) ──────────────────────────
-  const statedEdges = selection.bandEdges ?? {}
-  const statedMembers = new Map<string, BandName>()
-  for (const bn of BAND_NAMES) {
-    for (const id of statedEdges[bn]?.compIds ?? []) {
-      if (!byId.has(id)) {
-        checks.d3 = 'fail'
-        failures.push(`d3_${bn}_unknown_member`)
-        gateFeedback.push(`d3: ${id} is in your ${bn} band compIds but is not in the evidence pool — remove it`)
-        continue
-      }
-      if (statedMembers.has(id)) {
-        checks.d3 = 'fail'
-        failures.push(`d3_${id}_dual_membership`)
-        gateFeedback.push(`d3: ${id} appears in two bands — every comp belongs to exactly one`)
-        continue
-      }
-      statedMembers.set(id, bn)
-      const c = byId.get(id)!
-      if (bn === 'arv' && asIsClassified(c)) {
-        checks.d3 = 'fail'
-        failures.push('d3_as_is_in_arv_band')
-        gateFeedback.push(`d3: ${id} (${c.address ?? 'unknown'}) is classified as-is — it cannot sit in the ARV band`)
-      }
-    }
-  }
-
   // ── d4: right ARV evidence ────────────────────────────────────────────────
   const asIsDrivers = drivers.filter(asIsClassified)
   // All-as-is pool paradox: when the pool offers zero non-as-is evidence,
-  // any driver the agent picks is as-is — the verdict is forced into a
-  // distressed read. Warn instead of making every selection unpassable.
+  // any driver is as-is — the verdict is forced into a distressed read.
   const poolHasNonAsIs = evidence.comps.some((c) => priceable(c) && !asIsClassified(c))
   if (asIsDrivers.length > 0 && poolHasNonAsIs) {
     checks.d4 = 'fail'
@@ -269,26 +212,26 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     checks.d4 = 'warn'
     failures.push('d4_all_as_is_pool')
   } else {
-    const arvBandMembers = bands.arv.method === 'ok' ? new Set(bands.arv.memberIds) : new Set<string>()
+    const qualifiedIds = new Set(arvQualified.map((c) => c.id))
     const driversWithEvidence = drivers.filter(carriesArvEvidence)
-    const skippedArvMembers = drivers.filter((c) => arvBandMembers.has(c.id) === false && !carriesArvEvidence(c))
-    if (arvBandMembers.size > 0 && driversWithEvidence.length === 0) {
+    const skippedQualified = drivers.filter((c) => !qualifiedIds.has(c.id) && !carriesArvEvidence(c))
+    if (qualifiedIds.size > 0 && driversWithEvidence.length === 0) {
       checks.d4 = 'fail'
       failures.push('d4_arv_evidence_skipped')
-    } else if (driversWithEvidence.length === 0 || skippedArvMembers.length > 0) {
+      gateFeedback.push(`d4: no pricing comp carries renovated evidence while ${qualifiedIds.size} qualified renovated comp(s) went unused — anchor on them or say why none apply`)
+    } else if (driversWithEvidence.length === 0 || skippedQualified.length > 0) {
       checks.d4 = 'warn'
       failures.push('d4_maintained_anchor')
     }
   }
 
   // ── d5: right rejections ─────────────────────────────────────────────────
-  const trimmed = new Set(BAND_NAMES.flatMap((bn) => bands[bn].trimmedIds))
   const trimmedPicks = picks.filter((c) => trimmed.has(c.id))
   if (trimmedPicks.length > 0) {
     checks.d5 = 'fail'
-    failures.push('d5_iqr_outlier_picked')
+    failures.push('d5_coherence_outlier_picked')
     for (const c of trimmedPicks) {
-      gateFeedback.push(`d5: pick ${c.id} (${c.address ?? 'unknown'}) was IQR-trimmed from its band — its $/sf is a band outlier, remove it`)
+      gateFeedback.push(`d5: pick ${c.id} (${c.address ?? 'unknown'}) is a price outlier inside its condition group ($${c.salePrice?.toLocaleString() ?? '?'}) — remove it`)
     }
   }
   const verifiedAnchors = enabledUnpicked.filter((c) =>
@@ -305,68 +248,41 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     failures.push('d6_gaps_unsurfaced')
   }
 
-  // ── d7: final value inside the ARV evidence edge ─────────────────────────
-  const arvBand = bands.arv
-  const hasEdges = arvBand.low != null && arvBand.high != null
-  if (arvBand.method === 'ok' && hasEdges) {
-    const lo = arvBand.low! * 0.9
-    const hi = arvBand.high! * 1.1
+  // ── d7: final value inside the renovated-comps price envelope ────────────
+  // The envelope is the actual sale-price range of ARV-qualified comps —
+  // ±10%. With fewer than 2 qualified comps the envelope is soft (warn),
+  // computed over all non-as-is priceable comps instead.
+  const envelopePool = arvQualified.length >= 2 ? arvQualified
+    : evidence.comps.filter((c) => priceable(c) && !asIsClassified(c) && !flaggedOutlier(c))
+  if (envelopePool.length >= 2) {
+    const prices = envelopePool.map((c) => c.salePrice!)
+    const lo = Math.min(...prices) * 0.9
+    const hi = Math.max(...prices) * 1.1
+    const soft = arvQualified.length < 2
     if (selection.arv < lo || selection.arv > hi) {
-      checks.d7 = 'fail'
-      failures.push('d7_outside_evidence_edge')
-      gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the ARV evidence edge $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%) — re-anchor inside the verified band`)
-    }
-  } else if (hasEdges) {
-    // Implied envelope (stale/bimodal/extreme_variance) — softer check: a
-    // verdict outside it is a warning, not a gateable contradiction.
-    const lo = arvBand.low! * 0.9
-    const hi = arvBand.high! * 1.1
-    if (selection.arv < lo || selection.arv > hi) {
-      checks.d7 = 'warn'
-      failures.push('d7_outside_implied_edge')
-      gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the implied ARV envelope $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%, ${arvBand.method} band — weaker evidence); flag why or re-anchor`)
+      if (soft) {
+        checks.d7 = 'warn'
+        failures.push('d7_outside_implied_edge')
+        gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the non-as-is comps' price range $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%, weak renovated evidence — flag why or re-anchor)`)
+      } else {
+        checks.d7 = 'fail'
+        failures.push('d7_outside_evidence_edge')
+        gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the renovated comps' price envelope $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%) — re-anchor inside the evidence`)
+      }
     }
   } else {
     checks.d7 = 'skipped'
   }
 
-  // ── d8: band geometry ─────────────────────────────────────────────────────
-  const bandGrades = {
-    as_is: gradeBand('as_is', statedEdges.as_is ?? null, bands.as_is),
-    median: gradeBand('median', statedEdges.median ?? null, bands.median),
-    arv: gradeBand('arv', statedEdges.arv ?? null, bands.arv),
-  }
-  const bandResults = BAND_NAMES.map((bn) => bandGrades[bn].result)
-  const d8Contradicts = BAND_NAMES.some(
-    (bn) => bandGrades[bn].result === 'fail' && bandGrades[bn].stated != null,
-  )
-  if (bandResults.includes('fail')) {
-    checks.d8 = 'fail'
-    for (const bn of BAND_NAMES) if (bandGrades[bn].result === 'fail') failures.push(`d8_${bn}_edge_miss`)
-    for (const bn of BAND_NAMES) {
-      const bg = bandGrades[bn]
-      if (bg.result === 'fail' && bg.stated != null && bg.evidence != null) {
-        gateFeedback.push(`d8: your ${bn} band edges $${Math.round(bg.stated.low).toLocaleString()}\u2013$${Math.round(bg.stated.high).toLocaleString()} disagree with the verified band $${Math.round(bg.evidence.low).toLocaleString()}\u2013$${Math.round(bg.evidence.high).toLocaleString()} (IoU ${bg.iou?.toFixed(2) ?? '0'}) — restate them or flag why the band should differ`)
-      }
-    }
-  } else if (bandResults.every((r) => r === 'skipped')) {
-    checks.d8 = 'skipped'
-  } else if (bandResults.includes('warn')) {
-    checks.d8 = 'warn'
-  }
-
   // Composite — pass=1, warn=0.5, skipped out of the denominator, minus
-  // flat soft penalties (geo bleed). Spec §6.3 excluded denominator.
+  // flat soft penalties (geo bleed).
   const results = Object.values(checks)
   const active = results.filter((r) => r !== 'skipped')
   const earned = active.reduce((a, r) => a + (r === 'pass' ? 1 : r === 'warn' ? 0.5 : 0), 0)
-  const gateFails = Object.entries(checks)
-    .filter(([k, r]) => r === 'fail' && (k !== 'd8' || d8Contradicts))
-    .map(([k]) => k)
+  const gateFails = Object.entries(checks).filter(([, r]) => r === 'fail').map(([k]) => k)
 
   return {
     checks,
-    bandGrades,
     gateFails,
     score: active.length > 0 ? Math.max(0, earned / active.length - scorePenalty) : 1,
     failures: [...new Set(failures)],

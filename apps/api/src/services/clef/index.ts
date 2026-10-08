@@ -77,6 +77,11 @@ export interface CompConditionResult {
   conditionLabel: string
   /** Clef's reported confidence in the score answer, when present */
   confidence?: number
+  /** 1-2 sentence evidence summary the classifier wrote (haiku path). */
+  summary?: string
+  /** Comp-rules check — does the comp satisfy the selection rules and,
+   *  if not, what is it missing (price, sqft, recency, legitimacy). */
+  rulesCheck?: { meets: boolean; missing: string[] }
   /** Agent-assist digest — advisory pre-read the Evaluation Agent weighs
    *  next to the raw data; never a verdict by itself. */
   hint?: CompHint

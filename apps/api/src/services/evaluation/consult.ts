@@ -12,7 +12,7 @@
  */
 
 import { createSpecialistProvider } from '../llm'
-import { BAND_DOCTRINE } from './band-doctrine'
+import { COMP_DOCTRINE } from './comp-doctrine'
 import type { AgentSelection, HarnessEvidence, SelectionAttempt } from './index'
 import type { VerdictGrade } from './verdict-grade'
 
@@ -38,7 +38,7 @@ const CONSULT_SCHEMA = {
 
 const CONSULT_PROMPT = `You are an expert real-estate investor and appraiser — a consultant to the agent finalizing this evaluation, not the decision-maker.
 
-The agent proposes picks/drivers/ARV for this subject (plus optional band adjustments — it holds the banding seat). The deterministic gate has already graded the proposal (checkFails = hard violations; failures/warns = named issues). Give your findings like a senior investor advisor would: the data behind your read, the reasoning, and the specific recommendation — then the agent decides whether to adopt it.
+The agent proposes picks/drivers/ARV for this subject . The deterministic gate has already graded the proposal (checkFails = hard violations; failures/warns = named issues). Give your findings like a senior investor advisor would: the data behind your read, the reasoning, and the specific recommendation — then the agent decides whether to adopt it.
 
 Return STRICT JSON:
 {
@@ -50,7 +50,7 @@ Return STRICT JSON:
 suggestedFixes is [] when verdict is accept. Be concrete: name compIds, bands, or the ARV envelope the fix implies.
 
 DOCTRINE:
-${BAND_DOCTRINE}
+${COMP_DOCTRINE}
 `
 
 function compactComp(c: Record<string, unknown>) {
@@ -71,7 +71,9 @@ function compactComp(c: Record<string, unknown>) {
     sameBlockGroup: c.sameBlockGroup,
     censusTract: c.censusTract,
     neighborhoodName: c.neighborhoodName,
-    band: c.band ?? null,
+    conditionLabel: c.conditionLabel ?? null,
+    compTier: c.compTier ?? null,
+    rulesCheck: c.rulesCheck ?? null,
     classification: cls?.type ?? null,
     condition: cond?.condition ?? cond?.label ?? null,
     conditionTier: cond?.tier ?? null,
@@ -111,12 +113,8 @@ export async function consultOnSelection(
       conf: input.selection.conf,
       selectedCompIds: input.selection.selectedCompIds,
       drivers: input.selection.drivers ?? [],
-      bands: input.selection.bands ?? null,
-      bandEdges: input.selection.bandEdges ?? null,
-      bandAdjustments: input.selection.bandAdjustments ?? null,
       notes: input.selection.notes ?? null,
     },
-    bandConsult: input.evidence.bandEscalation ?? null,
     gateGrade: {
       score: input.grade.score,
       checkFails: input.grade.gateFails,
@@ -124,8 +122,6 @@ export async function consultOnSelection(
       warnings: input.grade.warnings,
     },
     priorAttempts: prior,
-    evidenceBands: input.evidence.evidenceBands,
-    geoBands: input.evidence.geoBands,
     comps: (input.evidence.comps ?? []).map((c) => compactComp(c as unknown as Record<string, unknown>)),
   }
 

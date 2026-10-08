@@ -214,7 +214,9 @@ Answer as strict JSON:
   "as_is": number 0-1 — probability it was sold as-is / fixer / deferred maintenance,
   "investor_language": number 0-1 — probability the listing markets to investors,
   "tier": one of ["investor","median","arv"] — investor-marketed or as-is sales are never ARV evidence however updated they look,
-  "confidence": number 0-1 — your confidence in the condition_label
+  "confidence": number 0-1 — your confidence in the condition_label,
+  "summary": string — 1-2 sentences summarizing the listing evidence you used,
+  "rulesCheck": { "meets": boolean, "missing": ["<item>"] } — does this comp satisfy the comp rules (real arm's-length sale, priceable evidence, usable condition read, usable geo/recency)? List every rule it fails or every field its evidence is missing; empty list when it qualifies
 }`
 
 const LUNA_COMP_SCHEMA = {
@@ -226,8 +228,18 @@ const LUNA_COMP_SCHEMA = {
     investor_language: { type: 'number' },
     tier: { type: 'string', enum: ['investor', 'median', 'arv'] },
     confidence: { type: 'number' },
+    summary: { type: 'string' },
+    rulesCheck: {
+      type: 'object',
+      properties: {
+        meets: { type: 'boolean' },
+        missing: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['meets', 'missing'],
+      additionalProperties: false,
+    },
   },
-  required: ['condition_label', 'renovated', 'as_is', 'investor_language', 'tier', 'confidence'],
+  required: ['condition_label', 'renovated', 'as_is', 'investor_language', 'tier', 'confidence', 'summary', 'rulesCheck'],
   additionalProperties: false,
 } as const
 
@@ -238,6 +250,8 @@ export interface LunaCompAnswer {
   investor_language?: unknown
   tier?: unknown
   confidence?: unknown
+  summary?: unknown
+  rulesCheck?: { meets?: unknown; missing?: unknown }
 }
 
 /** Map a Luna JSON answer onto the Clef output contract — pure, testable. */
@@ -263,6 +277,15 @@ export function parseLunaCompCondition(content: string): Omit<CompConditionResul
     conditionScore: idx,
     conditionLabel: CONDITION_SCALE[idx].split(' — ')[0],
     confidence: prob(o.confidence) || undefined,
+    summary: typeof o.summary === 'string' && o.summary ? o.summary.slice(0, 400) : undefined,
+    rulesCheck: o.rulesCheck && typeof o.rulesCheck === 'object'
+      ? {
+          meets: o.rulesCheck.meets !== false,
+          missing: Array.isArray(o.rulesCheck.missing)
+            ? (o.rulesCheck.missing as unknown[]).filter((m): m is string => typeof m === 'string').slice(0, 8)
+            : [],
+        }
+      : undefined,
   }
 }
 
@@ -270,11 +293,11 @@ async function classifyCompConditionLuna(
   env: Env,
   input: Parameters<typeof classifyCompCondition>[1],
 ): Promise<CompConditionResult | null> {
-  // Specialist lane — routine cohort classification rides claude-sonnet-5-5
-  // when the Anthropic key is set; otherwise the arm's reasoning provider
-  // (luna on A, haiku on B). This function remains the Clef fallback either way.
+  // Haiku is the comp classifier — it replaced the Decisions model and has
+  // no decision authority (classification only). Sonnet is the fallback
+  // when the reasoning lane is unavailable; OpenRouter when neither.
   const model = env.VISION_MODEL || env.OPENROUTER_MODEL || LUNA_COMP_MODEL
-  const provider = createSpecialistProvider(env, 'routine') ?? createReasoningProvider(env, model)
+  const provider = createReasoningProvider(env, model) ?? createSpecialistProvider(env, 'routine')
   if (!provider) return null
   const context =
     `Property: ${input.address ?? 'unknown'}${input.salePrice ? ` — sold $${input.salePrice.toLocaleString()}` : ''}` +
@@ -515,6 +538,91 @@ export async function gatherCompConditionEvidence(
  *  comp (`c_<id>__<q>`) and run through the same buildConditionResult
  *  assembly as the single-comp path. */
 const DECISIONS_BATCH_CHUNK = 10
+
+/**
+ * Haiku comp classifier — one call per comp, run in parallel lanes. Haiku
+ * replaced the Decisions model for comp classification: it reads the
+ * cover photo + listing text + facts, with the pool price ladder as
+ * context, and returns condition tier + an evidence summary + a
+ * comp-rules check (which rules the comp fails or fields it lacks).
+ * Classification only — no decision authority; the appraiser (Opus) and
+ * the gate decide downstream.
+ */
+export async function classifyCompPoolHaiku(
+  env: Env,
+  evidences: Array<{ evidence: CompConditionEvidence; comp: CompEvidenceInput }>,
+  subject?: { squareFeet?: number; address?: string },
+  lanes = 8,
+): Promise<void> {
+  const classifiable = evidences.filter((e) => e.evidence.listing != null && !e.evidence.condition)
+  if (classifiable.length === 0) return
+
+  const pool = evidences.map(({ comp }) => ({
+    compId: comp.propertyId,
+    address: comp.address,
+    salePrice: comp.salePrice,
+    saleDate: comp.saleDate,
+    squareFeet: comp.squareFeet,
+    pricePerSqft: comp.salePrice && comp.squareFeet ? Math.round(comp.salePrice / comp.squareFeet) : null,
+    sameBlockGroup: comp.sameBlockGroup ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    subdivision: comp.subdivision ?? null,
+    censusTract: comp.censusTract ?? null,
+    distanceMiles: comp.distanceMiles ?? null,
+  }))
+  const poolContext = `\n\nPOOL CONTEXT (the comp ladder this sale sits in — calibrate 'renovated' against siblings):\n${JSON.stringify({ appraisalSubject: subject ?? null, pool })}`
+
+  const queue = [...classifiable]
+  const worker = async () => {
+    while (queue.length > 0) {
+      const item = queue.shift()
+      if (!item) return
+      const { evidence: ev, comp } = item
+      const started = Date.now()
+      ev.condition = await classifyCompConditionLuna(env, {
+        address: comp.address,
+        salePrice: comp.salePrice,
+        saleDate: comp.saleDate,
+        description: (ev.listing?.description ?? '') + poolContext,
+        whatsSpecial: ev.listing?.whatsSpecial,
+        features: ev.listing?.features,
+        yearBuilt: comp.yearBuilt,
+        squareFeet: comp.squareFeet,
+        images: ev._images,
+      }).catch(() => null)
+      if (ev.condition) {
+        // Merge deterministic rule gaps the model can't see — mechanical
+        // fields are checked in code, not trusted to the classifier.
+        const gaps: string[] = []
+        if (!comp.salePrice) gaps.push('sale price')
+        if (!comp.squareFeet) gaps.push('square footage')
+        if (!comp.saleDate) gaps.push('sale date')
+        if (!ev.listing?.description && (ev._images?.length ?? 0) === 0) gaps.push('condition evidence (no description, no photos)')
+        if (ev.condition.rulesCheck) {
+          ev.condition.rulesCheck.missing = [...new Set([...ev.condition.rulesCheck.missing, ...gaps])]
+          if (ev.condition.rulesCheck.missing.length > 0) ev.condition.rulesCheck.meets = false
+        } else if (gaps.length > 0) {
+          ev.condition.rulesCheck = { meets: false, missing: gaps }
+        }
+        ev.condition.durationMs = Date.now() - started
+        const m = ev.condition.model ?? ''
+        const source = m.startsWith('clef') ? 'clef' : m === 'gpt-6-luna' ? 'decisions' : 'reasoning'
+        if (ev.condition.investorLanguageProbability >= 0.5) ev.investorSignalSources.push(`${source}_noul`)
+        if (ev.condition.tier === 'investor') ev.investorSignalSources.push(`${source}_tier`)
+        ev.investorSignal ||= ev.investorSignalSources.length > 0
+        if (ev.condition.hint) ev.hint = ev.condition.hint
+      } else {
+        ev.skippedReason = 'haiku classify failed'
+      }
+      if (ev.condition || ev.listing) {
+        const { _images, ...persistable } = ev
+        void env.API_CACHE.put(evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+      }
+      delete ev._images
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(lanes, classifiable.length) }, () => worker()))
+}
 
 export async function classifyCompBatchDecisions(
   env: Env,
