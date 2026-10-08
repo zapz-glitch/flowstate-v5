@@ -525,9 +525,12 @@ export function ReportPageView({ params, queue }: {
         setRefreshing(false)
         setRefreshStreamUrl(null)
         setRefreshToken(null)
-        // Terminal event fires after errors too — never overwrite Failed with Done
-        setRerunStage((prev) => (prev === 'error' ? prev : 'done'))
-        clearRerunStageSoon(2500)
+        // Terminal event fires after errors too — keep Failed and let its own timer clear it
+        setRerunStage((prev) => {
+          if (prev === 'error') return prev
+          clearRerunStageSoon(2500)
+          return 'done'
+        })
         break
       case 'error':
         setAiAnalyzing(false)
