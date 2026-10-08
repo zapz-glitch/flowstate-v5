@@ -353,23 +353,39 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
+  // Redfin stingray is the fast path (~2-5s structured JSON); the Zillow
+  // scrape chain is the fallback (~15-45s rendered). Zillow gets a short
+  // head start the moment Redfin misses or stalls past 3s — a straggler
+  // comp must not serialize behind a failed first source — while Redfin
+  // still wins whenever it returns real evidence.
   let photos: PropertyPhotos | null = null
+  const redfinPromise = fetchRedfinListing(env, comp).catch(() => null)
+  const zillowFetch = async (): Promise<PropertyPhotos | null> => {
+    try {
+      const photoService = createPhotoService(env, { provider: 'zillow' })
+      if (!photoService.isAvailable()) return null
+      const result = await photoService.fetchPhotos(comp, {
+        maxPhotos: 8,
+        includeDescription: true,
+        includePriceHistory: false,
+      })
+      return result.success ? result.data : null
+    } catch { return null }
+  }
+  const zillowPromise = (async (): Promise<PropertyPhotos | null> => {
+    const first = await Promise.race([
+      redfinPromise,
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 3000)),
+    ])
+    if (first) return null // redfin already delivered — no scrape needed
+    return zillowFetch() // redfin missed or is still in flight at 3s
+  })()
   try {
-    // Redfin stingray first — structured JSON, no rendered scrape. The
-    // Zillow chain below stays as the fallback when Redfin can't resolve.
-    photos = await fetchRedfinListing(env, comp).catch(() => null)
+    photos = await redfinPromise
   } catch { photos = null }
   if (!photos) {
     try {
-      const photoService = createPhotoService(env, { provider: 'zillow' })
-      if (photoService.isAvailable()) {
-        const result = await photoService.fetchPhotos(comp, {
-          maxPhotos: 8,
-          includeDescription: true,
-          includePriceHistory: false,
-        })
-        if (result.success) photos = result.data
-      }
+      photos = await zillowPromise
     } catch (error) {
       evidence.skippedReason = error instanceof Error ? error.message : 'listing fetch failed'
       return evidence
