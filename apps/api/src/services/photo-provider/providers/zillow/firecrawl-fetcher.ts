@@ -62,7 +62,7 @@ export function generateZillowUrl(property: ZillowPropertyIdentifier): string {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface ZillowExtraction {
+export interface ZillowExtraction {
   photos: string[]
   description?: string
   price?: number
@@ -135,7 +135,7 @@ interface ZillowExtraction {
  * Parse bedrooms from features array
  * Handles: "3 bed", "3 beds", "3 bedroom", "3 bedrooms", "3bd", "3br"
  */
-function parseBedroomsFromFeatures(features: string[]): number | undefined {
+export function parseBedroomsFromFeatures(features: string[]): number | undefined {
   for (const feature of features) {
     const lower = feature.toLowerCase().trim()
     const match = lower.match(/^(\d+)\s*(?:bed|beds|bedroom|bedrooms|bd|br)/)
@@ -150,7 +150,7 @@ function parseBedroomsFromFeatures(features: string[]): number | undefined {
  * Parse bathrooms from features array
  * Handles: "2 bath", "2.5 bath", "2 baths", "2 bathroom", "2ba"
  */
-function parseBathroomsFromFeatures(features: string[]): number | undefined {
+export function parseBathroomsFromFeatures(features: string[]): number | undefined {
   for (const feature of features) {
     const lower = feature.toLowerCase().trim()
     const match = lower.match(/^(\d+(?:\.\d+)?)\s*(?:bath|baths|bathroom|bathrooms|ba)/)
@@ -165,7 +165,7 @@ function parseBathroomsFromFeatures(features: string[]): number | undefined {
  * Parse square footage from features array
  * Handles: "1,500 sqft", "1500 sq ft", "1,500 square feet"
  */
-function parseSqftFromFeatures(features: string[]): number | undefined {
+export function parseSqftFromFeatures(features: string[]): number | undefined {
   for (const feature of features) {
     const lower = feature.toLowerCase().trim()
     const match = lower.match(/^([\d,]+)\s*(?:sqft|sq\s*ft|square\s*feet)/)
@@ -179,7 +179,7 @@ function parseSqftFromFeatures(features: string[]): number | undefined {
 /**
  * Get most recent sale from price history
  */
-function getLastSaleFromHistory(priceHistory?: Array<{ date: string; price: number; event: string }>): {
+export function getLastSaleFromHistory(priceHistory?: Array<{ date: string; price: number; event: string }>): {
   lastSaleDate?: string
   lastSalePrice?: number
 } {
@@ -232,7 +232,7 @@ interface FirecrawlResponse {
 /**
  * Check if an extraction is valid and worth caching
  */
-function isValidExtraction(extraction: ZillowExtraction): boolean {
+export function isValidExtraction(extraction: ZillowExtraction): boolean {
   if (extraction.error) return false
   if (!extraction.photos || extraction.photos.length === 0) return false
 
@@ -248,7 +248,7 @@ function isValidExtraction(extraction: ZillowExtraction): boolean {
 /**
  * Extract Zillow data from HTML content
  */
-function parseZillowHtml(html: string): ZillowExtraction {
+export function parseZillowHtml(html: string): ZillowExtraction {
   const photos: string[] = []
   const features: string[] = []
   const priceHistory: NonNullable<ZillowExtraction['priceHistory']> = []

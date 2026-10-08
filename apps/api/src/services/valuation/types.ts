@@ -68,6 +68,9 @@ export interface ValuationParams {
   rehabLevelIndex?: number
   /** Vision-verified renovated — skip base $/sqft rehab (major items still apply) */
   skipBaseRehab?: boolean
+  /** Agent-posted renovation scope total — when set, replaces the tier
+   *  $/sqft base rehab entirely (renovation engine, Path A/B priced scope). */
+  rehabBaseOverride?: number
   /** Location-risk deduction as % of ARV (0 = none) — major road/railroad/commercial proximity */
   locationPenaltyPercent?: number
   /** Explicit location-risk deduction in dollars — wins over locationPenaltyPercent */

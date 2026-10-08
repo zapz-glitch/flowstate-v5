@@ -34,6 +34,7 @@ export class ListingPhotoProvider implements PhotoProvider {
   }
 
   isAvailable(): boolean {
+    // Firecrawl-only fetch path — Scrapfly/Serper removed per owner spec.
     return Boolean(this.env.FIRECRAWL_API_KEY)
   }
 
@@ -41,7 +42,7 @@ export class ListingPhotoProvider implements PhotoProvider {
     if (!this.isAvailable()) return null
     if (!this.scraper) {
       this.scraper = new ListingPhotoScraper({
-        apiKey: this.env.FIRECRAWL_API_KEY as string,
+        apiKey: this.env.FIRECRAWL_API_KEY,
         openrouterApiKey: this.env.OPENROUTER_API_KEY,
         openrouterModel: this.env.OPENROUTER_MODEL,
         cache: this.env.API_CACHE,

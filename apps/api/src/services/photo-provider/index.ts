@@ -81,7 +81,9 @@ import { createListingPhotoProvider } from './providers/listing-provider'
 
 export type PhotoProviderType = 'zillow' | 'mls' | 'redfin' | 'realtor' | 'manual'
 
-/** Subject-photo fallback order: Zillow → Redfin → Realtor.com → none */
+/** Subject-photo fallback order: Redfin → Zillow → Realtor.com → none.
+ *  Redfin runs first so its listing metadata (ask price, flood signal)
+ *  merges into whichever provider wins on photos. */
 const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'zillow', 'realtor']
 
 /**
@@ -376,7 +378,7 @@ class MultiPhotoService implements PhotoService {
     }
 
     const [subjectResult, ...compResults] = await Promise.all([
-      withTimeout(this.fetchPhotos(subject, options), 20000, failed(subject.propertyId, 'Subject photo fetch timed out', 'FETCH_FAILED')),
+      withTimeout(this.fetchPhotos(subject, options), 45000, failed(subject.propertyId, 'Subject photo fetch timed out', 'FETCH_FAILED')),
       ...compsToFetch.map((comp) => fetchCompWithFallback(comp)),
     ])
 

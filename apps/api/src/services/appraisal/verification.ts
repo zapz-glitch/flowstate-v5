@@ -77,7 +77,17 @@ export function verifyCompEvidence(
   comp: NormalizedComparable,
   poolRefPpsf?: number | null,
   preferredSaleAgeDays?: number | null,
-  context?: { packageDeed?: boolean; bulkSale?: boolean },
+  context?: {
+    packageDeed?: boolean
+    bulkSale?: boolean
+    /** Evidence-based band the comp was classified into. */
+    band?: string
+    /** Median $/sf of the comp's own band cluster (same tract). When the
+     *  comp is after_renovation, the noise check compares against THIS —
+     *  an ARV comp at 200% of a distressed pocket is band evidence, not
+     *  a transaction outlier. */
+    bandRefPpsf?: number | null
+  },
 ): CompEvidenceVerification {
   const flags: string[] = []
   let transactionCheck: CompEvidenceVerification['transactionCheck'] = 'clean'
@@ -96,14 +106,23 @@ export function verifyCompEvidence(
 
   // Extreme price outliers are transaction noise even when a vision read
   // labels the home nicely — a 3x-pocket sale is a different market.
+  // Band-aware: an after_renovation comp is compared to its OWN band's
+  // cluster — renovated sales sit far above the as-is-heavy pocket median
+  // by definition; that premium is the ARV signal, not noise.
   const ppsfForNoise = compPpsf(comp)
-  const pocketRatioForNoise = ppsfForNoise != null && poolRefPpsf != null && poolRefPpsf > 0
-    ? ppsfForNoise / poolRefPpsf
+  const noiseRef = context?.band === 'after_renovation' && context?.bandRefPpsf != null && context.bandRefPpsf > 0
+    ? context.bandRefPpsf
+    : poolRefPpsf
+  const noiseRefLabel = context?.band === 'after_renovation' && context?.bandRefPpsf != null
+    ? 'renovated-band'
+    : 'current pocket'
+  const pocketRatioForNoise = ppsfForNoise != null && noiseRef != null && noiseRef > 0
+    ? ppsfForNoise / noiseRef
     : null
   if (transactionCheck === 'clean' && pocketRatioForNoise != null &&
       (pocketRatioForNoise <= 0.35 || pocketRatioForNoise >= 2.0)) {
     transactionCheck = 'extreme_outlier'
-    flags.push(`Sale at $${Math.round(ppsfForNoise!)}/sf is ${Math.round(pocketRatioForNoise * 100)}% of current pocket $${Math.round(poolRefPpsf!)}/sf — extreme outlier, not market evidence`)
+    flags.push(`Sale at $${Math.round(ppsfForNoise!)}/sf is ${Math.round(pocketRatioForNoise * 100)}% of ${noiseRefLabel} $${Math.round(noiseRef!)}/sf — extreme outlier, not market evidence`)
   }
 
   // Price cross-check — comp's recorded sale vs its own AVM. A big gap means

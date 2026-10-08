@@ -12,7 +12,7 @@
  * 5. (Optional) Start DO-based enrichment: Zillow scraping + LLM analysis via SSE
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { Env } from '../types';
 import type { AuthContext } from '../middleware/auth';
 import {
@@ -139,6 +139,12 @@ interface AnalyzeRequest {
 
   /** Close CRM opportunity linked to the lead (stored alongside leadId) */
   opportunityId?: string;
+
+  /** 'agent' runs the evidence pipeline then parks the job as
+   *  `awaiting_agent` — the Evaluation Agent posts its comp-selection
+   *  verdict to /jobs/:jobId/harness/selection and the deterministic tail
+   *  finishes the eval. Omitted = today's deterministic Set-B path. */
+  harness?: 'agent';
 }
 
 const ALLOWED_MODELS = new Set([
@@ -242,14 +248,14 @@ analyze.post('/', async (c) => {
     // The route returns immediately with jobId + SSE token.
 
     let appraisalRules = userSettings.appraisalRules;
-    if (body.appraisalOverrides) {
-      const overrideFilters = body.appraisalOverrides.filters?.map((f) => ({
+    if (body.appraisalOverrides || body.harness === 'agent') {
+      const overrideFilters = body.appraisalOverrides?.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
         value: f.value,
         priority: f.priority,
       }));
-      const overrideAdjustments = body.appraisalOverrides.adjustments?.map(
+      const overrideAdjustments = body.appraisalOverrides?.adjustments?.map(
         (a) => ({
           type: a.type as import('../services/appraisal').AdjustmentType,
           enabled: a.enabled,
@@ -257,10 +263,19 @@ analyze.post('/', async (c) => {
           percent: a.percent,
         }),
       );
-      appraisalRules = {
-        filters: overrideFilters ?? appraisalRules?.filters ?? [],
-        adjustments: overrideAdjustments ?? appraisalRules?.adjustments ?? [],
-      };
+      appraisalRules = body.harness === 'agent'
+        // Agent runs are governed by EVAL-AGENT-RULESET.md — the caller's
+        // overrides are verbatim and the user's preset never merges in.
+        // With no filters enabled, comps stay enabled except for the hard
+        // data gates (non-market price, lot mismatch, transaction noise).
+        ? {
+            filters: overrideFilters ?? [],
+            adjustments: overrideAdjustments ?? [],
+          }
+        : {
+            filters: overrideFilters ?? appraisalRules?.filters ?? [],
+            adjustments: overrideAdjustments ?? appraisalRules?.adjustments ?? [],
+          };
     }
 
     const arvThreshold = body.arvThresholdPercent
@@ -288,7 +303,14 @@ analyze.post('/', async (c) => {
       evalParams,
       searchOptions: searchOptionsFingerprint(body.searchOptions),
     });
-    const resultCacheKey = evalResultKey(auth.userId, body.address ?? '', evalParamsHash);
+    // Harness mode gets its own cache keyspace — a deterministic report is
+    // never served to an agent run (it needs to park for the verdict), and
+    // an agent verdict never leaks into deterministic cached results.
+    const resultCacheKey = evalResultKey(
+      auth.userId,
+      body.address ?? '',
+      evalParamsHash + (body.harness === 'agent' ? ':agent' : ''),
+    );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
         const cachedJobId = await c.env.API_CACHE.get(resultCacheKey)
@@ -377,6 +399,7 @@ analyze.post('/', async (c) => {
           ),
           marketSearchModel: validateModel(body.llmAnalysis?.marketSearchModel),
         },
+        harness: body.harness === 'agent' ? 'agent' : undefined,
       }),
     });
     // A live run owns the DO — don't error, hand the caller the same job
@@ -483,6 +506,7 @@ analyze.get('/jobs/:jobId', async (c) => {
   // owner is never a pass — only a fully evicted DO may fall through to the
   // (userId-scoped) saved-report fallback below.
   const liveJob = state?.status === 'processing' || state?.status === 'idle'
+    || state?.status === 'awaiting_agent'
     || state?.status === 'complete' || state?.status === 'error';
   if (state?.userId ? state.userId !== auth.userId : liveJob) {
     return c.json({ success: false, error: 'Job not found' }, 404);
@@ -525,6 +549,19 @@ analyze.get('/jobs/:jobId', async (c) => {
     return c.json({
       success: true,
       data: { jobId, status: 'error', error: state?.error ?? 'Evaluation failed' },
+    });
+  }
+
+  if (status === 'awaiting_agent') {
+    return c.json({
+      success: true,
+      data: {
+        jobId,
+        status: 'awaiting_agent',
+        pending: state?.pending ?? [],
+        lastEvent: events.length ? events[events.length - 1]!.event : null,
+        elapsedMs: state?.createdAt ? Date.now() - state.createdAt : null,
+      },
     });
   }
 
@@ -666,6 +703,78 @@ analyze.get('/defaults', async (c) => {
 // Photo endpoint disabled — Firecrawl removed
 analyze.post('/comp-photos', async (c) => {
   return c.json({ success: false, error: 'Photo provider not available' }, 503);
+});
+
+// ─── Evaluation Agent harness seam ──────────────────────────────────────────
+
+/** Ownership check shared by both harness endpoints — a live job's DO state
+ *  carries the owner; anything else 404s the same way /jobs/:jobId does.
+ *  Returns a 404 response when unauthorized, or the job's DO stub. */
+async function harnessOwnerCheck(c: Context, jobId: string): Promise<Response | { fetch: (url: string, init?: RequestInit) => Promise<Response> }> {
+  const auth = c.get('auth');
+  const doId = c.env.ANALYSIS_JOB.idFromName(jobId);
+  const stub = c.env.ANALYSIS_JOB.get(doId);
+  const resp = await stub.fetch('http://internal/state');
+  const state = (await resp.json().catch(() => null)) as { userId?: string } | null;
+  if (state?.userId !== auth.userId) {
+    return c.json({ success: false, error: 'Job not found' }, 404) as unknown as Response;
+  }
+  return stub as unknown as { fetch: (url: string, init?: RequestInit) => Promise<Response> };
+}
+
+/**
+ * GET /analyze/jobs/:jobId/harness/evidence
+ *
+ * Frozen BSubject+BComps evidence bundle for the Evaluation Agent — the exact
+ * pool and subject fields the deterministic engine would have seen. 409
+ * unless the job is parked in `awaiting_agent`.
+ */
+analyze.get('/jobs/:jobId/harness/evidence', async (c) => {
+  const ownership = await harnessOwnerCheck(c, c.req.param('jobId'));
+  if (ownership instanceof Response) return ownership;
+  const resp = await ownership.fetch('http://internal/harness/evidence');
+  const text = await resp.text();
+  return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json' } });
+});
+
+/**
+ * POST /analyze/jobs/:jobId/harness/selection
+ *
+ * The agent's verdict (or `{ needsMoreEvidence: 'deepen' }`). Server validates
+ * picks against the enabled pool and the evidence envelope, then resumes the
+ * deterministic tail — the saved report and dashboard see only the selected
+ * comps.
+ */
+analyze.post('/jobs/:jobId/harness/selection', async (c) => {
+  const ownership = await harnessOwnerCheck(c, c.req.param('jobId'));
+  if (ownership instanceof Response) return ownership;
+  const resp = await ownership.fetch('http://internal/harness/selection', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: await c.req.text(),
+  });
+  const text = await resp.text();
+  return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json' } });
+});
+
+/**
+ * POST /analyze/jobs/:jobId/harness/consult
+ *
+ * Expert second opinion for the Evaluation Agent — claude-opus-5-5 reviews
+ * a proposed selection against the same evidence + gate grade, read-only.
+ * Intended for revision turns: check the consult's suggestedFixes before
+ * re-posting to /harness/selection. Never consumes the revision budget.
+ */
+analyze.post('/jobs/:jobId/harness/consult', async (c) => {
+  const ownership = await harnessOwnerCheck(c, c.req.param('jobId'));
+  if (ownership instanceof Response) return ownership;
+  const resp = await ownership.fetch('http://internal/harness/consult', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: await c.req.text(),
+  });
+  const text = await resp.text();
+  return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json' } });
 });
 
 export default analyze;

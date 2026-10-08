@@ -14,15 +14,18 @@
  */
 
 import type { Env } from '../../types'
+import { decisionsRun } from '../decisions'
 
-export type ClefModel = 'clef' | 'clef-flash' | 'openai/gpt-6-luna'
+// Workers-AI reader names, the legacy OpenRouter lane, or whichever
+// reasoning model answered (e.g. 'claude-haiku-5-5' via Anthropic).
+export type ClefModel = 'clef' | 'clef-flash' | 'openai/gpt-6-luna' | (string & {})
 
 export interface ClefImage {
   content_type: 'image/png' | 'image/jpeg' | 'image/webp'
   base64: string
 }
 
-type Question =
+export type Question =
   | { type: 'noul'; instructions: string }
   | { type: 'choice'; instructions: string; criteria: Record<string, string> }
   | { type: 'score'; instructions: string; criteria: string[] }
@@ -40,9 +43,21 @@ export interface CompConditionInput {
   squareFeet?: number
   /** Embedded curb-appeal/listing photos (max 4, ≤4MiB each) */
   images?: ClefImage[]
+  /** Subject context for the anchor-quality question — the agent reads the
+   *  answer as a pre-digested hint, never as a verdict. */
+  subject?: { squareFeet?: number; address?: string }
 }
 
 export type CompTier = 'investor' | 'median' | 'arv'
+
+export interface CompHint {
+  priceSanity: 'plausible' | 'suspicious' | 'data_error' | null
+  anchorQuality: 'strong_anchor' | 'supporting' | 'weak' | 'reject' | null
+  probabilities: {
+    price_sanity?: Record<string, number>
+    anchor_quality?: Record<string, number>
+  }
+}
 
 export interface CompConditionResult {
   /** The model's answer set, verbatim — useful for calibration forensics */
@@ -62,6 +77,14 @@ export interface CompConditionResult {
   conditionLabel: string
   /** Clef's reported confidence in the score answer, when present */
   confidence?: number
+  /** 1-2 sentence evidence summary the classifier wrote (haiku path). */
+  summary?: string
+  /** Comp-rules check — does the comp satisfy the selection rules and,
+   *  if not, what is it missing (price, sqft, recency, legitimacy). */
+  rulesCheck?: { meets: boolean; missing: string[] }
+  /** Agent-assist digest — advisory pre-read the Evaluation Agent weighs
+   *  next to the raw data; never a verdict by itself. */
+  hint?: CompHint
   model: ClefModel
   modelVersion: string
   durationMs: number
@@ -75,7 +98,7 @@ export const CONDITION_SCALE = [
   'Renovated — comprehensively remodeled for sale',
 ] as const
 
-const CONDITION_QUESTIONS: Record<string, Question> = {
+export const CONDITION_QUESTIONS: Record<string, Question> = {
   renovated: {
     type: 'noul',
     instructions:
@@ -124,6 +147,35 @@ const CONDITION_QUESTIONS: Record<string, Question> = {
       arv: 'After-repair-value evidence — genuinely renovated sale at or near the top of the market',
     },
   },
+  // Agent-assist digests — pre-reasoned hints the Evaluation Agent weighs
+  // alongside the raw data. Advisory only: the agent owns the verdict.
+  price_sanity: {
+    type: 'choice',
+    instructions:
+      'Is the recorded sale price plausible for THIS property given the ' +
+      'listing facts (size, condition, description)? Flag obvious data ' +
+      'errors — a stray digit, a price-per-sqft wildly out of band, or a ' +
+      'price inconsistent with the described property.',
+    criteria: {
+      plausible: 'Price consistent with the property\'s size, condition, and marketed features',
+      suspicious: 'Price looks high or low for the described property — possibly a non-arm\'s-length or unusual sale',
+      data_error: 'Price is almost certainly wrong — a typo or feed artifact (e.g. $2,000+/sqft, missing digit)',
+    },
+  },
+  anchor_quality: {
+    type: 'choice',
+    instructions:
+      'As ARV evidence for a similar nearby subject property, how strong is ' +
+      'this sale? Weigh size similarity (the subject\'s square footage is in ' +
+      'the state context), sale recency, condition tier, and how close the ' +
+      'sale price-per-sqft sits to a realistic renovated-market ceiling.',
+    criteria: {
+      strong_anchor: 'Excellent ARV evidence — comparable size, recent sale, appropriate tier',
+      supporting: 'Usable supporting evidence — some size/date/condition gaps but same market band',
+      weak: 'Marginal — meaningful size mismatch, stale sale, or uncertain tier',
+      reject: 'Do not anchor on this — non-arm\'s-length, data error, extreme size mismatch, or wrong market band',
+    },
+  },
 }
 
 // Answer shapes (observed on the wire, clef-flash 2026-10-02):
@@ -157,6 +209,22 @@ function parseTier(v: unknown): { tier: CompTier; probabilities: Record<CompTier
   return { tier, probabilities: out }
 }
 
+/** Argmax over a choice question's probabilities → chosen key. */
+function choicePick<T extends string>(v: unknown, keys: readonly T[]): { pick: T | null; probabilities: Record<string, number> } {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  const probs = (o.probabilities ?? {}) as Record<string, number>
+  let pick = typeof o.choice === 'string' ? o.choice : null
+  if (!pick || !(keys as readonly string[]).includes(pick)) {
+    let best = -1
+    pick = null
+    for (const k of keys) {
+      const p = probs[k]
+      if (typeof p === 'number' && p > best) { best = p; pick = k }
+    }
+  }
+  return { pick: pick as T | null, probabilities: probs }
+}
+
 /** Argmax over a score question's per-option probabilities → scale index. */
 function scoreIdx(v: unknown): { idx: number; score: number } {
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
@@ -177,7 +245,8 @@ function scoreIdx(v: unknown): { idx: number; score: number } {
 }
 
 export function isClefAvailable(env: Env): boolean {
-  return typeof env.AI?.run === 'function'
+  return typeof env.AI?.run === 'function' ||
+    (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY)
 }
 
 export async function classifyCompCondition(
@@ -197,26 +266,62 @@ export async function classifyCompCondition(
       yearBuilt: input.yearBuilt,
       squareFeet: input.squareFeet,
     },
+    appraisalSubject: input.subject ?? null,
     listingDescription: input.description ?? null,
     listingHighlights: input.whatsSpecial ?? [],
     listedFeatures: input.features ?? [],
   }
 
   const started = Date.now()
-  const res = (await env.AI.run(`@cf/cloudflare/${model}`, {
-    model,
-    state,
-    questions: CONDITION_QUESTIONS,
-    ...(input.images?.length ? { images: input.images.slice(0, 4) } : {}),
-  })) as { model?: string; answers?: Record<string, unknown> }
+  // 'decisions' lane — same questions through OpenAI's dedicated endpoint.
+  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  const res: { model?: string; answers?: Record<string, unknown> } = useDecisions
+    ? { ...(await decisionsRun(env, {
+        state,
+        questions: CONDITION_QUESTIONS,
+        images: input.images?.slice(0, 4) as Array<{ content_type?: string; base64: string }> | undefined,
+      })), model: env.DECISIONS_MODEL || 'gpt-6-luna' }
+    : ((await env.AI.run(`@cf/cloudflare/${model}`, {
+        model,
+        state,
+        questions: CONDITION_QUESTIONS,
+        ...(input.images?.length ? { images: input.images.slice(0, 4) } : {}),
+      })) as { model?: string; answers?: Record<string, unknown> })
 
   const answers = res?.answers ?? {}
+  return {
+    ...buildConditionResult(answers),
+    model: (res?.model ?? model) as ClefModel,
+    modelVersion: res?.model ?? model,
+    durationMs: Date.now() - started,
+  }
+}
+
+/** Assemble a CompConditionResult from an answer map — shared by the
+ *  single-comp path and the batch Decisions classifier (per-comp answer
+ *  subsets are re-keyed then passed through the same assembly). */
+export function buildConditionResult(
+  answers: Record<string, unknown>,
+): Omit<CompConditionResult, 'model' | 'modelVersion' | 'durationMs'> {
   const { idx, score } = scoreIdx(answers.condition)
   const clamped = Math.max(0, Math.min(CONDITION_SCALE.length - 1, idx))
   const renP = prob(answers.renovated)
   const asisP = prob(answers.as_is)
   const conf = (answers.condition as Record<string, unknown> | undefined)?.confidence
   const tier = parseTier(answers.tier)
+  const priceSanity = choicePick(answers.price_sanity, ['plausible', 'suspicious', 'data_error'] as const)
+  const anchorQuality = choicePick(answers.anchor_quality, ['strong_anchor', 'supporting', 'weak', 'reject'] as const)
+  const hint: CompHint | undefined =
+    priceSanity.pick || anchorQuality.pick
+      ? {
+          priceSanity: priceSanity.pick,
+          anchorQuality: anchorQuality.pick,
+          probabilities: {
+            price_sanity: priceSanity.probabilities,
+            anchor_quality: anchorQuality.probabilities,
+          },
+        }
+      : undefined
 
   return {
     raw: answers,
@@ -230,8 +335,6 @@ export async function classifyCompCondition(
     conditionScore: score,
     conditionLabel: CONDITION_SCALE[clamped].split(' — ')[0],
     confidence: typeof conf === 'number' ? conf : undefined,
-    model,
-    modelVersion: res?.model ?? model,
-    durationMs: Date.now() - started,
+    hint,
   }
 }

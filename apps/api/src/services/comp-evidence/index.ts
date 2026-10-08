@@ -20,8 +20,10 @@
 
 import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, type ClefImage, type CompConditionResult } from '../clef'
-import { createLLMProvider } from '../llm'
+import { fetchRedfinListing } from '../photo-provider/providers/redfin-stingray'
+import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, CONDITION_QUESTIONS, buildConditionResult, type ClefImage, type CompConditionResult } from '../clef'
+import { createReasoningProvider, createSpecialistProvider } from '../llm'
+import { decisionsRun } from '../decisions'
 
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // Clef per-image cap
@@ -32,6 +34,17 @@ export interface CompEvidenceInput extends PropertyIdentifier {
   saleDate?: string
   yearBuilt?: number
   squareFeet?: number
+  /** Geocoded comp coordinates — enable the Street View fallback when no
+   *  listing exists on any portal. */
+  latitude?: number | null
+  longitude?: number | null
+  /** Geo-tier fields — the batch Decisions classify reads the whole pool's
+   *  geocode context when it classifies each comp. */
+  sameBlockGroup?: boolean | null
+  neighborhoodName?: string | null
+  subdivision?: string | null
+  censusTract?: string | null
+  distanceMiles?: number | null
 }
 
 export interface CompConditionEvidence {
@@ -39,6 +52,10 @@ export interface CompConditionEvidence {
   listing: {
     source: string
     sourceUrl?: string
+    /** Cover photo URL — persisted for the final evaluation model's
+     *  vision pass (the reasoning agent reads condition tier + cover
+     *  photo together; no re-scrape needed). */
+    coverPhotoUrl?: string
     description?: string
     whatsSpecial?: string[]
     features?: string[]
@@ -73,6 +90,10 @@ export interface CompConditionEvidence {
     }
   } | null
   condition: CompConditionResult | null
+  /** Agent-assist digest riding the same Clef call — advisory hints
+   *  (price sanity, anchor quality) the Evaluation Agent weighs next to
+   *  the raw comp data. Absent on cached/Luna-fallback evidence. */
+  hint?: CompConditionResult['hint']
   /** Investor-marketed listing — deterministic keyword hit OR Clef agrees.
    *  Per owner rule: investor language disqualifies the 'updated'/'renovated'
    *  ARV stamp — these are median/lower-tier sales, whatever they look like. */
@@ -81,6 +102,9 @@ export interface CompConditionEvidence {
   investorSignalSources: string[]
   /** Why classification didn't run — 'no_listing' | 'clef_unavailable' | fetch error */
   skippedReason?: string
+  /** Transient — embedded listing photos for the deferred (batch) classify
+   *  pass. Never persisted to KV: stripped before the evidence pins. */
+  _images?: ClefImage[]
 }
 
 /**
@@ -191,8 +215,34 @@ Answer as strict JSON:
   "as_is": number 0-1 — probability it was sold as-is / fixer / deferred maintenance,
   "investor_language": number 0-1 — probability the listing markets to investors,
   "tier": one of ["investor","median","arv"] — investor-marketed or as-is sales are never ARV evidence however updated they look,
-  "confidence": number 0-1 — your confidence in the condition_label
+  "confidence": number 0-1 — your confidence in the condition_label,
+  "summary": string — 1-2 sentences summarizing the listing evidence you used,
+  "rulesCheck": { "meets": boolean, "missing": ["<item>"] } — does this comp satisfy the comp rules (real arm's-length sale, priceable evidence, usable condition read, usable geo/recency)? List every rule it fails or every field its evidence is missing; empty list when it qualifies
 }`
+
+const LUNA_COMP_SCHEMA = {
+  type: 'object',
+  properties: {
+    condition_label: { type: 'string', enum: ['Poor', 'Dated', 'Maintained', 'Updated', 'Renovated'] },
+    renovated: { type: 'number' },
+    as_is: { type: 'number' },
+    investor_language: { type: 'number' },
+    tier: { type: 'string', enum: ['investor', 'median', 'arv'] },
+    confidence: { type: 'number' },
+    summary: { type: 'string' },
+    rulesCheck: {
+      type: 'object',
+      properties: {
+        meets: { type: 'boolean' },
+        missing: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['meets', 'missing'],
+      additionalProperties: false,
+    },
+  },
+  required: ['condition_label', 'renovated', 'as_is', 'investor_language', 'tier', 'confidence', 'summary', 'rulesCheck'],
+  additionalProperties: false,
+} as const
 
 export interface LunaCompAnswer {
   condition_label?: unknown
@@ -201,6 +251,8 @@ export interface LunaCompAnswer {
   investor_language?: unknown
   tier?: unknown
   confidence?: unknown
+  summary?: unknown
+  rulesCheck?: { meets?: unknown; missing?: unknown }
 }
 
 /** Map a Luna JSON answer onto the Clef output contract — pure, testable. */
@@ -226,6 +278,15 @@ export function parseLunaCompCondition(content: string): Omit<CompConditionResul
     conditionScore: idx,
     conditionLabel: CONDITION_SCALE[idx].split(' — ')[0],
     confidence: prob(o.confidence) || undefined,
+    summary: typeof o.summary === 'string' && o.summary ? o.summary.slice(0, 400) : undefined,
+    rulesCheck: o.rulesCheck && typeof o.rulesCheck === 'object'
+      ? {
+          meets: o.rulesCheck.meets !== false,
+          missing: Array.isArray(o.rulesCheck.missing)
+            ? (o.rulesCheck.missing as unknown[]).filter((m): m is string => typeof m === 'string').slice(0, 8)
+            : [],
+        }
+      : undefined,
   }
 }
 
@@ -233,13 +294,12 @@ async function classifyCompConditionLuna(
   env: Env,
   input: Parameters<typeof classifyCompCondition>[1],
 ): Promise<CompConditionResult | null> {
-  if (!env.OPENROUTER_API_KEY) return null
+  // Haiku is the comp classifier — it replaced the Decisions model and has
+  // no decision authority (classification only). Sonnet is the fallback
+  // when the reasoning lane is unavailable; OpenRouter when neither.
   const model = env.VISION_MODEL || env.OPENROUTER_MODEL || LUNA_COMP_MODEL
-  const provider = createLLMProvider({
-    provider: 'openrouter',
-    apiKey: env.OPENROUTER_API_KEY,
-    model,
-  })
+  const provider = createReasoningProvider(env, model) ?? createSpecialistProvider(env, 'routine')
+  if (!provider) return null
   const context =
     `Property: ${input.address ?? 'unknown'}${input.salePrice ? ` — sold $${input.salePrice.toLocaleString()}` : ''}` +
     `${input.yearBuilt ? `, built ${input.yearBuilt}` : ''}${input.squareFeet ? `, ${input.squareFeet}sf` : ''}\n` +
@@ -251,17 +311,21 @@ async function classifyCompConditionLuna(
     prompt: `${LUNA_COMP_PROMPT}\n\n${context}`,
     images: (input.images ?? []).slice(0, MAX_IMAGES).map((i) => ({ base64: i.base64, mimeType: i.content_type })),
     responseFormat: 'json',
+    // Anthropic structured outputs 400s on a bare {type:'object'} schema.
+    jsonSchema: { name: 'comp_condition', schema: LUNA_COMP_SCHEMA },
     maxTokens: 1024,
   })
   if (!res.success || !res.data?.content) return null
   const parsed = parseLunaCompCondition(res.data.content)
   if (!parsed) return null
-  return { ...parsed, model: LUNA_COMP_MODEL, modelVersion: model, durationMs: Date.now() - started }
+  return { ...parsed, model: provider.model, modelVersion: model, durationMs: Date.now() - started }
 }
 
 export async function gatherCompConditionEvidence(
   env: Env,
   comp: CompEvidenceInput,
+  subject?: { squareFeet?: number; address?: string },
+  opts?: { deferClassify?: boolean },
 ): Promise<CompConditionEvidence> {
   const key = evidenceKey(comp)
   const cached = await env.API_CACHE.get(key, 'json').catch(() => null) as CompConditionEvidence | null
@@ -291,18 +355,25 @@ export async function gatherCompConditionEvidence(
 
   let photos: PropertyPhotos | null = null
   try {
-    const photoService = createPhotoService(env, { provider: 'zillow' })
-    if (photoService.isAvailable()) {
-      const result = await photoService.fetchPhotos(comp, {
-        maxPhotos: 8,
-        includeDescription: true,
-        includePriceHistory: false,
-      })
-      if (result.success) photos = result.data
+    // Redfin stingray first — structured JSON, no rendered scrape. The
+    // Zillow chain below stays as the fallback when Redfin can't resolve.
+    photos = await fetchRedfinListing(env, comp).catch(() => null)
+  } catch { photos = null }
+  if (!photos) {
+    try {
+      const photoService = createPhotoService(env, { provider: 'zillow' })
+      if (photoService.isAvailable()) {
+        const result = await photoService.fetchPhotos(comp, {
+          maxPhotos: 8,
+          includeDescription: true,
+          includePriceHistory: false,
+        })
+        if (result.success) photos = result.data
+      }
+    } catch (error) {
+      evidence.skippedReason = error instanceof Error ? error.message : 'listing fetch failed'
+      return evidence
     }
-  } catch (error) {
-    evidence.skippedReason = error instanceof Error ? error.message : 'listing fetch failed'
-    return evidence
   }
 
   // No listing found — Google the property for photos via Firecrawl
@@ -337,10 +408,28 @@ export async function gatherCompConditionEvidence(
     evidence.skippedReason = 'no_listing'
     return evidence
   }
+  return finishListing(env, evidence, photos, comp, subject, opts, key)
+}
 
+/** Shared tail for every listing source — assembles the evidence record,
+ *  scans marketed sqft, keyword-flags investor language, embeds photos,
+ *  classifies (unless deferred to the pool batch), and pins the KV stamp. */
+async function finishListing(
+  env: Env,
+  evidence: CompConditionEvidence,
+  photos: PropertyPhotos,
+  comp: CompEvidenceInput,
+  subject?: { squareFeet?: number; address?: string },
+  opts?: { deferClassify?: boolean },
+  key?: string,
+): Promise<CompConditionEvidence> {
   evidence.listing = {
     source: photos.source,
     sourceUrl: photos.sourceUrl,
+    // Cover photo persists for the final evaluation model — the vision-
+    // capable reasoning agent reads it alongside the condition tier as
+    // evidence, without re-scraping the listing.
+    coverPhotoUrl: photos.photos[0],
     description: photos.description,
     whatsSpecial: photos.whatsSpecial,
     features: photos.features,
@@ -394,6 +483,16 @@ export async function gatherCompConditionEvidence(
   // description alone still carries renovation/fixture language.
   const images = photos.photos.length > 0 ? await embedPhotos(photos.photos) : []
 
+  const imagesEmbedded = photos.photos.length > 0 ? images : []
+
+  // Batch lane (Decisions): classification is deferred to the pool-level
+  // pass in startCompEvidenceBatch — the model reads every comp together,
+  // which calibrates 'renovated' against siblings instead of in isolation.
+  if (opts?.deferClassify) {
+    evidence._images = imagesEmbedded
+    return evidence
+  }
+
   // Clef is the primary reader; Luna is the fallback — absent binding or a
   // failed call both route here. The stamp contract is identical.
   const clefReady = isClefAvailable(env)
@@ -408,6 +507,7 @@ export async function gatherCompConditionEvidence(
       yearBuilt: comp.yearBuilt ?? photos.yearBuilt,
       squareFeet: comp.squareFeet ?? photos.squareFeet,
       images,
+      subject,
     })
   } catch { /* Clef failed — Luna tries next */ }
 
@@ -425,23 +525,303 @@ export async function gatherCompConditionEvidence(
     }).catch(() => null)
   }
   if (evidence.condition) {
+    // clef_* = Workers-AI reader · decisions_* = OpenAI Decisions lane ·
+    // reasoning_* = whichever reasoning model answered (luna/haiku).
+    const m = evidence.condition.model ?? ''
+    const source = m.startsWith('clef') ? 'clef' : m === 'gpt-6-luna' ? 'decisions' : 'reasoning'
     if (evidence.condition.investorLanguageProbability >= 0.5) {
-      evidence.investorSignalSources.push(evidence.condition.model === 'openai/gpt-6-luna' ? 'luna_noul' : 'clef_noul')
+      evidence.investorSignalSources.push(`${source}_noul`)
     }
     if (evidence.condition.tier === 'investor') {
-      evidence.investorSignalSources.push(evidence.condition.model === 'openai/gpt-6-luna' ? 'luna_tier' : 'clef_tier')
+      evidence.investorSignalSources.push(`${source}_tier`)
     }
     evidence.investorSignal ||= evidence.investorSignalSources.length > 0
   } else {
-    evidence.skippedReason = clefReady ? 'clef+luna failed' : 'no condition reader'
+    evidence.skippedReason = clefReady ? 'clef+reasoning failed' : 'no condition reader'
   }
+  if (evidence.condition?.hint) evidence.hint = evidence.condition.hint
 
   // Pin the stamp — only persist meaningful evidence (a listing or a
   // classification); 'no_listing'/'clef_unavailable' partials stay
   // uncached so a retry can still find them.
   if (evidence.condition || evidence.listing) {
-    void env.API_CACHE.put(key, JSON.stringify(evidence), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+    const { _images, ...persistable } = evidence
+    void env.API_CACHE.put(key ?? evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
   }
 
   return evidence
+}
+
+/** One Decisions request classifies a whole comp chunk — the model sees
+ *  the pool price ladder + every comp's listing text, with each comp's
+ *  photos grouped under its own section header. That's the calibration
+ *  per-comp isolation can't give: 'renovated' gets judged relative to the
+ *  pocket's other renovated stock, not absolutely. Answers re-key per
+ *  comp (`c_<id>__<q>`) and run through the same buildConditionResult
+ *  assembly as the single-comp path. */
+const DECISIONS_BATCH_CHUNK = 10
+
+/**
+ * Haiku comp classifier — one call per comp, run in parallel lanes. Haiku
+ * replaced the Decisions model for comp classification: it reads the
+ * cover photo + listing text + facts, with the pool price ladder as
+ * context, and returns condition tier + an evidence summary + a
+ * comp-rules check (which rules the comp fails or fields it lacks).
+ * Classification only — no decision authority; the appraiser (Opus) and
+ * the gate decide downstream.
+ */
+export async function classifyCompPoolHaiku(
+  env: Env,
+  evidences: Array<{ evidence: CompConditionEvidence; comp: CompEvidenceInput }>,
+  subject?: { squareFeet?: number; address?: string },
+  lanes = 8,
+): Promise<void> {
+  // A cached condition is only valid when the current classifier wrote it —
+  // stamps from a previous lane (luna/Decisions/Clef) are dropped so the
+  // active classifier re-reads the cached evidence. Keeps old models out of
+  // the eval without throwing away the expensive listing/photo fetch.
+  // `model` is the provider that actually ran; `modelVersion` is only the
+  // requested fallback string, so model wins. Stamps predating the
+  // comp-rules notation (no rulesCheck) are stale too.
+  const want = (env.ANTHROPIC_API_KEY
+    ? (env.REASONING_MODEL || 'claude-haiku-5-5')
+    : (env.VISION_MODEL || env.OPENROUTER_MODEL || LUNA_COMP_MODEL)).split('/').pop()
+  const norm = (s?: string | null) => (s ?? '').split('/').pop()
+  for (const { evidence } of evidences) {
+    const c = evidence.condition
+    if (c && (norm(c.model ?? c.modelVersion) !== want || c.rulesCheck === undefined)) {
+      evidence.condition = null
+      delete evidence.skippedReason
+      evidence.investorSignalSources = []
+      evidence.investorSignal = false
+      delete evidence.hint
+    }
+  }
+  const classifiable = evidences.filter((e) => e.evidence.listing != null && !e.evidence.condition)
+  if (classifiable.length === 0) return
+
+  const pool = evidences.map(({ comp }) => ({
+    compId: comp.propertyId,
+    address: comp.address,
+    salePrice: comp.salePrice,
+    saleDate: comp.saleDate,
+    squareFeet: comp.squareFeet,
+    pricePerSqft: comp.salePrice && comp.squareFeet ? Math.round(comp.salePrice / comp.squareFeet) : null,
+    sameBlockGroup: comp.sameBlockGroup ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    subdivision: comp.subdivision ?? null,
+    censusTract: comp.censusTract ?? null,
+    distanceMiles: comp.distanceMiles ?? null,
+  }))
+  const poolContext = `\n\nPOOL CONTEXT (the comp ladder this sale sits in — calibrate 'renovated' against siblings):\n${JSON.stringify({ appraisalSubject: subject ?? null, pool })}`
+
+  const queue = [...classifiable]
+  const worker = async () => {
+    while (queue.length > 0) {
+      const item = queue.shift()
+      if (!item) return
+      const { evidence: ev, comp } = item
+      const started = Date.now()
+      ev.condition = await classifyCompConditionLuna(env, {
+        address: comp.address,
+        salePrice: comp.salePrice,
+        saleDate: comp.saleDate,
+        description: (ev.listing?.description ?? '') + poolContext,
+        whatsSpecial: ev.listing?.whatsSpecial,
+        features: ev.listing?.features,
+        yearBuilt: comp.yearBuilt,
+        squareFeet: comp.squareFeet,
+        images: ev._images,
+      }).catch(() => null)
+      if (ev.condition) {
+        // Merge deterministic rule gaps the model can't see — mechanical
+        // fields are checked in code, not trusted to the classifier.
+        const gaps: string[] = []
+        if (!comp.salePrice) gaps.push('sale price')
+        if (!comp.squareFeet) gaps.push('square footage')
+        if (!comp.saleDate) gaps.push('sale date')
+        if (!ev.listing?.description && (ev._images?.length ?? 0) === 0) gaps.push('condition evidence (no description, no photos)')
+        if (ev.condition.rulesCheck) {
+          ev.condition.rulesCheck.missing = [...new Set([...ev.condition.rulesCheck.missing, ...gaps])]
+          if (ev.condition.rulesCheck.missing.length > 0) ev.condition.rulesCheck.meets = false
+        } else if (gaps.length > 0) {
+          ev.condition.rulesCheck = { meets: false, missing: gaps }
+        }
+        ev.condition.durationMs = Date.now() - started
+        const m = ev.condition.model ?? ''
+        const source = m.startsWith('clef') ? 'clef' : m === 'gpt-6-luna' ? 'decisions' : 'reasoning'
+        if (ev.condition.investorLanguageProbability >= 0.5) ev.investorSignalSources.push(`${source}_noul`)
+        if (ev.condition.tier === 'investor') ev.investorSignalSources.push(`${source}_tier`)
+        ev.investorSignal ||= ev.investorSignalSources.length > 0
+        if (ev.condition.hint) ev.hint = ev.condition.hint
+      } else {
+        ev.skippedReason = 'haiku classify failed'
+      }
+      if (ev.condition || ev.listing) {
+        const { _images, ...persistable } = ev
+        void env.API_CACHE.put(evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+      }
+      delete ev._images
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(lanes, classifiable.length) }, () => worker()))
+}
+
+export async function classifyCompBatchDecisions(
+  env: Env,
+  evidences: Array<{ evidence: CompConditionEvidence; comp: CompEvidenceInput }>,
+  subject?: { squareFeet?: number; address?: string },
+): Promise<void> {
+  const model = env.DECISIONS_MODEL || 'gpt-6-luna'
+  const classifiable = evidences.filter((e) => e.evidence.listing != null && !e.evidence.condition)
+  if (classifiable.length === 0) return
+
+  const pool = evidences.map(({ comp }) => ({
+    compId: comp.propertyId,
+    address: comp.address,
+    salePrice: comp.salePrice,
+    saleDate: comp.saleDate,
+    squareFeet: comp.squareFeet,
+    pricePerSqft: comp.salePrice && comp.squareFeet ? Math.round(comp.salePrice / comp.squareFeet) : null,
+    sameBlockGroup: comp.sameBlockGroup ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    subdivision: comp.subdivision ?? null,
+    censusTract: comp.censusTract ?? null,
+    distanceMiles: comp.distanceMiles ?? null,
+  }))
+
+  for (let i = 0; i < classifiable.length; i += DECISIONS_BATCH_CHUNK) {
+    const chunk = classifiable.slice(i, i + DECISIONS_BATCH_CHUNK)
+    const withImages = chunk.filter((e) => (e.evidence._images?.length ?? 0) > 0)
+    const perCompImages = Math.max(1, Math.min(4, Math.floor(128 / Math.max(1, withImages.length))))
+
+    const questions: Record<string, typeof CONDITION_QUESTIONS[string]> = {}
+    for (const { comp } of chunk) {
+      for (const [name, q] of Object.entries(CONDITION_QUESTIONS)) {
+        questions[`c_${comp.propertyId}__${name}`] = {
+          ...q,
+          instructions: `For comp ${comp.propertyId} (${comp.address}): ${q.instructions}`,
+        } as typeof q
+      }
+    }
+
+    const state = {
+      subject: 'Batch comparable condition assessment — classify EACH comp independently using its own section below, calibrated against the full pool ladder in `pool`.',
+      appraisalSubject: subject ?? null,
+      pool,
+    }
+
+    const sections = chunk.map(({ evidence: ev, comp }) => ({
+      text: `=== COMP ${comp.propertyId}: ${comp.address}` +
+        `${comp.salePrice ? ` — sold $${comp.salePrice.toLocaleString()}` : ''}` +
+        `${comp.saleDate ? ` on ${comp.saleDate}` : ''}` +
+        `${comp.squareFeet ? `, ${comp.squareFeet}sf` : ''}` +
+        `${comp.yearBuilt ? `, built ${comp.yearBuilt}` : ''} ===\n` +
+        (ev.listing?.description ? `Description: ${ev.listing.description}\n` : '') +
+        (ev.listing?.whatsSpecial?.length ? `Highlights: ${ev.listing.whatsSpecial.join('; ')}\n` : '') +
+        (ev.listing?.features?.length ? `Features: ${ev.listing.features.join('; ')}` : ''),
+      images: (ev._images ?? []).slice(0, perCompImages),
+    }))
+
+    const started = Date.now()
+    const res = await decisionsRun(env, { state, questions, sections }).catch(() => null)
+    for (const { evidence: ev, comp } of chunk) {
+      const answers = res?.answers
+      if (answers) {
+        const sub: Record<string, unknown> = {}
+        const prefix = `c_${comp.propertyId}__`
+        for (const [k, v] of Object.entries(answers)) {
+          if (k.startsWith(prefix)) sub[k.slice(prefix.length)] = v
+        }
+        if (Object.keys(sub).length) {
+          ev.condition = {
+            ...buildConditionResult(sub),
+            model: model as CompConditionResult['model'],
+            modelVersion: model,
+            durationMs: Date.now() - started,
+          }
+        }
+      }
+      if (!ev.condition) {
+        // Batch call or parse miss — fall back to the reasoning reader
+        // (same lane the single-comp path falls back to).
+        ev.condition = await classifyCompConditionLuna(env, {
+          address: comp.address,
+          salePrice: comp.salePrice,
+          saleDate: comp.saleDate,
+          description: ev.listing?.description,
+          whatsSpecial: ev.listing?.whatsSpecial,
+          features: ev.listing?.features,
+          yearBuilt: comp.yearBuilt,
+          squareFeet: comp.squareFeet,
+          images: ev._images,
+        }).catch(() => null)
+      }
+      if (ev.condition) {
+        const m = ev.condition.model ?? ''
+        const source = m.startsWith('clef') ? 'clef' : m === 'gpt-6-luna' ? 'decisions' : 'reasoning'
+        if (ev.condition.investorLanguageProbability >= 0.5) ev.investorSignalSources.push(`${source}_noul`)
+        if (ev.condition.tier === 'investor') ev.investorSignalSources.push(`${source}_tier`)
+        ev.investorSignal ||= ev.investorSignalSources.length > 0
+        if (ev.condition.hint) ev.hint = ev.condition.hint
+      } else {
+        ev.skippedReason = 'decisions_batch+reasoning failed'
+      }
+      if (ev.condition || ev.listing) {
+        const { _images, ...persistable } = ev
+        void env.API_CACHE.put(evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+      }
+      delete ev._images
+    }
+  }
+}
+
+/**
+ * Parallel comp-evidence fan-out — Firecrawl (search → scrape → photos+text)
+ * into Clef, 15 lanes wide (Firecrawl's 25-browser plan leaves headroom for
+ * the subject scrape + redfin lanes). Returns a propertyId → evidence map
+ * so callers that start the batch early (the moment comps land, before
+ * geo/enrich finishes) can hand the result into the pipeline as it sorts.
+ */
+export async function startCompEvidenceBatch(
+  env: Env,
+  comps: CompEvidenceInput[],
+  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean },
+): Promise<Map<string, CompConditionEvidence | null>> {
+  const out = new Map<string, CompConditionEvidence | null>()
+  const perComp = opts?.perCompTimeoutMs ?? 30_000
+  const deadline = opts?.globalDeadlineMs ?? 150_000
+  const laneCount = Math.min(opts?.lanes ?? 15, comps.length)
+  // Decisions lane: gather every comp's listing + photos first, then run
+  // the pool-level batch classify — the model sees all the data at the
+  // end, not comp-by-comp as each fetch lands. Clef lane keeps the
+  // per-comp classify inside the gather. `gatherOnly` defers the batch
+  // classify to the caller — used by the early prefetch, which fires
+  // before census geo-stamps land on the comps.
+  const batchDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  let next = 0
+  const lane = async () => {
+    while (next < comps.length) {
+      const comp = comps[next++]
+      const ev = await Promise.race([
+        gatherCompConditionEvidence(env, comp, opts?.subject, { deferClassify: batchDecisions }),
+        new Promise<null>((r) => setTimeout(() => r(null), perComp)),
+      ]).catch(() => null)
+      out.set(comp.propertyId, ev)
+    }
+  }
+  await Promise.race([
+    Promise.all(Array.from({ length: laneCount }, lane)),
+    new Promise((r) => setTimeout(r, deadline)),
+  ])
+  if (batchDecisions && !opts?.gatherOnly) {
+    await classifyCompBatchDecisions(
+      env,
+      comps
+        .map((comp) => ({ evidence: out.get(comp.propertyId), comp }))
+        .filter((e): e is { evidence: CompConditionEvidence; comp: CompEvidenceInput } => e.evidence != null),
+      opts?.subject,
+    ).catch(() => null)
+  }
+  return out
 }
