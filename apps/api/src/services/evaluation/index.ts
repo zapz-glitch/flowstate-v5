@@ -58,7 +58,6 @@ import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-
 import { gradeVerdict } from './verdict-grade'
 import { buildRenovationEvidence, priceAgentRenovation } from './renovation'
 import { computeEvidenceBands, computeGeoTieredBands, bandForComp, type EvidenceBands, type GeoTieredBands, type BandName } from '@flowstate-api/shared/appraisal'
-import { adjudicateBandMembership, type BandAdjudicationResult } from './band-adjudicate'
 import { escalateBandReview } from './band-escalate'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
@@ -1927,13 +1926,15 @@ export interface Phase1Context {
   /** 1-revision gate telemetry — every selection attempt with its grade
    *  and gate decision (rejected | accepted | accepted_final). */
   selectionAttempts?: SelectionAttempt[]
-  /** Reasoning-model band overrides persisted on the frozen context —
-   *  buildHarnessEvidence applies them to band labels + evidenceBands
-   *  identically at evidence-serve and selection-grade time. */
+  /** Agent-posted band overrides (from selection.bandAdjustments) —
+   *  the agent holds the initial banding seat; buildHarnessEvidence applies
+   *  them to band labels + evidenceBands at selection-grade time. Never set
+   *  by the pipeline itself. */
   bandOverrides?: Record<string, BandName | null>
   bandAdjudication?: { adjustments: import('./band-adjudicate').BandAdjustment[]; model: string; ambiguous?: string[]; confidence?: number }
-  /** Expert escalation over the adjudication — Opus verdict, triggers
-   *  that fired, and any further overrides. */
+  /** Expert consultant findings on the draft bands — Opus verdict,
+   *  triggers that fired, and SUGGESTED membership changes for the agent
+   *  to weigh. Advisory only: never applied to bands automatically. */
   bandEscalation?: {
     model: string
     triggers: string[]
@@ -1944,12 +1945,14 @@ export interface Phase1Context {
   }
 }
 
-/** Park-path helper — runs the reasoning-model adjudication over the
- *  DRAFT band membership (deterministic labels as input) and stamps the
- *  result onto the context so both the evidence payload and the gate
- *  verify the same adjudicated bands. When escalation triggers fire, the
- *  expert (claude-opus-5-5) reviews the adjudication and its overrides
- *  merge on top. No-op without a reasoning provider. */
+/** Park-path helper — emits the expert consultant's findings on the
+ *  DRAFT band membership. Under the agent-banding contract the AGENT holds
+ *  the initial banding seat: it posts bandAdjustments with its selection
+ *  and the gate recomputes membership + edges on those calls. No model in
+ *  the pipeline edits membership — Opus only consults, and only on the
+ *  hard pools (thin ARV anchor, wide spread, conflicting condition
+ *  evidence). Its suggestions ride the evidence payload for the agent to
+ *  weigh; they never auto-apply. */
 export async function adjudicatePhase1Bands(ctx: Phase1Context, env: Env): Promise<void> {
   const compClassifications = new Map(ctx.compClassifications)
   const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos)
@@ -1960,26 +1963,28 @@ export async function adjudicatePhase1Bands(ctx: Phase1Context, env: Env): Promi
     censusTract: ctx.bundle.property.censusTract ?? null,
     neighborhoodName: ctx.bundle.property.neighborhoodName ?? null,
   }
-  const res = await adjudicateBandMembership(env, { subject, comps: rows }).catch(() => null)
-  if (!res) return
-
-  // Specialist tier — Opus reviews the adjudication only when a trigger
-  // fires (low confidence, ambiguous members, material ARV shift, thin
-  // or wide-spread ARV anchor, conflicting condition evidence).
   const draftBands = computeEvidenceBands(rows, ctx.bundle.property)
-  const adjBands = computeEvidenceBands(rows, ctx.bundle.property, { bandOverrides: res.overrides })
+  // No in-pipeline adjudicator — the agent owns initial banding. The stub
+  // keeps the deterministic band set as the baseline the consultant
+  // reviews, so haiku-origin triggers (low_confidence, ambiguous_members,
+  // material_arv_shift) never fire; only structural hard-pool triggers do.
+  const draft = {
+    overrides: {} as Record<string, never>,
+    adjustments: [] as import('./band-adjudicate').BandAdjustment[],
+    model: 'deterministic',
+    ambiguous: [] as string[],
+    confidence: 1,
+  }
   const esc = await escalateBandReview(env, {
     subject,
     comps: rows,
-    adjudication: res,
+    adjudication: draft,
     draftArvMid: draftBands.arv.mid,
-    adjudicatedArvMid: adjBands.arv.mid,
-    arvMemberIds: adjBands.arv.memberIds,
-    arvSpread: adjBands.arv.spread,
+    adjudicatedArvMid: draftBands.arv.mid,
+    arvMemberIds: draftBands.arv.memberIds,
+    arvSpread: draftBands.arv.spread,
   }).catch(() => null)
 
-  ctx.bandOverrides = esc ? { ...res.overrides, ...esc.overrides } : res.overrides
-  ctx.bandAdjudication = { adjustments: res.adjustments, model: res.model, ambiguous: res.ambiguous, confidence: res.confidence }
   ctx.bandEscalation = esc
     ? {
         model: esc.model,
@@ -2062,7 +2067,7 @@ function buildBSubjectFields(
   }
 }
 
-function toBCompsOf(
+export function toBCompsOf(
   comparables: AppraisedComparable[],
   compClassifications: Map<string, ClassificationResult>,
   compCurbAppeal?: CompCurbAppealMap,
@@ -2172,6 +2177,14 @@ export interface AgentSelection {
    *  (d8), so agents should only state edges when deliberately debugging. */
   bandEdges?: Partial<Record<'as_is' | 'median' | 'arv',
     { low: number; high: number; mid: number; compIds: string[] }>>
+  /** The agent's band adjudication — include/exclude/move calls per comp.
+   *  Under the agent-banding contract the agent holds the initial banding
+   *  seat: the gate validates each adjustment (real comp, named band for
+   *  include/move, as-is evidence can never land in arv), recomputes
+   *  membership + edges on the adjudicated set, and grades picks + ARV
+   *  against THOSE bands. Omitted = grade against the deterministic
+   *  draft bands. */
+  bandAdjustments?: Array<import('./band-adjudicate').BandAdjustment>
   /** Per-comp adjustments applied by the agent (audit trail). */
   adjustments?: Record<string, Array<{ type: string; amount: number; note?: string }>>
   flags?: string[]

@@ -28,6 +28,8 @@ import {
   type AgentSelection,
   type Phase1Context,
 } from '../services/evaluation'
+import { bandAdjustmentsToOverrides } from '../services/evaluation/band-adjudicate'
+import { toBCompsOf } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
@@ -1775,7 +1777,21 @@ export class AnalysisJobDO {
     // gate. Revisions are bounded — after REVISION_BUDGET rejections the
     // next post is accepted_final and the deadline fallback still holds.
     const attempts = js.harnessAttempts ?? []
-    const evidence = buildHarnessEvidence(ctx)
+    // Agent-banding contract — the agent holds the initial banding seat.
+    // When it posts bandAdjustments, apply them (validated: real comps,
+    // named band for include/move, as-is evidence can never be banded arv)
+    // and grade picks + ARV against the adjudicated membership — edges
+    // still recompute deterministically, so the agent adjusts MEMBERSHIP,
+    // never edges. No adjustments = grade against the draft bands.
+    let gradeCtx = ctx
+    if (Array.isArray(sel.bandAdjustments) && sel.bandAdjustments.length > 0) {
+      const compClassifications = new Map(ctx.compClassifications)
+      const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos)
+      const rows = bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b }))
+      const { overrides } = bandAdjustmentsToOverrides(sel.bandAdjustments, rows)
+      gradeCtx = { ...ctx, bandOverrides: overrides }
+    }
+    const evidence = buildHarnessEvidence(gradeCtx)
     const gateGrade = gradeVerdict(evidence, sel)
     const checkFails = gateGrade.gateFails
     const renoViolations: string[] = []

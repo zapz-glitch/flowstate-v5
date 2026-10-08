@@ -134,33 +134,41 @@ suggests ARV but condition suggests MEDIAN, the price position carries the
 weight. A distressed property that sold near MEDIAN or ARV prices does not
 stay in the AS-IS band — its price places it.
 
-## 5a. Bands are the gate's referee, not your language
+## 5a. Banding — you hold the initial banding seat
 
 The harness computes the three bands deterministically from the comp
-evidence (classify → coherence trim → scale-to-subject → edges) and
-verifies your picks + ARV against them internally. **You do not state
-band edges.** Select comps by first principles — condition tier, price,
-geo proximity — and let the gate police coherence. Each evidence comp
-row still carries its `band` label as evidence you can read (and its
-`coverPhotoUrl` for a direct look), but you never have to reproduce a
-band assignment or its edges.
+evidence (classify → coherence trim → scale-to-subject → edges) for
+referee purposes and, on hard pools, ships you `evidence.bandEscalation`
+— an Opus-level expert's findings + suggested membership moves. **You**
+decide the actual membership: post `bandAdjustments` alongside your
+selection and the gate recomputes the edges on your adjudicated set and
+grades picks + ARV against it.
 
 - `evidenceBands` shows the harness's computed bands — read them as
   evidence of where the pocket's price tiers actually broke.
 - `geoBands` repeats that computation at `block_group` → `neighborhood`
   → `tract`, tightest first. When the block group produced a band, that
   tier is the operative pocket for the gate's geo checks.
-- `bandAdjudication` records the reasoning model's pass over draft band
-  membership (include / exclude / move per
-  docs/BAND-FIRST-PRINCIPLES.md). Excluded comps carry `band: null`;
-  moved comps carry their new label — the labels in the payload are
-  final.
-- `bandEscalation` (when present) records the expert review that fired
-  over the adjudication on a hard pool — its overrides already applied.
+- `bandEscalation` (when present) is the expert's advisory pass — its
+  suggested moves with citations are usually the shortest defensible
+  path; adopt, adapt, or reject them, they are never auto-applied.
 
-`bandEdges` still exists in the schema for deliberate debugging only:
-a stated band that contradicts the computed evidence fails the gate
-(d8). Leave it out — an unstated band is neutral, never a disregard.
+```jsonc
+"bandAdjustments": [
+  { "compId": "…", "action": "include", "band": "arv",   "reason": "…" },
+  { "compId": "…", "action": "exclude",                  "reason": "…" },
+  { "compId": "…", "action": "move",    "band": "median","reason": "…" }
+]
+```
+
+- `include`/`move` need a named band (`as_is` | `median` | `arv`);
+  `exclude` unbands the comp entirely.
+- A comp the evidence marks as-is can never be banded ARV — the gate
+  drops those moves.
+- No adjustments = the deterministic draft bands are the referee.
+- `bandEdges` still exists in the schema for deliberate debugging only:
+  a stated band that contradicts the computed evidence fails the gate
+  (d8). Leave it out — an unstated band is neutral, never a disregard.
 
 ### The revision gate — principle over position
 
