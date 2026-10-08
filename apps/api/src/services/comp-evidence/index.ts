@@ -21,7 +21,7 @@
 import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, CONDITION_QUESTIONS, buildConditionResult, type ClefImage, type CompConditionResult } from '../clef'
-import { createReasoningProvider } from '../llm'
+import { createReasoningProvider, createSpecialistProvider } from '../llm'
 import { decisionsRun } from '../decisions'
 
 const MAX_IMAGES = 4
@@ -51,6 +51,10 @@ export interface CompConditionEvidence {
   listing: {
     source: string
     sourceUrl?: string
+    /** Cover photo URL — persisted for the final evaluation model's
+     *  vision pass (the reasoning agent reads condition tier + cover
+     *  photo together; no re-scrape needed). */
+    coverPhotoUrl?: string
     description?: string
     whatsSpecial?: string[]
     features?: string[]
@@ -266,10 +270,11 @@ async function classifyCompConditionLuna(
   env: Env,
   input: Parameters<typeof classifyCompCondition>[1],
 ): Promise<CompConditionResult | null> {
-  // Reasoning lane — Anthropic Haiku when configured, OpenRouter luna
-  // otherwise (this function remains the Clef fallback either way).
+  // Specialist lane — routine cohort classification rides claude-sonnet-5-5
+  // when the Anthropic key is set; otherwise the arm's reasoning provider
+  // (luna on A, haiku on B). This function remains the Clef fallback either way.
   const model = env.VISION_MODEL || env.OPENROUTER_MODEL || LUNA_COMP_MODEL
-  const provider = createReasoningProvider(env, model)
+  const provider = createSpecialistProvider(env, 'routine') ?? createReasoningProvider(env, model)
   if (!provider) return null
   const context =
     `Property: ${input.address ?? 'unknown'}${input.salePrice ? ` — sold $${input.salePrice.toLocaleString()}` : ''}` +
@@ -376,6 +381,10 @@ export async function gatherCompConditionEvidence(
   evidence.listing = {
     source: photos.source,
     sourceUrl: photos.sourceUrl,
+    // Cover photo persists for the final evaluation model — the vision-
+    // capable reasoning agent reads it alongside the condition tier as
+    // evidence, without re-scraping the listing.
+    coverPhotoUrl: photos.photos[0],
     description: photos.description,
     whatsSpecial: photos.whatsSpecial,
     features: photos.features,

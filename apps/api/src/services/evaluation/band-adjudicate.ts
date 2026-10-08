@@ -95,18 +95,11 @@ DOCTRINE:
 ${BAND_DOCTRINE}
 `
 
-/** Adjudicate the draft band membership. Returns null when no reasoning
- *  provider is configured or the call fails — the caller keeps
- *  deterministic bands. */
-export async function adjudicateBandMembership(
-  env: Parameters<typeof createReasoningProvider>[0],
-  input: BandAdjudicationInput,
-): Promise<BandAdjudicationResult | null> {
-  if (!isReasoningProviderAvailable(env)) return null
-  const provider = createReasoningProvider(env, 'openai/gpt-6-luna')
-  if (!provider) return null
-
-  const compRows = input.comps.map((c) => ({
+/** Evidence rows the reasoning/specialist models adjudicate over — one
+ *  serialization shared by the reasoning adjudication and the expert
+ *  escalation so neither model sees evidence the other didn't. */
+export function buildCompRows(comps: BandAdjudicationInput['comps']) {
+  return comps.map((c) => ({
     compId: c.id,
     draftBand: c.band ?? null,
     address: c.address,
@@ -127,6 +120,7 @@ export async function adjudicateBandMembership(
           asIsProbability: (c.curbAppeal as { asIsProbability?: number }).asIsProbability ?? null,
         }
       : null,
+    coverPhotoUrl: c.coverPhotoUrl ?? null,
     verifiedFlip: c.verifiedFlip ?? false,
     investorSignal: (c.curbAppeal as { investorSignal?: boolean } | null)?.investorSignal ?? false,
     verification: c.evidenceVerification
@@ -139,6 +133,28 @@ export async function adjudicateBandMembership(
       ? { priceSanity: (c.clefDigest.B as { priceSanity?: string }).priceSanity ?? null, geoFit: (c.clefDigest.B as { geoFit?: string }).geoFit ?? null }
       : null,
   }))
+}
+
+/** Doctrine hard rule — as-is evidence can never sit in the ARV band.
+ *  Shared by adjudication + escalation validation. */
+export function isAsIsEvidence(c: BandAdjudicationInput['comps'][number]): boolean {
+  return c.classification?.type === 'as_is' ||
+    c.curbAppeal?.condition === 'distressed' ||
+    c.evidenceVerification?.transactionCheck === 'nominal_sale'
+}
+
+/** Adjudicate the draft band membership. Returns null when no reasoning
+ *  provider is configured or the call fails — the caller keeps
+ *  deterministic bands. */
+export async function adjudicateBandMembership(
+  env: Parameters<typeof createReasoningProvider>[0],
+  input: BandAdjudicationInput,
+): Promise<BandAdjudicationResult | null> {
+  if (!isReasoningProviderAvailable(env)) return null
+  const provider = createReasoningProvider(env, 'openai/gpt-6-luna')
+  if (!provider) return null
+
+  const compRows = buildCompRows(input.comps)
 
   const state = {
     task: 'Adjudicate band membership for the comp pool of this appraisal subject.',
@@ -166,13 +182,7 @@ export async function adjudicateBandMembership(
 
   const validIds = new Set(input.comps.map((c) => c.id))
   const byId = new Map(input.comps.map((c) => [c.id, c] as const))
-  // Doctrine hard rule — as-is evidence can never sit in the ARV band.
-  // The reasoning model may misread a distressed member as renovated; the
-  // gate forbids the agent from stating that membership, so strip it here.
-  const isAsIs = (c: BandAdjudicationInput['comps'][number]): boolean =>
-    c.classification?.type === 'as_is' ||
-    c.curbAppeal?.condition === 'distressed' ||
-    c.evidenceVerification?.transactionCheck === 'nominal_sale'
+  const isAsIs = isAsIsEvidence
   const overrides: Record<string, BandName | null> = {}
   const adjustments: BandAdjustment[] = []
   for (const raw of Array.isArray(parsed.adjustments) ? parsed.adjustments : []) {

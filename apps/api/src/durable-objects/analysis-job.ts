@@ -29,6 +29,7 @@ import {
   type Phase1Context,
 } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
+import { consultOnSelection } from '../services/evaluation/consult'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
@@ -286,6 +287,9 @@ export class AnalysisJobDO {
     }
     if (request.method === 'POST' && path === '/harness/selection') {
       return this.handleHarnessSelection(request)
+    }
+    if (request.method === 'POST' && path === '/harness/consult') {
+      return this.handleHarnessConsult(request)
     }
 
     return new Response('Not found', { status: 404 })
@@ -1588,6 +1592,55 @@ export class AnalysisJobDO {
       rounds: js.harnessRounds ?? 0,
       deadlineMs: js.harnessDeadline ? Math.max(0, js.harnessDeadline - Date.now()) : null,
       evidence: buildHarnessEvidence(ctx),
+    })
+  }
+
+  /** Expert consult — the agent's 2nd-opinion seam before spending a
+   *  revision. Opus reviews the proposed selection against the same
+   *  evidence + gate grade; read-only, never consumes the revision
+   *  budget, never persists. */
+  private async handleHarnessConsult(request: Request): Promise<Response> {
+    if (!this.jobState) this.jobState = await this.persistence.read()
+    const js = this.jobState
+    if (!js || js.status !== 'awaiting_agent' || !js.harnessContext) {
+      return Response.json(
+        { error: 'Job is not awaiting an agent selection', status: js?.status ?? 'not_found' },
+        { status: 409 },
+      )
+    }
+    const raw = await request.text().catch(() => '')
+    if (raw.length > 256 * 1024) {
+      return Response.json({ error: 'Selection body too large' }, { status: 413 })
+    }
+    const body = JSON.parse(raw) as { selection?: AgentSelection } | null
+    const sel = body?.selection
+    if (!sel) {
+      return Response.json({ error: 'Body must be { selection: AgentSelection }' }, { status: 400 })
+    }
+    const ctx = JSON.parse(js.harnessContext) as Phase1Context
+    const fails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
+    const evidence = buildHarnessEvidence(ctx)
+    const grade = gradeVerdict(evidence, sel)
+    const consult = fails.length === 0
+      ? await consultOnSelection(this.env, {
+          evidence,
+          selection: sel,
+          grade,
+          priorAttempts: js.harnessAttempts,
+        }).catch(() => null)
+      : null
+    return Response.json({
+      jobId: js.jobId,
+      validationFails: fails,
+      gateGrade: {
+        score: grade.score,
+        checkFails: grade.gateFails,
+        failures: grade.failures,
+        warnings: grade.warnings,
+        feedback: grade.gateFeedback,
+      },
+      consult: consult ?? null,
+      consultUnavailable: consult == null && fails.length === 0,
     })
   }
 

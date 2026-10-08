@@ -33,6 +33,12 @@ export interface BandResult {
   trimmedIds: string[]
   /** Transitional comps — counted in IQR, barred from edges. */
   edgeExcludedIds: string[]
+  /** Members outside the 1.0×IQR core fence — survive the 1.5× trim but
+   *  are too incoherent to set band edges (also folded into edgeExcludedIds). */
+  coherenceExcludedIds: string[]
+  /** (high-low)/mid on scaled prices — band coherence measure; high spread
+   *  = the membership doesn't price one market. */
+  spread: number | null
   /** 'ok' | disregard reasons from the §6 ladder. */
   method: 'ok' | 'insufficient_data' | 'extreme_variance' | 'stale' | 'bimodal'
   /** When method != 'ok' the edges are an implied envelope over surviving
@@ -200,7 +206,8 @@ export function computeEvidenceBands(
     const pool = members[band]
     const empty: BandResult = {
       band, low: null, high: null, mid: null, n: 0,
-      memberIds: [], trimmedIds: [], edgeExcludedIds: [], method: 'insufficient_data', implied: false,
+      memberIds: [], trimmedIds: [], edgeExcludedIds: [], coherenceExcludedIds: [],
+      spread: null, method: 'insufficient_data', implied: false,
     }
     if (pool.length === 0) return empty
 
@@ -252,8 +259,23 @@ export function computeEvidenceBands(
         const adjMed = bandMedianRate(adj)
         return adjMed != null && Math.abs(unitRate(c) - adjMed) / adjMed <= TRANSITIONAL_TOLERANCE
       }))
-    const edgeSet = kept.filter((c) => !edgeExcluded.includes(c))
+    // Intra-band coherence — tighter 1.0×IQR fence about the kept core's
+    // quartiles. Members outside it survive the 1.5× trim but are too
+    // incoherent to set edges (the mixed-pocket failure mode: a $253k and
+    // a $610k comp both 'renovated' in one band). n>=4 required so small
+    // bands keep their evidence.
+    const coherenceExcluded = kept.length >= 4
+      ? kept.filter((c) => unitRate(c) < q1 - 1.0 * iqr || unitRate(c) > q3 + 1.0 * iqr)
+      : []
+    const edgeExcludedAll = [...edgeExcluded, ...coherenceExcluded.filter((c) => !edgeExcluded.includes(c))]
+    const edgeSet = kept.filter((c) => !edgeExcludedAll.includes(c))
     const edgePool = edgeSet.length >= 2 ? edgeSet : kept // all-transitional edge case: fall back so the band doesn't collapse
+
+    const spreadOf = (cs: CompRow[]): number | null => {
+      const xs = cs.map(scale).sort((a, b) => a - b)
+      const m = median(xs)
+      return m != null && m > 0 && xs.length > 0 ? (xs[xs.length - 1]! - xs[0]!) / m : null
+    }
 
     // Extreme variance — CV > 0.25 on unit rates → disregard edges.
     const keptRates = kept.map(unitRate)
@@ -261,7 +283,8 @@ export function computeEvidenceBands(
     if (cv > 0.25) {
       return {
         ...empty, ...impliedEnvelope(edgePool), n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
-        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'extreme_variance', implied: true,
+        edgeExcludedIds: edgeExcludedAll.map((c) => c.id), coherenceExcludedIds: coherenceExcluded.map((c) => c.id),
+        spread: spreadOf(edgePool), method: 'extreme_variance', implied: true,
       }
     }
 
@@ -271,7 +294,8 @@ export function computeEvidenceBands(
     if (gaps.some((g) => g > 0.2)) {
       return {
         ...empty, ...impliedEnvelope(edgePool), n: kept.length, memberIds: kept.map((c) => c.id), trimmedIds,
-        edgeExcludedIds: edgeExcluded.map((c) => c.id), method: 'bimodal', implied: true,
+        edgeExcludedIds: edgeExcludedAll.map((c) => c.id), coherenceExcludedIds: coherenceExcluded.map((c) => c.id),
+        spread: spreadOf(edgePool), method: 'bimodal', implied: true,
       }
     }
 
@@ -283,7 +307,9 @@ export function computeEvidenceBands(
       n: kept.length,
       memberIds: kept.map((c) => c.id),
       trimmedIds,
-      edgeExcludedIds: edgeExcluded.map((c) => c.id),
+      edgeExcludedIds: edgeExcludedAll.map((c) => c.id),
+      coherenceExcludedIds: coherenceExcluded.map((c) => c.id),
+      spread: spreadOf(edgePool),
       method: 'ok',
       implied: false,
     }

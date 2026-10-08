@@ -181,3 +181,40 @@ export function createReasoningProvider(env: ReasoningEnv, fallbackModel: string
 export function isReasoningProviderAvailable(env: ReasoningEnv): boolean {
   return !!(env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY)
 }
+
+// ─── Specialist lane ─────────────────────────────────────────────────────────
+
+/**
+ * On-demand specialist models — same Anthropic key, heavier brains for the
+ * hardest slice of cases. Independent of REASONING_PROVIDER: arm A (luna)
+ * and arm B (haiku) both escalate through this lane.
+ *
+ *   routine → claude-sonnet-5-5  (cohort classification, image understanding)
+ *   expert  → claude-opus-5-5    (material ARV disputes, conflicting condition
+ *                                 evidence, final band include/exclude, agent
+ *                                 consult on revision turns)
+ */
+export type SpecialistTier = 'routine' | 'expert'
+
+interface SpecialistEnv {
+  ANTHROPIC_API_KEY?: string
+  SPECIALIST_ROUTINE_MODEL?: string
+  SPECIALIST_EXPERT_MODEL?: string
+}
+
+const SPECIALIST_MODELS: Record<SpecialistTier, string> = {
+  routine: 'claude-sonnet-5-5',
+  expert: 'claude-opus-5-5',
+}
+
+export function createSpecialistProvider(env: SpecialistEnv, tier: SpecialistTier): LLMProvider | null {
+  if (!env.ANTHROPIC_API_KEY) return null
+  const model = tier === 'expert'
+    ? (env.SPECIALIST_EXPERT_MODEL ?? SPECIALIST_MODELS.expert)
+    : (env.SPECIALIST_ROUTINE_MODEL ?? SPECIALIST_MODELS.routine)
+  return createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY, model })
+}
+
+export function isSpecialistAvailable(env: SpecialistEnv): boolean {
+  return !!env.ANTHROPIC_API_KEY
+}

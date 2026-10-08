@@ -59,6 +59,7 @@ import { gradeVerdict } from './verdict-grade'
 import { buildRenovationEvidence, priceAgentRenovation } from './renovation'
 import { computeEvidenceBands, computeGeoTieredBands, bandForComp, type EvidenceBands, type GeoTieredBands, type BandName } from '@flowstate-api/shared/appraisal'
 import { adjudicateBandMembership, type BandAdjudicationResult } from './band-adjudicate'
+import { escalateBandReview } from './band-escalate'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
 import { persistReportAssets } from '../report-assets'
@@ -1071,6 +1072,9 @@ export async function performAnalysisPhase1(
   // stamps ride the response; if it lands late, onCurbAppeal lets the
   // caller patch the persisted result (cards populate on next fetch).
   let compCurbAppeal: CompCurbAppealMap | undefined
+  // Cover photo URLs persist per comp — the final evaluation agent reads
+  // them as evidence alongside the condition tier (vision-capable).
+  const compCoverPhotos: Record<string, string> = {}
   const compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData> = {}
   // Permit types that validate added living area — county-dependent free
   // text; a match means the marketed sqft is a permitted product.
@@ -1084,6 +1088,7 @@ export async function performAnalysisPhase1(
       const map: CompCurbAppealMap = {}
       for (const ev of settled) {
         const details = ev?.listing?.details
+        if (ev?.listing?.coverPhotoUrl) compCoverPhotos[ev.propertyId] = ev.listing.coverPhotoUrl
         if (details) {
           compListingPhysicalDetails[ev.propertyId] = {
             style: details.style,
@@ -1343,7 +1348,7 @@ export async function performAnalysisPhase1(
   return freezePhase1Context({
     jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
     filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
-    compCurbAppeal, compDigests, compListingPhysicalDetails, subjectListingDetails,
+    compCurbAppeal, compDigests, compCoverPhotos, compListingPhysicalDetails, subjectListingDetails,
     redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
     sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
@@ -1431,7 +1436,7 @@ export async function performAnalysisPhase2(
     // attempts — a persistently failing pool ships its honest fallback
     // tier, never a forced number.
     const bSubjectFields = buildBSubjectFields(bundle, valuation, subjectAvm)
-    const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal, compDigests)
+    const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal, compDigests, ctx.compCoverPhotos)
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
       const fails: string[] = []
@@ -1888,6 +1893,9 @@ export interface Phase1Context {
   compCurbAppeal?: CompCurbAppealMap
   /** Clef stage digests per comp — advisory agent-assist reads. */
   compDigests?: Record<string, CompDigestStages>
+  /** Cover photo URL per comp — persisted listing evidence the final
+   *  evaluation agent reads with the condition tier (vision-capable). */
+  compCoverPhotos?: Record<string, string>
   compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
   subjectListingDetails: RedfinDetailsResult | null
   redfinDetailsEnabled: boolean
@@ -1924,28 +1932,64 @@ export interface Phase1Context {
    *  identically at evidence-serve and selection-grade time. */
   bandOverrides?: Record<string, BandName | null>
   bandAdjudication?: { adjustments: import('./band-adjudicate').BandAdjustment[]; model: string; ambiguous?: string[]; confidence?: number }
+  /** Expert escalation over the adjudication — Opus verdict, triggers
+   *  that fired, and any further overrides. */
+  bandEscalation?: {
+    model: string
+    triggers: string[]
+    adjustments: import('./band-adjudicate').BandAdjustment[]
+    agreesWithAdjudication: boolean
+    verdict?: string
+    confidence?: number
+  }
 }
 
 /** Park-path helper — runs the reasoning-model adjudication over the
  *  DRAFT band membership (deterministic labels as input) and stamps the
  *  result onto the context so both the evidence payload and the gate
- *  verify the same adjudicated bands. No-op without a reasoning provider. */
+ *  verify the same adjudicated bands. When escalation triggers fire, the
+ *  expert (claude-opus-5-5) reviews the adjudication and its overrides
+ *  merge on top. No-op without a reasoning provider. */
 export async function adjudicatePhase1Bands(ctx: Phase1Context, env: Env): Promise<void> {
   const compClassifications = new Map(ctx.compClassifications)
-  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests)
+  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos)
   const rows = bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b, band: bandForComp({ id: ctx.appraisalResult.comparables[i]!.id, ...b }) }))
-  const res = await adjudicateBandMembership(env, {
-    subject: {
-      address: ctx.bundle.property.address ?? null,
-      squareFeet: ctx.bundle.property.squareFeet ?? null,
-      censusTract: ctx.bundle.property.censusTract ?? null,
-      neighborhoodName: ctx.bundle.property.neighborhoodName ?? null,
-    },
-    comps: rows,
-  }).catch(() => null)
+  const subject = {
+    address: ctx.bundle.property.address ?? null,
+    squareFeet: ctx.bundle.property.squareFeet ?? null,
+    censusTract: ctx.bundle.property.censusTract ?? null,
+    neighborhoodName: ctx.bundle.property.neighborhoodName ?? null,
+  }
+  const res = await adjudicateBandMembership(env, { subject, comps: rows }).catch(() => null)
   if (!res) return
-  ctx.bandOverrides = res.overrides
+
+  // Specialist tier — Opus reviews the adjudication only when a trigger
+  // fires (low confidence, ambiguous members, material ARV shift, thin
+  // or wide-spread ARV anchor, conflicting condition evidence).
+  const draftBands = computeEvidenceBands(rows, ctx.bundle.property)
+  const adjBands = computeEvidenceBands(rows, ctx.bundle.property, { bandOverrides: res.overrides })
+  const esc = await escalateBandReview(env, {
+    subject,
+    comps: rows,
+    adjudication: res,
+    draftArvMid: draftBands.arv.mid,
+    adjudicatedArvMid: adjBands.arv.mid,
+    arvMemberIds: adjBands.arv.memberIds,
+    arvSpread: adjBands.arv.spread,
+  }).catch(() => null)
+
+  ctx.bandOverrides = esc ? { ...res.overrides, ...esc.overrides } : res.overrides
   ctx.bandAdjudication = { adjustments: res.adjustments, model: res.model, ambiguous: res.ambiguous, confidence: res.confidence }
+  ctx.bandEscalation = esc
+    ? {
+        model: esc.model,
+        triggers: esc.triggers,
+        adjustments: esc.adjustments,
+        agreesWithAdjudication: esc.agreesWithAdjudication,
+        verdict: esc.verdict,
+        confidence: esc.confidence,
+      }
+    : undefined
 }
 
 export interface SelectionAttempt {
@@ -2023,6 +2067,7 @@ function toBCompsOf(
   compClassifications: Map<string, ClassificationResult>,
   compCurbAppeal?: CompCurbAppealMap,
   compDigests?: Record<string, CompDigestStages>,
+  compCoverPhotos?: Record<string, string>,
 ): BComp[] {
   return comparables.map((comp) => ({
     address: comp.address ?? null,
@@ -2050,6 +2095,7 @@ function toBCompsOf(
       : null,
     curbAppeal: compCurbAppeal?.[comp.id] ?? null,
     clefDigest: compDigests?.[String(comp.id)] ?? null,
+    coverPhotoUrl: compCoverPhotos?.[comp.id] ?? null,
     evidenceVerification: comp.evidenceVerification ?? null,
     appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
   }))
@@ -2118,9 +2164,12 @@ export interface AgentSelection {
   drivers?: string[]
   /** Per-comp band assignment for the report: arv | median | asis | outlier. */
   bands?: Record<string, 'arv' | 'median' | 'asis' | 'outlier'>
-  /** Stated band edges for the verifier — docs/BANDING-VERIFICATION-SPEC.md §3.
-   *  Each band carries its scaled-price edges + member compIds. A band that
-   *  legitimately doesn't exist in the pool is omitted (INSUFFICIENT_DATA). */
+  /** Stated band edges — OPTIONAL debug field under the first-principles
+   *  contract. Bands are the gate's referee, not the agent's language: the
+   *  pipeline computes them deterministically and verifies picks + ARV
+   *  against them internally (d1–d7); the agent selects by condition tier,
+   *  price, and geo. A stated band that contradicts evidence still gates
+   *  (d8), so agents should only state edges when deliberately debugging. */
   bandEdges?: Partial<Record<'as_is' | 'median' | 'arv',
     { low: number; high: number; mid: number; compIds: string[] }>>
   /** Per-comp adjustments applied by the agent (audit trail). */
@@ -2233,7 +2282,7 @@ export interface HarnessEvidence {
   /** Renovation evidence — zone grades, description claims, permit ledger,
    *  seller notes, finish parity, flip-delta + cost schedule (advisory). */
   renovationEvidence?: import('./renovation').RenovationEvidence
-  comps: Array<BComp & { id: string; salePriceFormatted?: string; band?: BandName | null }>
+  comps: Array<BComp & { id: string; salePriceFormatted?: string; band?: BandName | null; coverPhotoUrl?: string | null }>
   suggestedSelection: string[]
   classifications: Record<string, ClassificationResult>
   classificationSummary: ReturnType<typeof summarizeClassifications> | null
@@ -2249,6 +2298,16 @@ export interface HarnessEvidence {
    *  reasoning provider's include/exclude/move verdicts + which comps it
    *  changed. Present only when a provider is configured and it answered. */
   bandAdjudication?: { model: string; adjustments: import('./band-adjudicate').BandAdjustment[]; ambiguous?: string[]; confidence?: number }
+  /** Expert escalation over the adjudication (claude-opus-5-5) — fired
+   *  only on triggers; merges over the adjudicator's overrides. */
+  bandEscalation?: {
+    model: string
+    triggers: string[]
+    adjustments: import('./band-adjudicate').BandAdjustment[]
+    agreesWithAdjudication: boolean
+    verdict?: string
+    confidence?: number
+  }
   rules: {
     filters: AppraisalFilter[]
     adjustments: AppraisalAdjustment[]
@@ -2306,7 +2365,7 @@ export function buildRenoEvidence(
 
 export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   const compClassifications = new Map(ctx.compClassifications)
-  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests)
+  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos)
   const overrides = ctx.bandOverrides
   const bandLabel = (row: BComp & { id: string }): BandName | null => {
     const o = overrides?.[row.id]
@@ -2338,6 +2397,16 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
     geoBands: computeGeoTieredBands(rows, ctx.bundle.property, { bandOverrides: overrides }),
     bandAdjudication: ctx.bandAdjudication
       ? { model: ctx.bandAdjudication.model, adjustments: ctx.bandAdjudication.adjustments, ambiguous: ctx.bandAdjudication.ambiguous, confidence: ctx.bandAdjudication.confidence }
+      : undefined,
+    bandEscalation: ctx.bandEscalation
+      ? {
+          model: ctx.bandEscalation.model,
+          triggers: ctx.bandEscalation.triggers,
+          adjustments: ctx.bandEscalation.adjustments,
+          agreesWithAdjudication: ctx.bandEscalation.agreesWithAdjudication,
+          verdict: ctx.bandEscalation.verdict,
+          confidence: ctx.bandEscalation.confidence,
+        }
       : undefined,
     rules: {
       filters: ctx.filters,
