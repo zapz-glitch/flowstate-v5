@@ -30,6 +30,7 @@ import {
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
 import { runOpusAppraiser } from '../services/evaluation/appraiser'
+import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
@@ -1437,6 +1438,18 @@ export class AnalysisJobDO {
         delete ctx.photoBundlePromise
         await marketContextPromise.catch(() => { /* display-only */ })
         const evidence = buildHarnessEvidence(ctx)
+        // Pocket desirability — its own haiku call (Serper gather →
+        // haiku verdict), riding the evidence bundle for Opus.
+        const pocketDesirability = await ratePocketDesirability(this.env, ctx.bundle.property).catch(() => null)
+        if (pocketDesirability) {
+          evidence.pocketDesirability = pocketDesirability
+          ctx.steps.push({
+            step: 'pocket_desirability', label: 'pocket_desirability',
+            status: 'completed',
+            detail: `haiku rated the pocket ${pocketDesirability.score}/10 — ${pocketDesirability.summary}`,
+            durationMs: pocketDesirability.durationMs,
+          })
+        }
         const appraiserStart = Date.now()
         const appraisal = await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
         const appraiserMs = Date.now() - appraiserStart
@@ -1480,6 +1493,15 @@ export class AnalysisJobDO {
                     descriptionClaims: reno.descriptionClaims?.length ?? 0,
                   }
                 : null,
+              pocketDesirability: pocketDesirability
+                ? {
+                    score: pocketDesirability.score,
+                    summary: pocketDesirability.summary,
+                    signals: pocketDesirability.signals,
+                    model: pocketDesirability.model,
+                    durationMs: pocketDesirability.durationMs,
+                  }
+                : null,
               comps: Object.fromEntries(
                 Object.entries(ctx.compConditions ?? {}).map(([id, c]) => [id, {
                   model: c.model ?? c.modelVersion ?? null,
@@ -1505,9 +1527,10 @@ export class AnalysisJobDO {
                 selectedCompIds: a.selection.selectedCompIds,
                 drivers: a.selection.drivers ?? null,
                 notes: a.selection.notes ?? null,
+                dataQuality: a.selection.dataQuality ?? null,
               })),
               selection: decision
-                ? { arv: decision.arv, conf: decision.conf, selectedCompIds: decision.selectedCompIds, drivers: decision.drivers ?? null, notes: decision.notes ?? null }
+                ? { arv: decision.arv, conf: decision.conf, selectedCompIds: decision.selectedCompIds, drivers: decision.drivers ?? null, notes: decision.notes ?? null, dataQuality: decision.dataQuality ?? null }
                 : null,
             },
             gate: {
@@ -1517,7 +1540,13 @@ export class AnalysisJobDO {
             latency: { appraiserMs, phase2Ms },
           }
           const resp = evalResult.response as unknown as Record<string, unknown>
-          resp.harness = { ...((resp.harness as Record<string, unknown> | undefined) ?? { source: 'agent' }), trace }
+          resp.harness = {
+            ...((resp.harness as Record<string, unknown> | undefined) ?? { source: 'agent' }),
+            // Haiku owns pocket desirability — its read is authoritative
+            // over any score a selection happened to carry.
+            ...(pocketDesirability ? { pocketScore: pocketDesirability.score } : {}),
+            trace,
+          }
         }
         // Trust floor — same rule the parked-resume path enforced: a weak
         // gate grade (<0.7 composite) at low confidence routes to the hold
