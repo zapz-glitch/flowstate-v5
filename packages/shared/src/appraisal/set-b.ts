@@ -125,6 +125,15 @@ export interface BComp {
   /** Persisted listing cover photo — the final evaluation agent reads it
    *  as vision evidence alongside the condition tier. */
   coverPhotoUrl?: string | null
+  /** Listing-evidence coverage — what the condition classifier could
+   *  read: 'photo+desc' | 'photo' | 'desc' | null (no listing found).
+   *  Photo-verified reads outweigh description-only ones. */
+  evidenceCoverage?: string | null
+  /** Position on the block-group price ladder — which natural-break
+   *  cluster the sale sits in ('top' | 'middle' | 'bottom' | null =
+   *  outside the ladder pool) plus $/sf ratios to the pocket median and
+   *  the top-cluster (ARV-band) median. */
+  priceLadder?: { group?: string | null; ppsfVsMedian?: number | null; ppsfVsTop?: number | null } | null
   evidenceVerification?: {
     /** Age only — stale means outside the preferred sale-age window. */
     staleness?: string | null

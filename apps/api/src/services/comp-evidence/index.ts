@@ -815,12 +815,16 @@ export async function startCompEvidenceBatch(
   // classify to the caller — used by the early prefetch, which fires
   // before census geo-stamps land on the comps.
   const batchDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  // gatherOnly also defers the per-comp classify: a caller passing it has a
+  // post-geo classifier (haiku pool read or the decisions batch) that needs
+  // census geo-stamps + pool context the early prefetch doesn't have yet.
+  const deferClassify = batchDecisions || opts?.gatherOnly === true
   let next = 0
   const lane = async () => {
     while (next < comps.length) {
       const comp = comps[next++]
       const ev = await Promise.race([
-        gatherCompConditionEvidence(env, comp, opts?.subject, { deferClassify: batchDecisions }),
+        gatherCompConditionEvidence(env, comp, opts?.subject, { deferClassify }),
         new Promise<null>((r) => setTimeout(() => r(null), perComp)),
       ]).catch(() => null)
       out.set(comp.propertyId, ev)

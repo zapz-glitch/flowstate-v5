@@ -29,6 +29,7 @@ import {
 import { bulkSaleIds, packageDeedIds, verifyCompEvidence } from '../appraisal/verification'
 import { checksForFlags, type RuleCheck } from '../analysis/rule-registry'
 import { arvEvidence, classifyCompsByEvidence, pocketPriceGroups } from './comp-classification'
+import { computeBlockLadder, compLadderPosition, type BlockLadder } from './block-ladder'
 
 /** Why a sale is switched off as transaction noise */
 const TRANSACTION_NOISE_REASON: Record<string, string> = {
@@ -831,14 +832,24 @@ export async function performAnalysisPhase1(
     censusTract: comp.censusTract ?? null,
     distanceMiles: comp.distanceMiles ?? null,
   }))
+  // Agent harness: comp evidence is core input, not a shadow lane — run
+  // the batch whenever a condition reader exists even without the CLEF
+  // flag (haiku classify feeds the Opus appraiser).
+  const compEvidenceOn =
+    (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
+    (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env)))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
-    env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)
+    compEvidenceOn
       ? (async () => {
           const early = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
           const missing = early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs
           const filled = missing.length
             ? await startCompEvidenceBatch(env, missing, {
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+                // Post-geo classify runs just below — don't let the fallback
+                // gather pin geo-less per-comp reads the pool classify skips.
+                gatherOnly: !!env.ANTHROPIC_API_KEY ||
+                  (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY),
               })
             : new Map<string, CompConditionEvidence | null>()
           // Classification runs after geo-stamps land — the classifier reads
@@ -1086,6 +1097,9 @@ export async function performAnalysisPhase1(
   // them as evidence alongside the condition tier (vision-capable).
   const compCoverPhotos: Record<string, string> = {}
   const compConditions: Record<string, CompConditionResult> = {}
+  // What the classifier could read per comp — the appraiser weighs
+  // photo-verified reads above description-only ones.
+  const compEvidenceCoverage: Record<string, 'photo+desc' | 'photo' | 'desc'> = {}
   const compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData> = {}
   // Permit types that validate added living area — county-dependent free
   // text; a match means the marketed sqft is a permitted product.
@@ -1100,6 +1114,11 @@ export async function performAnalysisPhase1(
       for (const ev of settled) {
         const details = ev?.listing?.details
         if (ev?.listing?.coverPhotoUrl) compCoverPhotos[ev.propertyId] = ev.listing.coverPhotoUrl
+        if (ev?.listing) {
+          const hasPhoto = !!ev.listing.coverPhotoUrl
+          const hasDesc = !!ev.listing.description
+          if (hasPhoto || hasDesc) compEvidenceCoverage[ev.propertyId] = hasPhoto && hasDesc ? 'photo+desc' : hasPhoto ? 'photo' : 'desc'
+        }
         if (details) {
           compListingPhysicalDetails[ev.propertyId] = {
             style: details.style,
@@ -1360,7 +1379,7 @@ export async function performAnalysisPhase1(
   return freezePhase1Context({
     jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
     filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
-    compCurbAppeal, compDigests, compCoverPhotos, compConditions, compListingPhysicalDetails, subjectListingDetails,
+    compCurbAppeal, compDigests, compCoverPhotos, compConditions, compEvidenceCoverage, compListingPhysicalDetails, subjectListingDetails,
     redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
     sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
@@ -1911,6 +1930,9 @@ export interface Phase1Context {
   /** Haiku condition classification per comp — label, tier, summary and
    *  the comp-rules check the classifier notated. */
   compConditions?: Record<string, CompConditionResult>
+  /** Listing-evidence coverage per comp — 'photo+desc' | 'photo' | 'desc';
+   *  absent entries had no listing evidence at all. */
+  compEvidenceCoverage?: Record<string, 'photo+desc' | 'photo' | 'desc'>
   compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
   subjectListingDetails: RedfinDetailsResult | null
   redfinDetailsEnabled: boolean
@@ -2022,6 +2044,7 @@ export function toBCompsOf(
   compDigests?: Record<string, CompDigestStages>,
   compCoverPhotos?: Record<string, string>,
   compConditions?: Record<string, CompConditionResult>,
+  compEvidenceCoverage?: Record<string, 'photo+desc' | 'photo' | 'desc'>,
 ): BComp[] {
   return comparables.map((comp) => ({
     address: comp.address ?? null,
@@ -2055,6 +2078,7 @@ export function toBCompsOf(
     rulesCheck: compConditions?.[comp.id]?.rulesCheck ?? null,
     clefDigest: compDigests?.[String(comp.id)] ?? null,
     coverPhotoUrl: compCoverPhotos?.[comp.id] ?? null,
+    evidenceCoverage: compEvidenceCoverage?.[comp.id] ?? null,
     evidenceVerification: comp.evidenceVerification ?? null,
     appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
   }))
@@ -2239,6 +2263,10 @@ export interface HarnessEvidence {
    *  bundle is built so the appraiser sees it. */
   pocketDesirability?: import('./pocket-desirability').PocketDesirability
   comps: Array<BComp & { id: string; salePriceFormatted?: string; coverPhotoUrl?: string | null }>
+  /** Block-group price ladder — the pocket's sales split into natural-
+   *  break clusters; top median ≈ ARV band, bottom median ≈ as-is band.
+   *  The appraiser's price-position evidence (median-relative pricing). */
+  blockLadder?: Omit<BlockLadder, 'groups'> | null
   suggestedSelection: string[]
   classifications: Record<string, ClassificationResult>
   classificationSummary: ReturnType<typeof summarizeClassifications> | null
@@ -2300,7 +2328,10 @@ export function buildRenoEvidence(
 
 export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
   const compClassifications = new Map(ctx.compClassifications)
-  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos, ctx.compConditions)
+  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos, ctx.compConditions, ctx.compEvidenceCoverage)
+  // Block-group price ladder — median-relative pricing evidence (Spec B):
+  // top-cluster median = ARV band, bottom-cluster = as-is/investor band.
+  const ladder = computeBlockLadder(ctx.appraisalResult.comparables, ctx.bundle.property.censusTract)
   const rows = bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b }))
   return {
     jobId: ctx.jobId,
@@ -2309,7 +2340,22 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
       address: ctx.bundle.property.address,
       id: ctx.bundle.property.id,
     },
-    comps: ctx.appraisalResult.comparables.map((comp, i) => ({ id: comp.id, ...bcomps[i]! })),
+    blockLadder: ladder
+      ? {
+          scope: ladder.scope,
+          n: ladder.n,
+          medianPpsf: ladder.medianPpsf,
+          topMedianPpsf: ladder.topMedianPpsf,
+          bottomMedianPpsf: ladder.bottomMedianPpsf,
+          topRange: ladder.topRange,
+          bottomRange: ladder.bottomRange,
+        }
+      : null,
+    comps: ctx.appraisalResult.comparables.map((comp, i) => ({
+      id: comp.id,
+      ...bcomps[i]!,
+      priceLadder: compLadderPosition(comp, ladder),
+    })),
     renovationEvidence: buildRenoEvidence(ctx, compClassifications),
     suggestedSelection: ctx.appraisalResult.selectedCompIds ?? [],
     classifications: Object.fromEntries(compClassifications),
