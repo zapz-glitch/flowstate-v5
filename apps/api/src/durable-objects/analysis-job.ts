@@ -1482,6 +1482,8 @@ export class AnalysisJobDO {
                 : null,
               comps: Object.fromEntries(
                 Object.entries(ctx.compConditions ?? {}).map(([id, c]) => [id, {
+                  model: c.modelVersion ?? c.model ?? null,
+                  durationMs: c.durationMs ?? null,
                   conditionLabel: c.conditionLabel ?? null,
                   tier: c.tier ?? null,
                   asIs: c.asIs ?? null,

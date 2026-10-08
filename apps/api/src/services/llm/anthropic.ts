@@ -71,7 +71,7 @@ export class AnthropicProvider extends BaseLLMProvider {
     if (request.temperature != null) body.temperature = request.temperature
     if (request.reasoning?.enabled) body.thinking = { type: 'adaptive' }
     if (request.jsonSchema) {
-      body.output_format = { type: 'json_schema', schema: request.jsonSchema.schema }
+      body.output_format = { type: 'json_schema', schema: sanitizeSchema(request.jsonSchema.schema) }
     } else if (request.responseFormat === 'json') {
       body.output_format = { type: 'json_schema', schema: { type: 'object' } }
     }
@@ -117,4 +117,24 @@ export class AnthropicProvider extends BaseLLMProvider {
 
 export function createAnthropicProvider(config: BaseLLMProviderConfig): AnthropicProvider {
   return new AnthropicProvider(config)
+}
+
+/** The structured-outputs beta rejects numeric bound keywords
+ *  ("For 'integer' type, properties maximum, minimum are not supported").
+ *  Strip them recursively — they're validation hints, not semantics, and a
+ *  400 here silently killed every subject reno read behind 'unavailable'. */
+const UNSUPPORTED_SCHEMA_KEYS = new Set([
+  'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+  'minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties',
+])
+
+function sanitizeSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(sanitizeSchema)
+  if (node == null || typeof node !== 'object') return node
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (UNSUPPORTED_SCHEMA_KEYS.has(k)) continue
+    out[k] = sanitizeSchema(v)
+  }
+  return out
 }
