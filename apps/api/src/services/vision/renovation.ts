@@ -283,7 +283,7 @@ interface ClefChunkRead {
 async function runClefChunkReads(
   env: RenovationEnv,
   live: FetchedImage[],
-  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
+  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
 ): Promise<ClefChunkRead> {
   const ai = env.AI
   const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
@@ -539,12 +539,13 @@ async function assessViaLunaEvidence(
   provider: { name: string; model: string; execute: (req: any) => Promise<any> },
   clef: ClefChunkRead,
   live: FetchedImage[],
-  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
+  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
 ): Promise<RenovationAssessment | null> {
   let prompt = ''
   if (propertyContext.address) prompt += `Address: ${propertyContext.address}\n`
   if (propertyContext.squareFeet) prompt += `Square Feet: ${propertyContext.squareFeet}\n`
   if (propertyContext.yearBuilt) prompt += `Year Built: ${propertyContext.yearBuilt}\n`
+  if (propertyContext.description) prompt += `Listing description: ${propertyContext.description.slice(0, 3000)}\n`
   prompt += '\n'
   prompt += LUNA_EVIDENCE_PREAMBLE + clefEvidenceBlock(clef) + '\n\n' + RENOVATION_PROMPT
 
@@ -655,7 +656,7 @@ export function unavailableAssessment(overrides?: Partial<RenovationAssessment>)
 export async function assessRenovationFromPhotos(
   env: RenovationEnv,
   photoUrls: string[],
-  propertyContext?: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
+  propertyContext?: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
   providerOverride?: { name: string; model: string; execute: (req: any) => Promise<any> }
 ): Promise<RenovationAssessment> {
   // Interior condition is 'NA' whenever it cannot be verified — never null,
@@ -684,13 +685,14 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  // Specialist lane — image understanding rides claude-sonnet-5-5 when
-  // the Anthropic key is set; otherwise the arm's reasoning provider
-  // (luna on A, haiku on B).
+  // Haiku is the subject classifier — it replaced the decision/classifier
+  // models for subject photos + description tier assignment, with no
+  // decision authority beyond producing the condition evidence. Sonnet is
+  // the fallback when the reasoning lane is unavailable.
   const provider =
     providerOverride ??
-    createSpecialistProvider(env, 'routine') ??
-    createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'openai/gpt-6-luna')
+    createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'openai/gpt-6-luna') ??
+    createSpecialistProvider(env, 'routine')
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
 
@@ -710,23 +712,16 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  // Clef reads every photo in 4-image chunks — its answers are evidence,
-  // not the verdict. Luna reasons over that evidence (plus the photos that
-  // fit its image budget) for the final tier call; the merged Clef verdict
-  // is the fallback when Luna can't answer. No Clef answers → the legacy
-  // Luna photo read below.
-  const clef = await runClefChunkReads(env, live, propertyContext ?? {})
-    .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
-  const mergedClef = mergedClefAssessment(clef.answers, live)
-  if (mergedClef) {
-    const luna = provider
-      ? await assessViaLunaEvidence(provider, clef, live, propertyContext ?? {}).catch(() => null)
-      : null
-    if (luna) {
-      if (!luna.curbAppeal && mergedClef.curbAppeal) luna.curbAppeal = mergedClef.curbAppeal
-      return luna
-    }
-    return mergedClef
+  // Haiku reads the subject photos + description directly — the Clef
+  // chunk layer is skipped entirely when a reasoning provider is bound
+  // (haiku sees the images itself rather than reasoning over Clef votes).
+  // Clef remains only as the fallback reader when no reasoning provider
+  // is configured.
+  if (!provider) {
+    const clef = await runClefChunkReads(env, live, propertyContext ?? {})
+      .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
+    const mergedClef = mergedClefAssessment(clef.answers, live)
+    if (mergedClef) return mergedClef
   }
 
   if (!provider) {
@@ -745,6 +740,7 @@ export async function assessRenovationFromPhotos(
     if (propertyContext.address) prompt += `Address: ${propertyContext.address}\n`
     if (propertyContext.squareFeet) prompt += `Square Feet: ${propertyContext.squareFeet}\n`
     if (propertyContext.yearBuilt) prompt += `Year Built: ${propertyContext.yearBuilt}\n`
+  if (propertyContext.description) prompt += `Listing description: ${propertyContext.description.slice(0, 3000)}\n`
     prompt += '\n'
   }
   prompt += RENOVATION_PROMPT

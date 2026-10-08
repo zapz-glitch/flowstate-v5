@@ -21,17 +21,15 @@ import {
   performAnalysisPhase1,
   performAnalysisPhase2,
   buildHarnessEvidence,
-  adjudicatePhase1Bands,
   harnessDeepen,
   harnessWiden,
   validateAgentSelection,
   type AgentSelection,
   type Phase1Context,
 } from '../services/evaluation'
-import { bandAdjustmentsToOverrides } from '../services/evaluation/band-adjudicate'
-import { toBCompsOf } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
+import { runOpusAppraiser } from '../services/evaluation/appraiser'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
@@ -1428,36 +1426,62 @@ export class AnalysisJobDO {
     let evalResult
     try {
       if (config.harness === 'agent') {
-        // Harness mode: freeze at the evidence-complete boundary and park
-        // until the Evaluation Agent posts its comp-selection verdict (or
-        // the deadline fires the deterministic fallback).
+        // Self-completing harness: phase 1 freezes the evidence bundle,
+        // then the Opus appraiser reviews the complete dataset and posts
+        // the final selection — verified by the deterministic gate, with
+        // bounded haiku clarify sub-calls and ≤2 gate-driven revisions.
+        // No awaiting_agent park; the job completes in-pipeline.
         const ctx = await performAnalysisPhase1({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
         if (ctx.photoBundlePromise) ctx.photoBundle = await ctx.photoBundlePromise
         delete ctx.photoBundlePromise
         await marketContextPromise.catch(() => { /* display-only */ })
-        // Reasoned band adjudication — the arm's reasoning model (luna /
-        // haiku) reviews draft band membership per BAND-FIRST-PRINCIPLES
-        // before the agent or gate sees bands. No-op without a provider.
-        await adjudicatePhase1Bands(ctx, this.env).catch(() => null)
-        ctx.steps.push({ step: 'agent_selection', label: 'agent_selection', status: 'skipped', detail: 'Awaiting Evaluation Agent verdict', durationMs: 0 })
-        this.jobState = {
-          ...(this.jobState ?? { jobId: config.jobId, userId: config.userId, status: 'processing' as const, pending: [], events: [], createdAt: Date.now() }),
-          status: 'awaiting_agent',
-          harnessContext: JSON.stringify(ctx),
-          harnessConfig: JSON.stringify(config),
-          resumeSeed: JSON.stringify({ isAttomMcp, ladderStep, ladderScope }),
-          harnessRounds: 0,
-          harnessDeadline: Date.now() + AnalysisJobDO.HARNESS_DEADLINE_MS,
+        const evidence = buildHarnessEvidence(ctx)
+        const appraisal = await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+        const decision = appraisal?.selection ?? null
+        const appraiserNote = appraisal == null
+          ? 'appraiser unavailable — deterministic engine completes'
+          : decision
+            ? `Opus (${appraisal.model}) selected ${decision.selectedCompIds.length} comps, ARV $${decision.arv.toLocaleString()} — ${appraisal.attempts.length} attempt(s), ${appraisal.clarifications.length} clarification(s)`
+            : `Opus gate-rejected ${appraisal.attempts.length} attempt(s) — deterministic engine completes`
+        ctx.steps.push({
+          step: 'appraiser', label: 'appraiser',
+          status: decision ? 'completed' : 'skipped',
+          detail: appraiserNote,
+          durationMs: 0,
+        })
+        if (appraisal?.attempts.length) ctx.selectionAttempts = appraisal.attempts
+        if (appraisal?.debugNotes.length) {
+          for (const note of appraisal.debugNotes) {
+            ctx.steps.push({ step: 'gate_debug', label: 'gate_debug', status: 'completed', detail: note, durationMs: 0 })
+          }
         }
-        await this.persistence.write(this.jobState)
-        await this.state.storage.setAlarm(this.jobState.harnessDeadline!)
-        await this.pushEvent('harness_awaiting', { jobId: config.jobId, compCount: ctx.appraisalResult.comparables.length, deadlineMs: AnalysisJobDO.HARNESS_DEADLINE_MS })
-        console.log(`[AnalysisJobDO] harness: job ${config.jobId} parked awaiting agent (${ctx.appraisalResult.comparables.length} comps)`)
-        return
+        void this.pushEvent('appraiser_done', {
+          jobId: config.jobId, model: appraisal?.model ?? null, accepted: decision != null,
+          attempts: appraisal?.attempts.length ?? 0, clarifications: appraisal?.clarifications.length ?? 0,
+        })
+        evalResult = await performAnalysisPhase2(ctx, { jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
+          (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) },
+          decision ?? undefined)
+        // Trust floor — same rule the parked-resume path enforced: a weak
+        // gate grade (<0.7 composite) at low confidence routes to the hold
+        // list; every other accepted verdict is the explicit auto-clear.
+        const accepted = ctx.selectionAttempts?.at(-1)
+        const valuation = evalResult?.response?.valuation
+        if (accepted && valuation) {
+          const weak = accepted.grade.score < 0.7
+          const hold = weak && accepted.selection.conf === 'low'
+          valuation.trustFloor = hold ? 'hold' : 'clear'
+          if (hold) {
+            valuation.requiresHumanReview = true
+            valuation.recommendationReason =
+              `${valuation.recommendationReason ?? ''} — TRUST FLOOR: gate grade ${accepted.grade.score.toFixed(2)} + low confidence — routed to hold list`.trim()
+          }
+        }
+      } else {
+        evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
+          (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
       }
-      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
-        (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
     } catch (evalError) {
       const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
       const code = (evalError as { code?: string })?.code
@@ -1747,9 +1771,6 @@ export class AnalysisJobDO {
           { status: 409 },
         )
       }
-      // New pool members (widen) change draft bands — re-adjudicate before
-      // the agent re-reads evidence so bands stay consistent.
-      if (mode === 'widen') await adjudicatePhase1Bands(ctx, this.env).catch(() => null)
       js.harnessContext = JSON.stringify(ctx)
       js.harnessRounds = rounds + 1
       js.harnessDeadline = Date.now() + AnalysisJobDO.HARNESS_DEADLINE_MS
@@ -1770,28 +1791,14 @@ export class AnalysisJobDO {
     // verdict component that contradicts evidence the pipeline already
     // verified is intercepted BEFORE pricing and handed back with the
     // specific violation named. That covers every hard check fail (d1
-    // off-pocket pricing comps, d2 outlier picks, d3 band membership, d4
-    // as-is drivers, d5 IQR-trimmed picks, d7 ARV outside the evidence
-    // edge, d8 stated-band miss) AND renovation scope violations the
+    // off-pocket pricing comps, d2 outlier picks, d4
+    // as-is drivers, d5 coherence-trimmed picks, d7 ARV outside the
+    // evidence envelope) AND renovation scope violations the
     // pricer would otherwise silently clamp or auto-append. Warns never
     // gate. Revisions are bounded — after REVISION_BUDGET rejections the
     // next post is accepted_final and the deadline fallback still holds.
     const attempts = js.harnessAttempts ?? []
-    // Agent-banding contract — the agent holds the initial banding seat.
-    // When it posts bandAdjustments, apply them (validated: real comps,
-    // named band for include/move, as-is evidence can never be banded arv)
-    // and grade picks + ARV against the adjudicated membership — edges
-    // still recompute deterministically, so the agent adjusts MEMBERSHIP,
-    // never edges. No adjustments = grade against the draft bands.
-    let gradeCtx = ctx
-    if (Array.isArray(sel.bandAdjustments) && sel.bandAdjustments.length > 0) {
-      const compClassifications = new Map(ctx.compClassifications)
-      const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal, ctx.compDigests, ctx.compCoverPhotos)
-      const rows = bcomps.map((b, i) => ({ id: ctx.appraisalResult.comparables[i]!.id, ...b }))
-      const { overrides } = bandAdjustmentsToOverrides(sel.bandAdjustments, rows)
-      gradeCtx = { ...ctx, bandOverrides: overrides }
-    }
-    const evidence = buildHarnessEvidence(gradeCtx)
+    const evidence = buildHarnessEvidence(ctx)
     const gateGrade = gradeVerdict(evidence, sel)
     const checkFails = gateGrade.gateFails
     const renoViolations: string[] = []
