@@ -27,6 +27,12 @@ import {
   type AgentSelection,
   type Phase1Context,
 } from '../services/evaluation'
+import { gradeVerdict } from '../services/evaluation/verdict-grade'
+import { consultOnSelection } from '../services/evaluation/consult'
+import { runOpusAppraiser } from '../services/evaluation/appraiser'
+import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
+import { fetchRedfinPropertyDetails } from '../services/redfin-details'
+import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
 import { createPropertyApi } from '../services/property-api'
@@ -35,7 +41,7 @@ import {
   resolveCandidateLimit,
   expansionRefetchRadius,
   isProvablyDeadComp,
-  rankEnrichmentCandidates,
+  enrichmentRankScore,
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
 import { bulkSaleIds, packageDeedIds } from '../services/appraisal/verification'
@@ -45,6 +51,9 @@ import {
   describeLadderConcessions, filtersForLadder, geoLevelForScope, ladderFactorAt, ladderLimitsAt, lastUsefulLadderStep,
 } from '../services/appraisal/filter-ladder'
 import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
+import { startCompEvidenceBatch } from '../services/comp-evidence'
+import { startCompDigestBatch, type CompDigest, type DigestComp, type DigestSubject } from '../services/comp-evidence/digest'
+import { isClefAvailable } from '../services/clef'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
@@ -84,6 +93,9 @@ interface JobState {
   harnessRounds?: number
   /** Epoch ms — the deterministic fallback fires when the deadline passes. */
   harnessDeadline?: number
+  /** Revision gate — every posted selection + its pre-pricing grade.
+   *  Any verified-evidence contradiction parks the job for a revision. */
+  harnessAttempts?: import('../services/evaluation').SelectionAttempt[]
 }
 
 export interface StartEnrichmentRequest {
@@ -276,6 +288,9 @@ export class AnalysisJobDO {
     }
     if (request.method === 'POST' && path === '/harness/selection') {
       return this.handleHarnessSelection(request)
+    }
+    if (request.method === 'POST' && path === '/harness/consult') {
+      return this.handleHarnessConsult(request)
     }
 
     return new Response('Not found', { status: 404 })
@@ -518,8 +533,93 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
+    const compsPromise = propertyApi.getComparables(comparablesParams)
+
+    // ── Clef digest passes — the agent-assist layer, three stages ──────
+    // A rides the comps-landed tap (sale records only), B fires inside the
+    // census gate the moment geo flags land, C after gated enrichment
+    // returns. Each pass is text-only Clef per comp, lane-fanned; all merge
+    // into compDigests for the harness evidence bundle. Advisory only —
+    // the Evaluation Agent owns every verdict.
+    const digestSubject: DigestSubject = {
+      address: property.address ?? undefined,
+      squareFeet: property.squareFeet ?? null,
+      yearBuilt: property.yearBuilt ?? null,
+      lotSizeAcres: property.lotSizeAcres ?? null,
+      propertyType: property.propertyType ?? null,
+      stories: property.stories ?? null,
+      censusTract: property.censusTract ?? null,
+      censusBlockGroup: property.censusBlockGroup ?? null,
+      subdivision: property.subdivision ?? null,
+      neighborhoodName: property.neighborhoodName ?? null,
+    }
+    const toDigestComp = (c: NormalizedComparable, geo?: { tract?: string; blockGroup?: string } | null): DigestComp => ({
+      propertyId: String(c.id),
+      address: c.address,
+      salePrice: c.salePrice ?? undefined,
+      saleDate: c.saleDate ? String(c.saleDate) : undefined,
+      squareFeet: c.squareFeet ?? undefined,
+      pricePerSqft: c.pricePerSqft ?? undefined,
+      yearBuilt: c.yearBuilt ?? undefined,
+      lotSizeAcres: c.lotSizeAcres ?? null,
+      lotSizeSquareFeet: c.lotSizeSquareFeet ?? null,
+      distanceMiles: c.distanceMiles ?? null,
+      bedrooms: c.bedrooms ?? null,
+      bathrooms: c.bathrooms ?? null,
+      propertyType: c.propertyType ?? null,
+      stories: c.stories ?? null,
+      construction: c.construction?.type ?? null,
+      subdivision: c.subdivision ?? null,
+      neighborhoodName: c.neighborhoodName ?? null,
+      censusTract: c.censusTract ?? geo?.tract ?? null,
+      censusBlockGroup: c.censusBlockGroup ?? geo?.blockGroup ?? null,
+      sameBlockGroup: c.sameBlockGroup ?? (geo?.blockGroup != null && digestSubject.censusBlockGroup != null ? geo.blockGroup === digestSubject.censusBlockGroup : null),
+      crossesMajorRoad: c.crossesMajorRoad ?? null,
+      isEnriched: c.isEnriched ?? null,
+    })
+    // Stage promise collectors — B fires inside the geo gate, C after each
+    // enrich; A fires at the comps-landed tap below. All merge at evalParams.
+    const digestAPromiseParts: Promise<Map<string, CompDigest>>[] = []
+    const digestBPromiseParts: Promise<Map<string, CompDigest>>[] = []
+    const digestCPromiseParts: Promise<Map<string, CompDigest>>[] = []
+    const clefDigestsOn = this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(this.env)
+
+    // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
+    // search→scrape→Clef runs beside geo/enrich instead of behind it.
+    const prefetchedCompEvidence = compsPromise.then(async (res) => {
+      try {
+        if (!res.success || this.env.CLEF_COMP_CONDITION_ENABLED !== 'true' || !isClefAvailable(this.env)) return null
+        const inputs = res.data.comparables.slice(0, Number(this.env.CLEF_COMP_MAX) || Infinity).map((c) => ({
+          propertyId: c.id,
+          address: c.address,
+          city: c.city,
+          state: c.state,
+          zipCode: c.zipCode,
+          latitude: c.latitude ?? null,
+          longitude: c.longitude ?? null,
+          salePrice: c.salePrice ?? undefined,
+          saleDate: c.saleDate ? String(c.saleDate) : undefined,
+          yearBuilt: c.yearBuilt ?? undefined,
+          squareFeet: c.squareFeet ?? undefined,
+        }))
+        const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
+          subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
+          // Decisions lane defers classification — this prefetch fires
+          // before census geo-stamps land, and the batch classify needs
+          // the gated pool's geocode context. Evaluation runs it after.
+          gatherOnly: this.env.CONDITION_READER === 'decisions',
+        })
+        // Stage-A digest on sale records — no listing data needed, runs
+        // beside the listing fetch it precedes in the evidence batch.
+        digestAPromiseParts.push(
+          startCompDigestBatch(this.env, res.data.comparables.map((c) => toDigestComp(c)), digestSubject, 'A')
+            .catch(() => new Map()),
+        )
+        return await evidenceBatch
+      } catch { return null }
+    }).catch(() => null)
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
-      propertyApi.getComparables(comparablesParams),
+      compsPromise,
       // Permits: fetched on every run (KV-cached) — the permit-age
       // thresholds drive major-item additions in the buybox derivation.
       // 'unavailable' must still mean the call failed, not that the
@@ -801,6 +901,19 @@ export class AnalysisJobDO {
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
       })
+      // Stage-B digest — the moment geography resolves, Clef pre-reads the
+      // block-group/neighborhood fit for every comp while the enrichment
+      // ladder runs beside it. The batch is ALSO awaited (bounded) below:
+      // its geo-fit/twin-fit/sanity reads rank the paid enrich queue.
+      const digestBPromise = clefDigestsOn
+        ? startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B')
+            .catch(() => new Map<string, CompDigest>())
+        : null
+      if (digestBPromise) {
+        digestSubject.censusTract ??= subjectGeo.tract
+        digestSubject.censusBlockGroup ??= subjectGeo.blockGroup
+        digestBPromiseParts.push(digestBPromise)
+      }
       // ATTOM fallback for Census misses: geography-context ships censusTract
       // on the detail call anyway — spend one provider call on comps that
       // look competitive (dead comps don't merit it) so "unverified" can't
@@ -862,7 +975,41 @@ export class AnalysisJobDO {
         { name: 'neighborhood', comps: outside.filter(sameName) },
         { name: 'value_equivalent', comps: outside.filter((c) => !sameName(c) && isValueEquivalent(property, c)) },
       ]
+      // Clef-assisted enrich order — stage-B digest reads compose with the
+      // deterministic geo/distance/age rank before any provider spend. A
+      // slow or absent Clef keeps the deterministic order untouched.
+      let digestBMap: Map<string, CompDigest> | null = null
+      if (digestBPromise) {
+        digestBMap = await Promise.race([
+          digestBPromise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+        ])
+      }
+      const digestRankAdjust = (c: NormalizedComparable): number => {
+        const d = digestBMap?.get(String(c.id))
+        if (!d) return 0
+        if (d.priceSanity === 'data_error') return 10_000_000 // broken data sinks to the bottom
+        let adj = 0
+        if (d.priceSanity === 'suspicious') adj += 500_000
+        if (d.geoFit === 'distant') adj += 2_000_000
+        else if (d.geoFit === 'adjacent') adj += 400_000
+        else if (d.geoFit === 'block_group') adj -= 200_000
+        if (d.twinFit === 'poor') adj += 300_000
+        else if (d.twinFit === 'twin') adj -= 100_000
+        else if (d.twinFit === 'close') adj -= 50_000
+        return adj
+      }
+      const rankForEnrich = (list: NormalizedComparable[]) =>
+        list.slice().sort((a, b) =>
+          (enrichmentRankScore(property, a, nowMs) + digestRankAdjust(a))
+          - (enrichmentRankScore(property, b, nowMs) + digestRankAdjust(b))
+          || String(a.id).localeCompare(String(b.id)))
       const ENRICH_WAVE_SIZE = 6
+      // Sufficiency stop: enrich the ranked queue until the pool holds
+      // enough verified anchors (enriched comps carrying ARV evidence), not
+      // a fixed call count — thick markets spend less, scarce markets keep
+      // working to the spend backstop.
+      const MIN_VERIFIED_ANCHORS = 3
       const MAX_PAID_ENRICHMENTS = 25
       const enrichedById = new Map<string, NormalizedComparable>()
       let wonStep: number | null = null
@@ -891,7 +1038,7 @@ export class AnalysisJobDO {
           firstPasser ??= { step, scope: scope.name }
           // Enrich this step's passers closest-first, six at a time, and
           // check for ARV evidence after every wave.
-          let pending = rankEnrichmentCandidates(property, passers.filter((c) => !enrichedById.has(c.id)), nowMs)
+          let pending = rankForEnrich(passers.filter((c) => !enrichedById.has(c.id)))
           for (;;) {
             // Enrichment can reveal a hard-rule failure (style, foundation,
             // stories) the free data could not show — an enriched comp only
@@ -902,9 +1049,18 @@ export class AnalysisJobDO {
             const stillPassing = passers
               .map((c) => enrichedById.get(c.id) ?? c)
               .filter((c) => !evaluateComparable(property, c, stepFilters, []).shouldDisable)
-            const pocket = pocketPriceGroups(stillPassing, property)
-            const hit = stillPassing.some((c) => enrichedById.has(c.id) && arvEvidence(c, pocket) != null)
-            if (hit) { wonStep = step; wonScope = scope.name; break search }
+            // Anchors are counted across EVERYTHING enriched so far (any
+            // scope/step), judged against this step's pocket — an anchor
+            // found in a tighter scope still anchors the pool.
+            const poolForPocket = stillPassing.slice()
+            for (const c of enrichedById.values()) {
+              if (!poolForPocket.some((p) => p.id === c.id)) poolForPocket.push(c)
+            }
+            const pocket = pocketPriceGroups(poolForPocket, property)
+            const anchors = poolForPocket.filter((c) =>
+              enrichedById.has(c.id) && arvEvidence(c, pocket) != null)
+            if (anchors.length > 0 && wonStep == null) { wonStep = step; wonScope = scope.name }
+            if (anchors.length >= MIN_VERIFIED_ANCHORS) break search
             if (pending.length === 0 || enrichedById.size >= MAX_PAID_ENRICHMENTS) break
             const wave = pending.slice(0, Math.min(ENRICH_WAVE_SIZE, MAX_PAID_ENRICHMENTS - enrichedById.size))
             pending = pending.slice(wave.length)
@@ -948,6 +1104,18 @@ export class AnalysisJobDO {
       enrichedComps = await gateAndEnrich(rawComps)
       retrieval.candidatesEnriched = candidatesEnriched
       console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
+      // Stage-C digest — enriched block-matched comps get the full read
+      // (final band, bracket role, anchor strength) while valuation setup
+      // and evidence verification run beside it.
+      if (clefDigestsOn) {
+        const enriched = enrichedComps.filter((c) => c.isEnriched)
+        if (enriched.length > 0) {
+          digestCPromiseParts.push(
+            startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
+              .catch(() => new Map()),
+          )
+        }
+      }
     }
 
     // ── Expansion refetch ─────────────────────────────────────────────────────
@@ -1042,6 +1210,17 @@ export class AnalysisJobDO {
       if (isAttomMcp) {
         newCandidates = await gateAndEnrich(newCandidates)
         retrieval.candidatesEnriched = candidatesEnriched
+        // Stage-C digest for expansion-refetch enriched comps — same read
+        // as the initial pool's stage C.
+        if (clefDigestsOn) {
+          const enriched = newCandidates.filter((c) => c.isEnriched)
+          if (enriched.length > 0) {
+            digestCPromiseParts.push(
+              startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
+                .catch(() => new Map()),
+            )
+          }
+        }
       }
       const newById = new Map(newCandidates.map((c) => [c.id, c]))
       enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
@@ -1209,6 +1388,30 @@ export class AnalysisJobDO {
       // attom-mcp comp enrichment happens in the census gate above —
       // passers only, 1 provider call each.
       prefetchedPhotoBundle,
+      // Comp evidence started the moment comps landed — a Map promise the
+      // pipeline awaits instead of launching its own batch late.
+      prefetchedCompEvidence,
+      // Clef agent-assist digests — stage A (comps-landed), B (post-geocode
+      // inside the census gate), C (post-enrichment). Merged per comp here;
+      // the pipeline stamps each stage's answers as comp.clefDigest.{A,B,C}.
+      compDigests: clefDigestsOn
+        ? Promise.all([
+            Promise.all(digestAPromiseParts).catch(() => []),
+            Promise.all(digestBPromiseParts).catch(() => []),
+            Promise.all(digestCPromiseParts).catch(() => []),
+          ]).then(([a, b, c]) => {
+            const out = new Map<string, { A?: CompDigest; B?: CompDigest; C?: CompDigest }>()
+            const merge = (maps: Map<string, CompDigest>[], key: 'A' | 'B' | 'C') => {
+              for (const m of maps) for (const [id, d] of m) {
+                const e = out.get(id) ?? {}
+                e[key] = d
+                out.set(id, e)
+              }
+            }
+            merge(a, 'A'); merge(b, 'B'); merge(c, 'C')
+            return out
+          }).catch(() => null)
+        : null,
       skipCache: !!config.skipCache,
       // Clef comp-evidence resolves fire-and-forget — the callback patches
       // comp curb-appeal stamps into the persisted report whenever it lands.
@@ -1224,32 +1427,146 @@ export class AnalysisJobDO {
     let evalResult
     try {
       if (config.harness === 'agent') {
-        // Harness mode: freeze at the evidence-complete boundary and park
-        // until the Evaluation Agent posts its comp-selection verdict (or
-        // the deadline fires the deterministic fallback).
+        // Self-completing harness: phase 1 freezes the evidence bundle,
+        // then the Opus appraiser reviews the complete dataset and posts
+        // the final selection — verified by the deterministic gate, with
+        // bounded haiku clarify sub-calls and ≤2 gate-driven revisions.
+        // No awaiting_agent park; the job completes in-pipeline.
         const ctx = await performAnalysisPhase1({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
         if (ctx.photoBundlePromise) ctx.photoBundle = await ctx.photoBundlePromise
         delete ctx.photoBundlePromise
         await marketContextPromise.catch(() => { /* display-only */ })
-        ctx.steps.push({ step: 'agent_selection', label: 'agent_selection', status: 'skipped', detail: 'Awaiting Evaluation Agent verdict', durationMs: 0 })
-        this.jobState = {
-          ...(this.jobState ?? { jobId: config.jobId, userId: config.userId, status: 'processing' as const, pending: [], events: [], createdAt: Date.now() }),
-          status: 'awaiting_agent',
-          harnessContext: JSON.stringify(ctx),
-          harnessConfig: JSON.stringify(config),
-          resumeSeed: JSON.stringify({ isAttomMcp, ladderStep, ladderScope }),
-          harnessRounds: 0,
-          harnessDeadline: Date.now() + AnalysisJobDO.HARNESS_DEADLINE_MS,
+        const evidence = buildHarnessEvidence(ctx)
+        // Pocket desirability — its own haiku call (Serper gather →
+        // haiku verdict), riding the evidence bundle for Opus.
+        const pocketDesirability = await ratePocketDesirability(this.env, ctx.bundle.property).catch(() => null)
+        if (pocketDesirability) {
+          evidence.pocketDesirability = pocketDesirability
+          ctx.steps.push({
+            step: 'pocket_desirability', label: 'pocket_desirability',
+            status: 'completed',
+            detail: `haiku rated the pocket ${pocketDesirability.score}/10 — ${pocketDesirability.summary}`,
+            durationMs: pocketDesirability.durationMs,
+          })
         }
-        await this.persistence.write(this.jobState)
-        await this.state.storage.setAlarm(this.jobState.harnessDeadline!)
-        await this.pushEvent('harness_awaiting', { jobId: config.jobId, compCount: ctx.appraisalResult.comparables.length, deadlineMs: AnalysisJobDO.HARNESS_DEADLINE_MS })
-        console.log(`[AnalysisJobDO] harness: job ${config.jobId} parked awaiting agent (${ctx.appraisalResult.comparables.length} comps)`)
-        return
+        const appraiserStart = Date.now()
+        const appraisal = await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+        const appraiserMs = Date.now() - appraiserStart
+        const decision = appraisal?.selection ?? null
+        const appraiserNote = appraisal == null
+          ? 'appraiser unavailable — deterministic engine completes'
+          : decision
+            ? `Opus (${appraisal.model}) selected ${decision.selectedCompIds.length} comps, ARV $${decision.arv.toLocaleString()} — ${appraisal.attempts.length} attempt(s), ${appraisal.clarifications.length} clarification(s)`
+            : `Opus gate-rejected ${appraisal.attempts.length} attempt(s) — deterministic engine completes`
+        ctx.steps.push({
+          step: 'appraiser', label: 'appraiser',
+          status: decision ? 'completed' : 'skipped',
+          detail: appraiserNote,
+          durationMs: 0,
+        })
+        if (appraisal?.attempts.length) ctx.selectionAttempts = appraisal.attempts
+        if (appraisal?.debugNotes.length) {
+          for (const note of appraisal.debugNotes) {
+            ctx.steps.push({ step: 'gate_debug', label: 'gate_debug', status: 'completed', detail: note, durationMs: 0 })
+          }
+        }
+        void this.pushEvent('appraiser_done', {
+          jobId: config.jobId, model: appraisal?.model ?? null, accepted: decision != null,
+          attempts: appraisal?.attempts.length ?? 0, clarifications: appraisal?.clarifications.length ?? 0,
+        })
+        const phase2Start = Date.now()
+        evalResult = await performAnalysisPhase2(ctx, { jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
+          (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) },
+          decision ?? undefined)
+        const phase2Ms = Date.now() - phase2Start
+        // Per-run observability — the trace block persists on the report:
+        // what haiku classified, what Opus decided, what the gate returned.
+        if (evalResult?.response) {
+          const reno = evidence.renovationEvidence
+          const trace = {
+            haiku: {
+              subject: reno
+                ? {
+                    zoneGrades: reno.zoneGrades ?? null,
+                    pathGate: reno.pathGate ?? null,
+                    descriptionClaims: reno.descriptionClaims?.length ?? 0,
+                  }
+                : null,
+              pocketDesirability: pocketDesirability
+                ? {
+                    score: pocketDesirability.score,
+                    summary: pocketDesirability.summary,
+                    signals: pocketDesirability.signals,
+                    model: pocketDesirability.model,
+                    durationMs: pocketDesirability.durationMs,
+                  }
+                : null,
+              comps: Object.fromEntries(
+                Object.entries(ctx.compConditions ?? {}).map(([id, c]) => [id, {
+                  model: c.model ?? c.modelVersion ?? null,
+                  durationMs: c.durationMs ?? null,
+                  conditionLabel: c.conditionLabel ?? null,
+                  tier: c.tier ?? null,
+                  asIs: c.asIs ?? null,
+                  summary: c.summary ?? null,
+                  rulesCheck: c.rulesCheck ?? null,
+                }]),
+              ),
+            },
+            opus: {
+              model: appraisal?.model ?? null,
+              unavailable: appraisal?.unavailable ?? false,
+              clarifications: appraisal?.clarifications ?? [],
+              debugNotes: appraisal?.debugNotes ?? [],
+              attempts: (appraisal?.attempts ?? []).map((a) => ({
+                decision: a.decision,
+                at: a.at,
+                arv: a.selection.arv,
+                conf: a.selection.conf,
+                selectedCompIds: a.selection.selectedCompIds,
+                drivers: a.selection.drivers ?? null,
+                notes: a.selection.notes ?? null,
+                dataQuality: a.selection.dataQuality ?? null,
+              })),
+              selection: decision
+                ? { arv: decision.arv, conf: decision.conf, selectedCompIds: decision.selectedCompIds, drivers: decision.drivers ?? null, notes: decision.notes ?? null, dataQuality: decision.dataQuality ?? null }
+                : null,
+            },
+            gate: {
+              attempts: (appraisal?.attempts ?? []).map((a) => a.grade),
+              finalDecision: decision != null ? 'accepted' : appraisal?.unavailable ? 'appraiser_unavailable' : 'rejected_deterministic_fallback',
+            },
+            latency: { appraiserMs, phase2Ms },
+          }
+          const resp = evalResult.response as unknown as Record<string, unknown>
+          resp.harness = {
+            ...((resp.harness as Record<string, unknown> | undefined) ?? { source: 'agent' }),
+            // Haiku owns pocket desirability — its read is authoritative
+            // over any score a selection happened to carry.
+            ...(pocketDesirability ? { pocketScore: pocketDesirability.score } : {}),
+            trace,
+          }
+        }
+        // Trust floor — same rule the parked-resume path enforced: a weak
+        // gate grade (<0.7 composite) at low confidence routes to the hold
+        // list; every other accepted verdict is the explicit auto-clear.
+        const accepted = ctx.selectionAttempts?.at(-1)
+        const valuation = evalResult?.response?.valuation
+        if (accepted && valuation) {
+          const weak = accepted.grade.score < 0.7
+          const hold = weak && accepted.selection.conf === 'low'
+          valuation.trustFloor = hold ? 'hold' : 'clear'
+          if (hold) {
+            valuation.requiresHumanReview = true
+            valuation.recommendationReason =
+              `${valuation.recommendationReason ?? ''} — TRUST FLOOR: gate grade ${accepted.grade.score.toFixed(2)} + low confidence — routed to hold list`.trim()
+          }
+        }
+      } else {
+        evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
+          (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
       }
-      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
-        (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
     } catch (evalError) {
       const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
       const code = (evalError as { code?: string })?.code
@@ -1389,6 +1706,55 @@ export class AnalysisJobDO {
     })
   }
 
+  /** Expert consult — the agent's 2nd-opinion seam before spending a
+   *  revision. Opus reviews the proposed selection against the same
+   *  evidence + gate grade; read-only, never consumes the revision
+   *  budget, never persists. */
+  private async handleHarnessConsult(request: Request): Promise<Response> {
+    if (!this.jobState) this.jobState = await this.persistence.read()
+    const js = this.jobState
+    if (!js || js.status !== 'awaiting_agent' || !js.harnessContext) {
+      return Response.json(
+        { error: 'Job is not awaiting an agent selection', status: js?.status ?? 'not_found' },
+        { status: 409 },
+      )
+    }
+    const raw = await request.text().catch(() => '')
+    if (raw.length > 256 * 1024) {
+      return Response.json({ error: 'Selection body too large' }, { status: 413 })
+    }
+    const body = JSON.parse(raw) as { selection?: AgentSelection } | null
+    const sel = body?.selection
+    if (!sel) {
+      return Response.json({ error: 'Body must be { selection: AgentSelection }' }, { status: 400 })
+    }
+    const ctx = JSON.parse(js.harnessContext) as Phase1Context
+    const fails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
+    const evidence = buildHarnessEvidence(ctx)
+    const grade = gradeVerdict(evidence, sel)
+    const consult = fails.length === 0
+      ? await consultOnSelection(this.env, {
+          evidence,
+          selection: sel,
+          grade,
+          priorAttempts: js.harnessAttempts,
+        }).catch(() => null)
+      : null
+    return Response.json({
+      jobId: js.jobId,
+      validationFails: fails,
+      gateGrade: {
+        score: grade.score,
+        checkFails: grade.gateFails,
+        failures: grade.failures,
+        warnings: grade.warnings,
+        feedback: grade.gateFeedback,
+      },
+      consult: consult ?? null,
+      consultUnavailable: consult == null && fails.length === 0,
+    })
+  }
+
   private async handleHarnessSelection(request: Request): Promise<Response> {
     if (!this.jobState) this.jobState = await this.persistence.read()
     const js = this.jobState
@@ -1442,7 +1808,24 @@ export class AnalysisJobDO {
           bundle: ctx.bundle,
           enrichComparables: (comps: NormalizedComparable[]) =>
             propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
-        })
+        },
+        // Sale-date fill for undated in-pocket comps — MLS sale history via
+        // the listing-details fetch (best-effort; an undated comp ATTOM
+        // included stays usable either way, in disclosure states or not).
+        this.env.FIRECRAWL_API_KEY && (this.env.ANTHROPIC_API_KEY || this.env.OPENROUTER_API_KEY)
+          ? async (comp: NormalizedComparable) => {
+              const r = await fetchRedfinPropertyDetails(this.env, {
+                propertyId: comp.id, address: comp.address,
+                city: comp.city, state: comp.state, zipCode: comp.zipCode,
+              }, this.env.API_CACHE).catch(() => null)
+              const sold = (r?.details?.saleHistory ?? [])
+                .filter((h) => /sold/i.test(h.event ?? '') && h.date)
+                .map((h) => new Date(h.date!).getTime())
+                .filter((t) => Number.isFinite(t))
+                .sort((a, b) => b - a)[0]
+              return sold != null ? { saleDate: new Date(sold).toISOString().slice(0, 10) } : null
+            }
+          : undefined)
       } else {
         // Time-widen: same radius and filters as the initial fetch,
         // monthsBack stepped +12 per round (12→24→36…). New candidates go
@@ -1488,6 +1871,67 @@ export class AnalysisJobDO {
     if (fails.length) {
       return Response.json({ error: 'Selection rejected', fails }, { status: 422 })
     }
+
+    // Load-bearing revision gate — principle-first (locked spec): ANY
+    // verdict component that contradicts evidence the pipeline already
+    // verified is intercepted BEFORE pricing and handed back with the
+    // specific violation named. That covers every hard check fail (d1
+    // off-pocket pricing comps, d2 outlier picks, d4
+    // as-is drivers, d5 coherence-trimmed picks, d7 ARV outside the
+    // evidence envelope) AND renovation scope violations the
+    // pricer would otherwise silently clamp or auto-append. Warns never
+    // gate. Revisions are bounded — after REVISION_BUDGET rejections the
+    // next post is accepted_final and the deadline fallback still holds.
+    const attempts = js.harnessAttempts ?? []
+    const evidence = buildHarnessEvidence(ctx)
+    const gateGrade = gradeVerdict(evidence, sel)
+    const checkFails = gateGrade.gateFails
+    const renoViolations: string[] = []
+    if (sel.renovation && evidence.renovationEvidence) {
+      const dry = priceAgentRenovation(sel.renovation, evidence.renovationEvidence)
+      for (const f of dry.flags) {
+        if (/auto_added|underbudget|overbudget|overcharge|cost_clamped/.test(f)) {
+          renoViolations.push(f)
+        }
+      }
+    }
+    const REVISION_BUDGET = 2
+    if ((checkFails.length > 0 || renoViolations.length > 0) && attempts.length < REVISION_BUDGET) {
+      const feedback = [
+        ...gateGrade.gateFeedback,
+        ...renoViolations.map((f) => `reno: ${f} — scope contradicts verified evidence; repost corrected line items`),
+      ]
+      attempts.push({ selection: sel, grade: gateGrade, decision: 'rejected', at: new Date().toISOString() })
+      js.harnessAttempts = attempts
+      this.jobState = js
+      await this.persistence.write(js)
+      await this.pushEvent('harness_gate_rejected', {
+        jobId: js.jobId,
+        checkFails,
+        renoViolations,
+        failures: gateGrade.failures,
+      })
+      return Response.json({
+        error: 'selection_rejected_by_gate',
+        revisionAllowed: true,
+        attempt: attempts.length,
+        checkFails,
+        renoViolations,
+        failures: gateGrade.failures,
+        feedback,
+      }, { status: 422 })
+    }
+    attempts.push({
+      selection: sel,
+      grade: gateGrade,
+      decision: attempts.length > 0 ? 'accepted_final' : 'accepted',
+      at: new Date().toISOString(),
+    })
+    js.harnessAttempts = attempts
+    ctx.selectionAttempts = attempts
+    js.harnessContext = JSON.stringify(ctx)
+    this.jobState = js
+    await this.persistence.write(js)
 
     // Resume the deterministic tail in the background — identical finish to
     // any completed run. The eval-active marker clears when the run ends.
@@ -1617,6 +2061,23 @@ export class AnalysisJobDO {
       await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: code ?? 'EVALUATION_ERROR', errorMessage: msg, compCount: bundle.comparables?.length })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
+    }
+
+    // Trust floor — a verdict the gate graded weak (<0.7 composite) posted
+    // at low confidence is honest about what it doesn't know, so it routes
+    // to the hold list (human review) instead of auto-clearing to offers.
+    // 'clear' on every other accepted verdict is the explicit auto-clear.
+    const accepted = ctx.selectionAttempts?.at(-1)
+    const valuation = evalResult.response.valuation
+    if (accepted && valuation) {
+      const weak = accepted.grade.score < 0.7
+      const hold = weak && accepted.selection.conf === 'low'
+      valuation.trustFloor = hold ? 'hold' : 'clear'
+      if (hold) {
+        valuation.requiresHumanReview = true
+        valuation.recommendationReason =
+          `${valuation.recommendationReason ?? ''} — TRUST FLOOR: gate grade ${accepted.grade.score.toFixed(2)} + low confidence — routed to hold list`.trim()
+      }
     }
     await this.finishEvaluation(config, evalResult, ctx.bundle.property, evalStart, startTime)
   }

@@ -96,6 +96,14 @@ export interface Env {
   OPENAI_API_KEY?: string
   OPENROUTER_MODEL?: string // Default model for general LLM tasks
   VISION_MODEL?: string // Vision-only override (subject reno tier) — defaults to OPENROUTER_MODEL
+  // ─── Reasoning lane (Anthropic direct — replaces gpt-6-luna) ───
+  ANTHROPIC_API_KEY?: string
+  REASONING_PROVIDER?: string // 'anthropic' | 'openrouter' | unset → anthropic when ANTHROPIC_API_KEY set
+  REASONING_MODEL?: string // default 'claude-haiku-5-5'
+  // ─── Condition-reader lane ───
+  /** 'decisions' routes Clef reads through the OpenAI Decisions API; unset → Workers AI Clef */
+  CONDITION_READER?: string
+  DECISIONS_MODEL?: string // default 'gpt-6-luna'
   /** Model for comp selection — stronger reasoning (e.g., 'anthropic/claude-sonnet-4', 'google/gemini-2.5-pro-preview') */
   COMP_SELECTION_MODEL?: string
   /** Model for market context web search — fast/cheap (e.g., 'google/gemini-2.0-flash-001') */
@@ -113,8 +121,14 @@ export interface Env {
   // ─── Firecrawl ─────────────────────────────────────────────────────────────────
   // Firecrawl API for web scraping (Zillow photos)
   FIRECRAWL_API_KEY?: string
-  /** Scrapfly — listing-URL discovery fallback for Zillow fetch misses */
+  /** Scrapfly — listing fetch engine (Zillow/Redfin/Realtor) + URL discovery */
   SCRAPFLY_API_KEY?: string
+  /** Scrapfly scrape endpoint — defaults to https://api.scrapfly.io/scrape */
+  SCRAPFLY_URL?: string
+  /** Serper — Google site-search for listing URL resolution */
+  SERPER_API_KEY?: string
+  /** Google Maps Platform — Street View Static curb-appeal fallback */
+  GOOGLE_MAPS_KEY?: string
   /** Geocodio — metered census-geography lookups (primary path; free 2.5k/day) */
   GEOCODIO_API_KEY?: string
 

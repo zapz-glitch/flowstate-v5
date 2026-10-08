@@ -28,6 +28,10 @@ import {
   createFirecrawlZillowFetcher,
   generateZillowUrl as generateZillowUrlFromFirecrawl,
 } from './firecrawl-fetcher'
+import {
+  ScrapflyZillowFetcher,
+  createScrapflyZillowFetcher,
+} from './scrapfly-fetcher'
 import type { ZillowPropertyIdentifier } from './types'
 
 // Re-export types and utilities
@@ -38,14 +42,15 @@ export { FirecrawlZillowFetcher, createFirecrawlZillowFetcher } from './firecraw
 // Re-export generateZillowUrl (use Firecrawl version as primary)
 export { generateZillowUrlFromFirecrawl as generateZillowUrl }
 
-// Type alias for the fetcher (supports both)
-export type ZillowFetcher = FirecrawlZillowFetcher | GeminiZillowFetcher
+// Type alias for the fetcher (supports all three)
+export type ZillowFetcher = ScrapflyZillowFetcher | FirecrawlZillowFetcher | GeminiZillowFetcher
 
 /**
  * Check if Zillow fetching is available (for Workers)
  * Requires Firecrawl API key. OpenRouter is optional (fallback for LLM parsing).
  */
 export function isZillowFetcherAvailable(env: Env): boolean {
+  if (env.SCRAPFLY_API_KEY) return true
   if (env.FIRECRAWL_API_KEY) return true
   return false
 }
@@ -55,12 +60,12 @@ export function isZillowFetcherAvailable(env: Env): boolean {
  * Uses Firecrawl v2 JSON extraction (primary) + OpenRouter LLM (fallback)
  */
 export function createZillowFetcher(env: Env): ZillowFetcher | null {
+  // Owner-specified chain — Firecrawl only:
+  //   Address → /v1/search → URL → /v1/scrape → photos+text → Clef.
+  // No Scrapfly, no Serper, no Stingray in the fetch path.
   if (env.FIRECRAWL_API_KEY) {
-    return createFirecrawlZillowFetcher({
-      apiKey: env.FIRECRAWL_API_KEY,
-      openrouterApiKey: env.OPENROUTER_API_KEY,  // Optional fallback
-      openrouterModel: env.OPENROUTER_MODEL,
-      scrapflyApiKey: env.SCRAPFLY_API_KEY,
+    return createScrapflyZillowFetcher({
+      firecrawlApiKey: env.FIRECRAWL_API_KEY,
       cache: env.API_CACHE,
       cacheTtl: 30 * 24 * 60 * 60,
     })
@@ -76,7 +81,7 @@ export const createZillowFetcherFromEnv = createZillowFetcher
  * Get the provider name being used
  */
 export function getZillowFetcherProvider(env: Env): string | null {
-  if (env.FIRECRAWL_API_KEY) return env.OPENROUTER_API_KEY ? 'firecrawl-json+openrouter-fallback' : 'firecrawl-json'
+  if (env.FIRECRAWL_API_KEY) return 'firecrawl-search+scrape'
   return null
 }
 

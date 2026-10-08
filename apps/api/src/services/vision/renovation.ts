@@ -16,7 +16,8 @@
  *   continues without an invented level
  */
 
-import { createLLMProvider } from '../llm'
+import { createReasoningProvider, createSpecialistProvider, isReasoningProviderAvailable } from '../llm'
+import { decisionsRun } from '../decisions'
 import { fetchImageAsBase64, type FetchedImage } from '../llm/image-utils'
 import { REHAB_LEVELS } from '../valuation/types'
 
@@ -149,6 +150,16 @@ export interface RenovationEnv {
   VISION_MODEL?: string
   /** Reasoning effort for the vision call (low|medium|high|xhigh|max) — default medium. */
   VISION_REASONING_EFFORT?: string
+  /** Anthropic direct — the reasoning lane (tier verdicts) when configured. */
+  ANTHROPIC_API_KEY?: string
+  REASONING_PROVIDER?: string
+  REASONING_MODEL?: string
+  /** Workers AI binding — Clef is the subject's primary reader. */
+  AI?: import('../../types').Env['AI']
+  /** 'decisions' routes subject reads through the OpenAI Decisions API. */
+  CONDITION_READER?: string
+  OPENAI_API_KEY?: string
+  DECISIONS_MODEL?: string
 }
 
 const ROOM_CONDITIONS = ['excellent', 'good', 'dated', 'poor', 'failed', 'not_visible']
@@ -189,8 +200,379 @@ const RENOVATION_SCHEMA = {
 }
 
 const MIN_UNIQUE_PHOTOS = 1
-const MAX_PHOTOS = 12
+const MAX_PHOTOS = 30
+// The LLM fallback reads in one call — cap its image payload. Clef reads
+// every photo via 4-image chunks instead, so nothing is skipped.
+const LLM_MAX_IMAGES = 12
 const LOW_CONFIDENCE = 40
+/** Clef's image budget is 4 — the comp lane uses the same cap. */
+const CLEF_MAX_PHOTOS = 4
+
+// ─── Clef subject read ──────────────────────────────────────────────────────
+// The subject reads through the same chain as comps: Clef (Workers AI)
+// primary, Luna (gpt-6-luna via OpenRouter) fallback. Clef answers a level
+// choice + a curb-appeal choice — level granularity only, so room
+// conditions stay 'NA' rather than invented at photo-4 depth.
+
+interface ClefAnswerMap {
+  renovation_level?: { choice?: string; probabilities?: Record<string, number> }
+  curb_appeal?: { choice?: string; probabilities?: Record<string, number> }
+  kitchen_condition?: { choice?: string; probabilities?: Record<string, number> }
+  bathroom_condition?: { choice?: string; probabilities?: Record<string, number> }
+  flooring_condition?: { choice?: string; probabilities?: Record<string, number> }
+  wall_ceiling_condition?: { choice?: string; probabilities?: Record<string, number> }
+  exterior_condition?: { choice?: string; probabilities?: Record<string, number> }
+  major_system_concern?: { noul?: number; probability?: number }
+  structural_concern?: { noul?: number; probability?: number }
+}
+
+const ZONE_CRITERIA: Record<string, Record<string, string>> = {
+  kitchen_condition: {
+    excellent: 'recently remodeled — new cabinets, counters, appliances',
+    good: 'updated and clean, no obvious work needed',
+    dated: 'functional but visibly dated finishes',
+    poor: 'heavy wear or damage — needs renovation',
+    failed: 'unusable, gutted, or stripped',
+    not_visible: 'no kitchen visible in these photos',
+  },
+  bathroom_condition: {
+    excellent: 'recently remodeled — new vanity, tile, fixtures',
+    good: 'updated and clean',
+    dated: 'functional but visibly dated finishes',
+    poor: 'heavy wear or damage — needs renovation',
+    failed: 'unusable, gutted, or stripped',
+    not_visible: 'no bathroom visible in these photos',
+  },
+  flooring_condition: {
+    excellent: 'new or like-new flooring throughout visible areas',
+    good: 'clean flooring, minor wear',
+    dated: 'functional but dated — old carpet, worn vinyl, dated tile',
+    poor: 'damaged, stained, or heavily worn flooring',
+    failed: 'missing, stripped, or subfloor exposed',
+    not_visible: 'no interior flooring visible in these photos',
+  },
+  wall_ceiling_condition: {
+    excellent: 'fresh paint/finishes, no visible damage',
+    good: 'clean walls and ceilings, minor wear',
+    dated: 'dated finishes, wallpaper, or old paint',
+    poor: 'damage, staining, cracks, or heavy wear',
+    failed: 'open studs, missing drywall, water damage',
+    not_visible: 'no interior walls/ceilings visible in these photos',
+  },
+  exterior_condition: {
+    excellent: 'new roof/siding, fresh exterior finishes',
+    good: 'maintained exterior, minor wear',
+    dated: 'dated siding/roof/paint, functional',
+    poor: 'visible exterior damage or deferred maintenance',
+    failed: 'roof failure, siding missing, structural exterior damage',
+    not_visible: 'no exterior visible in these photos',
+  },
+}
+
+/**
+ * Clef's role is evidence collection, not the verdict — it reads every
+ * photo in 4-image chunks (as many calls as the photo set needs) and the
+ * raw per-chunk answers go to Luna as the evidence block. The merged
+ * assessment below is the fallback when Luna can't be reached.
+ */
+interface ClefChunkRead {
+  answers: ClefAnswerMap[]
+  chunksRead: number
+}
+
+async function runClefChunkReads(
+  env: RenovationEnv,
+  live: FetchedImage[],
+  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
+): Promise<ClefChunkRead> {
+  const ai = env.AI
+  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  if (!ai && !useDecisions) return { answers: [], chunksRead: 0 }
+  const model = '@cf/cloudflare/clef-flash'
+  const questions = {
+    renovation_level: {
+      type: 'choice',
+      instructions:
+        'Examine ALL photos together as one property and choose the single ' +
+        'renovation level that best describes the work required across the ' +
+        'whole property. Weight majority-condition and the most expensive ' +
+        'required work — a dated kitchen alone is not Heavy Rehab; partial ' +
+        'demo is not Full Gut.',
+      criteria: Object.fromEntries(RENOVATION_LEVEL_DEFINITIONS.map((d) => [d.name, d.criteria])),
+    },
+    curb_appeal: {
+      type: 'choice',
+      instructions: 'Describe the property\'s visible exterior/curb condition.',
+      criteria: {
+        renovated: 'modern finishes, updated, move-in ready',
+        dated: 'livable but visibly dated finishes',
+        distressed: 'obvious disrepair, damage, heavy wear',
+        unknown: 'photos insufficient to judge',
+      },
+    },
+    // Zone reads — each 4-photo chunk answers every zone; chunks that don't
+    // show a zone answer not_visible and drop out of the merge, so the
+    // verdict per zone comes only from chunks that actually saw it.
+    kitchen_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of any kitchen visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.kitchen_condition,
+    },
+    bathroom_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of any bathroom visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.bathroom_condition,
+    },
+    flooring_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of interior flooring visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.flooring_condition,
+    },
+    wall_ceiling_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of interior walls and ceilings visible in THESE photos. If none are visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.wall_ceiling_condition,
+    },
+    exterior_condition: {
+      type: 'choice',
+      instructions: 'Rate the condition of the exterior — roof, siding, paint, yard — visible in THESE photos. If none is visible, answer not_visible.',
+      criteria: ZONE_CRITERIA.exterior_condition,
+    },
+    major_system_concern: {
+      type: 'noul',
+      instructions:
+        'Do THESE photos show a visible major-system concern — aged or rusty ' +
+        'HVAC unit, water heater corrosion, old/damaged electrical panel, ' +
+        'knob-and-tube or exposed wiring, plumbing leaks, missing fixtures?',
+    },
+    structural_concern: {
+      type: 'noul',
+      instructions:
+        'Do THESE photos show structural distress — foundation cracks, roof ' +
+        'sag, wall bowing, floor slope, fire or severe water damage?',
+    },
+  }
+  // One Clef call per photo chunk — Clef's image budget is 4, so a
+  // 12-photo subject reads through 3 calls. Level/curb probabilities are
+  // averaged across chunks into one verdict.
+  const chunks: FetchedImage[][] = []
+  for (let i = 0; i < live.length; i += CLEF_MAX_PHOTOS) chunks.push(live.slice(i, i + CLEF_MAX_PHOTOS))
+  const state = {
+    subject: 'Subject-property renovation assessment for a fix-and-flip appraisal.',
+    property: {
+      address: propertyContext.address ?? null,
+      squareFeet: propertyContext.squareFeet ?? null,
+      yearBuilt: propertyContext.yearBuilt ?? null,
+    },
+  }
+  // Decisions lane — one request for ALL photos (≤128) instead of per-chunk calls.
+  if (useDecisions) {
+    const res = await decisionsRun(env, {
+      state,
+      questions: questions as Parameters<typeof decisionsRun>[1]['questions'],
+      images: live.slice(0, 128).map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
+    }).catch(() => null)
+    const answers = res?.answers ? [res.answers as ClefAnswerMap] : []
+    return { answers, chunksRead: chunks.length }
+  }
+  const calls = await Promise.all(chunks.map((chunk) =>
+    ai!.run(model, {
+      state,
+      questions,
+      images: chunk.map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
+    }).then((r) => r as { answers?: ClefAnswerMap }).catch(() => null),
+  ))
+  const answers = calls.map((c) => c?.answers).filter((a): a is ClefAnswerMap => !!a)
+  return { answers, chunksRead: chunks.length }
+}
+
+/** Serialize the Clef chunk reads into the evidence block Luna reasons over. */
+function clefEvidenceBlock(clef: ClefChunkRead): string {
+  const zoneKeys = [
+    'kitchen_condition', 'bathroom_condition', 'flooring_condition',
+    'wall_ceiling_condition', 'exterior_condition',
+  ] as const
+  const perChunk = clef.answers.map((a, i) => {
+    const zones: Record<string, unknown> = {}
+    for (const zk of zoneKeys) {
+      const q = a[zk]
+      if (q?.choice) zones[zk] = { choice: q.choice, probability: q.probabilities?.[q.choice] ?? null }
+    }
+    return {
+      chunk: i + 1,
+      renovation_level: a.renovation_level?.choice ?? null,
+      renovation_level_probabilities: a.renovation_level?.probabilities ?? null,
+      curb_appeal: a.curb_appeal?.choice ?? null,
+      zones,
+      major_system_concern_probability: a.major_system_concern?.noul ?? a.major_system_concern?.probability ?? null,
+      structural_concern_probability: a.structural_concern?.noul ?? a.structural_concern?.probability ?? null,
+    }
+  })
+  return JSON.stringify({
+    photo_chunks_read: clef.chunksRead,
+    chunks_answered: clef.answers.length,
+    per_chunk_reads: perChunk,
+  }, null, 2)
+}
+
+function mergedClefAssessment(
+  answers: ClefAnswerMap[],
+  live: FetchedImage[],
+): RenovationAssessment | null {
+  if (!answers.length) return null
+
+  // Merge chunk probabilities — majority vote weighted by confidence.
+  const mergeProbs = (key: 'renovation_level' | 'curb_appeal') => {
+    const agg = new Map<string, { sum: number; n: number }>()
+    for (const a of answers) {
+      const probs = a[key]?.probabilities
+      if (!probs) continue
+      for (const [k, v] of Object.entries(probs)) {
+        const e = agg.get(k) ?? { sum: 0, n: 0 }
+        e.sum += v; e.n += 1; agg.set(k, e)
+      }
+    }
+    let best: string | null = null; let bestAvg = 0
+    for (const [k, { sum, n }] of agg) {
+      const avg = sum / n
+      if (avg > bestAvg) { bestAvg = avg; best = k }
+    }
+    return { pick: best, prob: bestAvg }
+  }
+
+  const { pick, prob: pickProb } = mergeProbs('renovation_level')
+  const levelIndex = renovationLevelToIndex(pick)
+  if (levelIndex === null) return null
+  const confidence = Math.round(Math.min(1, Math.max(0, pickProb)) * 100)
+  const { pick: curbPick, prob: curbProb } = mergeProbs('curb_appeal')
+
+  // Zone merge — a zone verdict comes only from chunks that saw it:
+  // not_visible picks drop out; remaining picks majority-vote weighted by
+  // their probability. No chunk saw the zone → 'not_visible' (never NA —
+  // the gate counts real reads, and a zone no camera reached is a data
+  // gap, not an unread zone).
+  const zoneKeys = [
+    'kitchen_condition', 'bathroom_condition', 'flooring_condition',
+    'wall_ceiling_condition', 'exterior_condition',
+  ] as const
+  const zones: Record<(typeof zoneKeys)[number], string> = {
+    kitchen_condition: 'not_visible', bathroom_condition: 'not_visible',
+    flooring_condition: 'not_visible', wall_ceiling_condition: 'not_visible',
+    exterior_condition: 'not_visible',
+  }
+  for (const zk of zoneKeys) {
+    const votes = new Map<string, number>()
+    for (const a of answers) {
+      const q = a[zk]
+      const ch = q?.choice
+      if (!ch || ch === 'not_visible') continue
+      const p = q?.probabilities?.[ch] ?? 0.5
+      votes.set(ch, (votes.get(ch) ?? 0) + p)
+    }
+    let bestZone: string | null = null
+    let bestV = 0
+    for (const [z, v] of votes) if (v > bestV) { bestV = v; bestZone = z }
+    if (bestZone) zones[zk] = bestZone
+  }
+  const noulAvg = (key: 'major_system_concern' | 'structural_concern') => {
+    const vals = answers
+      .map((a) => a[key]?.noul ?? a[key]?.probability)
+      .filter((v): v is number => typeof v === 'number')
+    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
+  }
+  const systemConcerns = noulAvg('major_system_concern') >= 0.5
+    ? ['Clef zone read: visible major-system concern in photo set']
+    : []
+  const structuralConcerns = noulAvg('structural_concern') >= 0.5
+    ? ['Clef zone read: possible structural distress in photo set']
+    : []
+
+  return {
+    status: confidence !== null && confidence < LOW_CONFIDENCE ? 'needs_review' : 'ok',
+    renovationLevelIndex: levelIndex,
+    renovationLevel: REHAB_LEVELS[levelIndex],
+    confidence,
+    photosExamined: live.length,
+    majorObservations: [],
+    kitchenCondition: zones.kitchen_condition,
+    bathroomCondition: zones.bathroom_condition,
+    flooringCondition: zones.flooring_condition,
+    wallCeilingCondition: zones.wall_ceiling_condition,
+    exteriorCondition: zones.exterior_condition,
+    visibleMajorSystemConcerns: systemConcerns,
+    structuralConcerns,
+    rationale: null,
+    evidenceForClassification: [],
+    evidenceAgainstMoreSevereLevel: [],
+    evidenceAgainstLessSevereLevel: [],
+    limitations: [`Clef chunked zone read — ${answers.length} call(s), zones not photographed report not_visible`],
+    provider: 'workers-ai',
+    model: 'clef-flash',
+    curbAppeal: curbPick && curbPick !== 'unknown'
+      ? {
+          condition: curbPick as CurbAppealCheck['condition'],
+          source: 'vision' as const,
+          confidence: Math.round(curbProb * 100),
+          summary: null,
+          photosExamined: live.length,
+        }
+      : null,
+  }
+}
+
+const LUNA_EVIDENCE_PREAMBLE = `You are the final renovation assessor for a fix-and-flip investor.
+
+A fast vision evidence reader has already examined EVERY listing photo of this property in 4-image chunks and produced the structured reads below — zone conditions per chunk, per-chunk renovation-level votes with probabilities, and major-system/structural concern probabilities. The photos themselves are also attached where the image budget allowed (the evidence covers photos you may not see).
+
+Your job is to reason over that evidence and make the FINAL call on the property's condition tier. The evidence reader's level votes are input, not verdict — you may land on a different level when the zone evidence supports it (e.g. votes split across levels, or a single chunk's 'failed' zone read that changes the whole-property call). Explain any divergence in the rationale.
+
+CLEF CHUNKED ZONE EVIDENCE:
+`
+
+/**
+ * Luna's verdict call — reasons over the Clef chunk evidence (plus the
+ * photos that fit the image budget) and returns the final tier call.
+ * Returns null when the provider call can't produce a parseable verdict;
+ * the caller then ships the merged Clef assessment instead.
+ */
+async function assessViaLunaEvidence(
+  provider: { name: string; model: string; execute: (req: any) => Promise<any> },
+  clef: ClefChunkRead,
+  live: FetchedImage[],
+  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
+): Promise<RenovationAssessment | null> {
+  let prompt = ''
+  if (propertyContext.address) prompt += `Address: ${propertyContext.address}\n`
+  if (propertyContext.squareFeet) prompt += `Square Feet: ${propertyContext.squareFeet}\n`
+  if (propertyContext.yearBuilt) prompt += `Year Built: ${propertyContext.yearBuilt}\n`
+  if (propertyContext.description) prompt += `Listing description: ${propertyContext.description.slice(0, 3000)}\n`
+  prompt += '\n'
+  prompt += LUNA_EVIDENCE_PREAMBLE + clefEvidenceBlock(clef) + '\n\n' + RENOVATION_PROMPT
+
+  const imagePayload = live.slice(0, LLM_MAX_IMAGES).map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
+
+  let parsed: Record<string, unknown> | null = null
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    const result = await provider.execute({
+      prompt,
+      images: imagePayload,
+      responseFormat: 'json',
+      jsonSchema: { name: 'renovation_assessment', schema: RENOVATION_SCHEMA },
+      reasoning: { enabled: true, effort: 'medium' as const },
+      maxTokens: 8192,
+    }).catch(() => null)
+    if (!result?.success || !result.data?.content) continue
+    parsed = parseVisionJson(result.data.content)
+  }
+  if (!parsed) return null
+
+  const assessment = assessmentFromParsed(parsed, provider.name, provider.model, live.length)
+  assessment.limitations = [
+    ...assessment.limitations,
+    `Tier call reasoned over Clef chunk evidence — ${clef.chunksRead} chunk read(s) covering ${live.length} photo(s)`,
+  ]
+  return assessment
+}
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
 
@@ -274,7 +656,7 @@ export function unavailableAssessment(overrides?: Partial<RenovationAssessment>)
 export async function assessRenovationFromPhotos(
   env: RenovationEnv,
   photoUrls: string[],
-  propertyContext?: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
+  propertyContext?: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
   providerOverride?: { name: string; model: string; execute: (req: any) => Promise<any> }
 ): Promise<RenovationAssessment> {
   // Interior condition is 'NA' whenever it cannot be verified — never null,
@@ -293,7 +675,7 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  if (!env.OPENROUTER_API_KEY && !providerOverride) {
+  if (!isReasoningProviderAvailable(env) && !env.AI && !providerOverride) {
     return {
       ...base,
       status: 'unavailable',
@@ -303,13 +685,14 @@ export async function assessRenovationFromPhotos(
     }
   }
 
+  // Haiku is the subject classifier — it replaced the decision/classifier
+  // models for subject photos + description tier assignment, with no
+  // decision authority beyond producing the condition evidence. Sonnet is
+  // the fallback when the reasoning lane is unavailable.
   const provider =
     providerOverride ??
-    createLLMProvider({
-      provider: 'openrouter',
-      apiKey: env.OPENROUTER_API_KEY as string,
-      model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
-    })
+    createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'openai/gpt-6-luna') ??
+    createSpecialistProvider(env, 'routine')
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
 
@@ -329,17 +712,40 @@ export async function assessRenovationFromPhotos(
     }
   }
 
+  // Haiku reads the subject photos + description directly — the Clef
+  // chunk layer is skipped entirely when a reasoning provider is bound
+  // (haiku sees the images itself rather than reasoning over Clef votes).
+  // Clef remains only as the fallback reader when no reasoning provider
+  // is configured.
+  if (!provider) {
+    const clef = await runClefChunkReads(env, live, propertyContext ?? {})
+      .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
+    const mergedClef = mergedClefAssessment(clef.answers, live)
+    if (mergedClef) return mergedClef
+  }
+
+  if (!provider) {
+    return {
+      ...base,
+      status: 'unavailable',
+      photosExamined: live.length,
+      error: 'No reasoning provider configured',
+      limitations: ['Reasoning provider not configured'],
+    }
+  }
+
   let prompt = ''
   if (propertyContext) {
     prompt = 'Property context:\n'
     if (propertyContext.address) prompt += `Address: ${propertyContext.address}\n`
     if (propertyContext.squareFeet) prompt += `Square Feet: ${propertyContext.squareFeet}\n`
     if (propertyContext.yearBuilt) prompt += `Year Built: ${propertyContext.yearBuilt}\n`
+  if (propertyContext.description) prompt += `Listing description: ${propertyContext.description.slice(0, 3000)}\n`
     prompt += '\n'
   }
   prompt += RENOVATION_PROMPT
 
-  const imagePayload = live.map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
+  const imagePayload = live.slice(0, LLM_MAX_IMAGES).map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
 
   // Retry once on unparseable output — LLM formatting is nondeterministic
   let parsed: Record<string, unknown> | null = null
@@ -383,6 +789,19 @@ export async function assessRenovationFromPhotos(
     }
   }
 
+  return assessmentFromParsed(parsed, provider.name, provider.model, photos.length)
+}
+
+/**
+ * Map the strict-schema JSON (either from the photo-reading call or the
+ * Clef-evidence reasoning call) into a RenovationAssessment.
+ */
+function assessmentFromParsed(
+  parsed: Record<string, unknown>,
+  providerName: string,
+  modelName: string,
+  photosExamined: number,
+): RenovationAssessment {
   const levelIndex = renovationLevelToIndex(parsed.renovation_level as string)
   const confidence =
     typeof parsed.confidence === 'number'
@@ -403,7 +822,7 @@ export async function assessRenovationFromPhotos(
     renovationLevelIndex: levelIndex,
     renovationLevel: levelIndex !== null ? REHAB_LEVELS[levelIndex] : 'NA',
     confidence,
-    photosExamined: photos.length,
+    photosExamined,
     majorObservations: list(parsed.major_observations),
     kitchenCondition: str(parsed.kitchen_condition),
     bathroomCondition: str(parsed.bathroom_condition),
@@ -417,15 +836,15 @@ export async function assessRenovationFromPhotos(
     evidenceAgainstMoreSevereLevel: list(parsed.evidence_against_more_severe_level),
     evidenceAgainstLessSevereLevel: list(parsed.evidence_against_less_severe_level),
     limitations: list(parsed.limitations),
-    provider: provider.name,
-    model: provider.model,
+    provider: providerName,
+    model: modelName,
     curbAppeal: (() => {
       const raw = String(parsed.curb_appeal_condition ?? '').toLowerCase()
       const condition = raw === 'renovated' || raw === 'dated' || raw === 'distressed' ? raw : 'unknown'
       const caConf = typeof parsed.curb_appeal_confidence === 'number' ? Math.min(100, Math.max(0, parsed.curb_appeal_confidence)) : null
       const summary = typeof parsed.curb_appeal_summary === 'string' ? parsed.curb_appeal_summary : null
       return condition !== 'unknown' || summary
-        ? { condition: condition as CurbAppealCheck['condition'], source: 'vision' as const, confidence: caConf, summary, photosExamined: photos.length }
+        ? { condition: condition as CurbAppealCheck['condition'], source: 'vision' as const, confidence: caConf, summary, photosExamined }
         : null
     })(),
   }
@@ -468,6 +887,18 @@ Never guess a condition the photos don't show — use "unknown".`
 const CURB_APPEAL_PHOTOS = 4
 const CURB_APPEAL_MIN_PHOTOS = 2
 
+const CURB_APPEAL_SCHEMA = {
+  type: 'object',
+  properties: {
+    condition: { type: 'string', enum: ['renovated', 'dated', 'distressed', 'unknown'] },
+    rehab_level: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    confidence: { type: 'number' },
+    summary: { type: 'string' },
+  },
+  required: ['condition', 'rehab_level', 'confidence', 'summary'],
+  additionalProperties: false,
+} as const
+
 /**
  * Lightweight per-comp visual check: is this comp's sale price plausibly
  * an ARV (post-renovation) candidate? Returns 'unknown' when photo evidence
@@ -481,13 +912,10 @@ export async function assessCompCurbAppeal(
   const base: CurbAppealCheck = { condition: 'unknown', source: 'vision', confidence: null, summary: null, photosExamined: photos.length }
 
   if (photos.length < CURB_APPEAL_MIN_PHOTOS) return { ...base, summary: 'Insufficient photos' }
-  if (!env.OPENROUTER_API_KEY) return { ...base, summary: 'Vision provider not configured' }
 
-  const provider = createLLMProvider({
-    provider: 'openrouter',
-    apiKey: env.OPENROUTER_API_KEY as string,
-    model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
-  })
+  const provider = createSpecialistProvider(env, 'routine')
+    ?? createReasoningProvider(env, env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash')
+  if (!provider) return { ...base, summary: 'Vision provider not configured' }
 
   const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))
   const live = fetched.filter((f): f is FetchedImage => f != null && f.size > 0)
@@ -497,6 +925,8 @@ export async function assessCompCurbAppeal(
     prompt: CURB_APPEAL_PROMPT,
     images: live.map((f) => ({ base64: f.base64, mimeType: f.mimeType })),
     responseFormat: 'json',
+    // Anthropic structured outputs 400s on a bare {type:'object'} schema.
+    jsonSchema: { name: 'curb_appeal', schema: CURB_APPEAL_SCHEMA },
     maxTokens: 2048,
   })
   if (!result.success || !result.data?.content) return { ...base, summary: 'Vision call failed', photosExamined: live.length }

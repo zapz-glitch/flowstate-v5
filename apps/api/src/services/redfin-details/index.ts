@@ -16,7 +16,7 @@
  * into appraisal math until live-verified.
  */
 
-import { createLLMProvider } from '../llm'
+import { createReasoningProvider, isReasoningProviderAvailable } from '../llm'
 import { ListingPhotoScraper, redfinAdapter } from '../photo-provider/providers/listing-scraper'
 import type { Env } from '../../types'
 
@@ -191,7 +191,7 @@ export async function fetchRedfinPropertyDetails(
   cache?: KVNamespace | null,
 ): Promise<RedfinDetailsResult> {
   if (!env.FIRECRAWL_API_KEY) return { details: null, skippedReason: 'no_firecrawl_key' }
-  if (!env.OPENROUTER_API_KEY) return { details: null, skippedReason: 'no_openrouter_key' }
+  if (!isReasoningProviderAvailable(env)) return { details: null, skippedReason: 'no_llm_key' }
 
   const fullAddress = [ident.address, ident.city, ident.state, ident.zipCode].filter(Boolean).join(', ')
   // v3 — schema bumps (schools, climate, interior/community) and resolver
@@ -241,11 +241,11 @@ export async function fetchRedfinPropertyDetails(
     return { details: null, skippedReason: 'scrape_failed', sourceUrl: url }
   }
 
-  const provider = createLLMProvider({
-    provider: 'openrouter',
-    apiKey: env.OPENROUTER_API_KEY,
-    model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
-  })
+  const provider = createReasoningProvider(
+    env,
+    env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+  )
+  if (!provider) return { details: null, skippedReason: 'no_llm', sourceUrl: url }
   const result = await provider.execute({
     prompt: EXTRACTION_PROMPT + markdown.slice(0, 60_000),
     responseFormat: 'json',

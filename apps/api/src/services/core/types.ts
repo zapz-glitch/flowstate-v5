@@ -132,6 +132,11 @@ export interface LLMRequest {
   temperature?: number
   /** Enable OpenRouter web search tool */
   webSearch?: WebSearchConfig
+  /** Provider-specific tool specs (e.g. Anthropic server-side tools like
+   *  web_search_20250305). Passed through verbatim to the provider body;
+   *  ignored by providers that do not support it — callers must gate on
+   *  provider.name before relying on tool execution. */
+  tools?: unknown[]
   /** Enable reasoning/thinking mode */
   reasoning?: {
     enabled: boolean
