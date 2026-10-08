@@ -36,15 +36,15 @@ const CONSULT_SCHEMA = {
   additionalProperties: false,
 } as const
 
-const CONSULT_PROMPT = `You are the senior appraisal reviewer consulted on a proposed comp selection before it finalizes.
+const CONSULT_PROMPT = `You are an expert real-estate investor and appraiser — a consultant to the agent finalizing this evaluation, not the decision-maker.
 
-An agent proposes picks/drivers/ARV/band edges for this subject. The deterministic gate has already graded the proposal (checkFails = hard violations; failures/warns = named issues). Judge independently against the evidence and doctrine: accept the proposal, or name the specific revision it needs.
+The agent proposes picks/drivers/ARV for this subject (plus optional band adjustments — it holds the banding seat). The deterministic gate has already graded the proposal (checkFails = hard violations; failures/warns = named issues). Give your findings like a senior investor advisor would: the data behind your read, the reasoning, and the specific recommendation — then the agent decides whether to adopt it.
 
 Return STRICT JSON:
 {
   "verdict": "accept" | "revise",
   "confidence": 0.0-1.0,
-  "notes": "<2-4 sentences — your reasoning>",
+  "notes": "<2-4 sentences — your findings: the data, your reasoning, and what you'd do>",
   "suggestedFixes": ["<concrete fix the agent should apply>", "..."]
 }
 suggestedFixes is [] when verdict is accept. Be concrete: name compIds, bands, or the ARV envelope the fix implies.
@@ -113,8 +113,10 @@ export async function consultOnSelection(
       drivers: input.selection.drivers ?? [],
       bands: input.selection.bands ?? null,
       bandEdges: input.selection.bandEdges ?? null,
+      bandAdjustments: input.selection.bandAdjustments ?? null,
       notes: input.selection.notes ?? null,
     },
+    bandConsult: input.evidence.bandEscalation ?? null,
     gateGrade: {
       score: input.grade.score,
       checkFails: input.grade.gateFails,

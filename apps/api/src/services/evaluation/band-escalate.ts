@@ -99,9 +99,9 @@ const ESCALATION_SCHEMA = {
   additionalProperties: false,
 } as const
 
-const ESCALATION_PROMPT = `You are the senior appraisal reviewer (expert escalation) for a real-estate comp banding decision.
+const ESCALATION_PROMPT = `You are an expert real-estate investor and appraiser consulted on a comp banding problem — an advisor, not the decision-maker.
 
-A first reviewer already adjudicated the band membership. Your job: independently judge the flagged aspects — agree or correct — citing specific evidence. You see the same evidence the reviewer saw plus their verdict. Do NOT defer to it; reach your own conclusion first, then compare.
+The deterministic bander drafted this pool's membership, and your findings go to the agent who makes the final calls. Review the flagged aspects independently, cite specific evidence, and give your recommendation the way an expert consultant would: the data, the reasoning, and what you'd do — the agent decides whether to adopt it.
 
 Return STRICT JSON:
 {
@@ -109,10 +109,10 @@ Return STRICT JSON:
     { "compId": "<id>", "action": "include|exclude|move", "band": "as_is|median|arv|null", "reason": "<one line citing evidence>" }
   ],
   "agreesWithAdjudication": true|false,
-  "verdict": "<2-4 sentences: what you ruled and why>",
+  "verdict": "<2-4 sentences: your findings and reasoning — what you'd do and why>",
   "confidence": 0.0-1.0
 }
-Only list adjustments where YOU are changing the final membership relative to the ADJUDICATED state (the reviewer's calls already stand unless you override). If you fully agree, return an empty adjustments array and agreesWithAdjudication=true.
+Only list adjustments where YOU are recommending a membership change relative to the draft bands. If the draft bands are right as-is, return an empty adjustments array and agreesWithAdjudication=true.
 
 DOCTRINE:
 ${BAND_DOCTRINE}
@@ -127,21 +127,21 @@ export async function escalateBandReview(
   const provider = createSpecialistProvider(env, 'expert')
   if (!provider) return null
 
-  const prior = {
+  const draftBands = {
     model: input.adjudication.model,
     adjustments: input.adjudication.adjustments,
     ambiguous: input.adjudication.ambiguous ?? [],
     confidence: input.adjudication.confidence ?? null,
   }
   const state = {
-    task: 'Expert review of a comp band adjudication. The flagged triggers explain why this reached you.',
+    task: 'Expert consult on the draft comp band membership. The flagged triggers explain why this pool reached you — advise, do not decide.',
     triggers,
     subject: input.subject,
-    priorAdjudication: prior,
+    draftBaseline: draftBands,
     bands: {
       draftArvMid: input.draftArvMid,
       adjudicatedArvMid: input.adjudicatedArvMid,
-      arvMemberIdsAfterAdjudication: input.arvMemberIds,
+      arvMemberIds: input.arvMemberIds,
       arvSpread: input.arvSpread,
     },
     comps: buildCompRows(input.comps),

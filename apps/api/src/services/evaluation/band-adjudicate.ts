@@ -143,6 +143,34 @@ export function isAsIsEvidence(c: BandAdjudicationInput['comps'][number]): boole
     c.evidenceVerification?.transactionCheck === 'nominal_sale'
 }
 
+/** Shared include/exclude/move → overrides validator. Used by the
+ *  in-pipeline reasoning adjudication AND by the gate when an agent posts
+ *  bandAdjustments with its selection — the agent holds the initial
+ *  banding seat, so its membership calls get the same validation: real
+ *  comp ids only, include/move require a named band, exclude unbands, and
+ *  as-is evidence can never be moved into the ARV band. */
+export function bandAdjustmentsToOverrides(
+  rawAdjustments: Array<{ compId?: unknown; action?: unknown; band?: unknown; reason?: unknown }>,
+  comps: BandAdjudicationInput['comps'],
+): { overrides: Record<string, BandName | null>; adjustments: BandAdjustment[] } {
+  const validIds = new Set(comps.map((c) => c.id))
+  const byId = new Map(comps.map((c) => [c.id, c] as const))
+  const overrides: Record<string, BandName | null> = {}
+  const adjustments: BandAdjustment[] = []
+  for (const a of rawAdjustments) {
+    const compId = typeof a.compId === 'string' ? a.compId : typeof a.compId === 'number' ? String(a.compId) : null
+    if (!compId || !validIds.has(compId)) continue
+    const action = a.action === 'include' || a.action === 'exclude' || a.action === 'move' ? a.action : null
+    if (!action) continue
+    const band = typeof a.band === 'string' && (BANDS as string[]).includes(a.band) ? (a.band as BandName) : null
+    if (band === 'arv' && isAsIsEvidence(byId.get(compId)!)) continue
+    const adj: BandAdjustment = { compId, action, band, reason: typeof a.reason === 'string' ? a.reason.slice(0, 300) : undefined }
+    adjustments.push(adj)
+    overrides[compId] = action === 'exclude' ? null : band
+  }
+  return { overrides, adjustments }
+}
+
 /** Adjudicate the draft band membership. Returns null when no reasoning
  *  provider is configured or the call fails — the caller keeps
  *  deterministic bands. */
@@ -181,23 +209,10 @@ export async function adjudicateBandMembership(
   } catch { return null }
 
   const validIds = new Set(input.comps.map((c) => c.id))
-  const byId = new Map(input.comps.map((c) => [c.id, c] as const))
-  const isAsIs = isAsIsEvidence
-  const overrides: Record<string, BandName | null> = {}
-  const adjustments: BandAdjustment[] = []
-  for (const raw of Array.isArray(parsed.adjustments) ? parsed.adjustments : []) {
-    const a = raw as { compId?: unknown; action?: unknown; band?: unknown; reason?: unknown }
-    const compId = typeof a.compId === 'string' ? a.compId : typeof a.compId === 'number' ? String(a.compId) : null
-    if (!compId || !validIds.has(compId)) continue
-    const action = a.action === 'include' || a.action === 'exclude' || a.action === 'move' ? a.action : null
-    if (!action) continue
-    const band = typeof a.band === 'string' && (BANDS as string[]).includes(a.band) ? (a.band as BandName) : null
-    if (band === 'arv' && isAsIs(byId.get(compId)!)) continue
-    const adj: BandAdjustment = { compId, action, band, reason: typeof a.reason === 'string' ? a.reason.slice(0, 300) : undefined }
-    adjustments.push(adj)
-    // include/move require a named band; exclude unbands.
-    overrides[compId] = action === 'exclude' ? null : band
-  }
+  const { overrides, adjustments } = bandAdjustmentsToOverrides(
+    Array.isArray(parsed.adjustments) ? parsed.adjustments as BandAdjustment[] : [],
+    input.comps,
+  )
 
   return {
     overrides,
