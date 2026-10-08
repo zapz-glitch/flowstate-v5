@@ -2131,6 +2131,9 @@ export interface AgentSelection {
   renovation?: import('./renovation').AgentRenovation
   /** Free-text verdict summary for the run record. */
   notes?: string
+  /** Appraiser's 0-10 rating of the dataset it was handed — 10 means the
+   *  evidence made the decision easy and unambiguous. Rides the trace. */
+  dataQuality?: { score: number; notes: string }
 }
 
 /** Server-side bounds on the agent verdict — coherence checks, never an
@@ -2228,6 +2231,10 @@ export interface HarnessEvidence {
   /** Renovation evidence — zone grades, description claims, permit ledger,
    *  seller notes, finish parity, flip-delta + cost schedule (advisory). */
   renovationEvidence?: import('./renovation').RenovationEvidence
+  /** Haiku's pocket-desirability read for the subject's location — its
+   *  own call (docs/HAIKU-POCKET-DESIRABILITY.md), attached after the
+   *  bundle is built so the appraiser sees it. */
+  pocketDesirability?: import('./pocket-desirability').PocketDesirability
   comps: Array<BComp & { id: string; salePriceFormatted?: string; coverPhotoUrl?: string | null }>
   suggestedSelection: string[]
   classifications: Record<string, ClassificationResult>

@@ -17,15 +17,27 @@ Target throughput: 1,000+ evaluations per week, production hardened.
     Rules-check gaps are ALSO merged deterministically — a comp missing sale
     price, square footage, or a usable sale date gets the gap notated by
     code even if the model missed it.
+  - Pocket desirability: one call per eval — Serper gathers web signal on
+    the subject's location, haiku rates desirability 0-10 with rationale
+    (`services/evaluation/pocket-desirability.ts`,
+    `HAIKU-POCKET-DESIRABILITY.md`).
   - Clarify sub-agent: Opus can ask haiku to clarify, classify, or surface a
-    missing fact mid-review (max 3 calls per eval, `CLARIFY_PROMPT`).
+    missing fact mid-review (max 5 calls per eval, `CLARIFY_PROMPT`).
     Haiku answers — it never advises on selection.
   - Gate debugger: when the deterministic gate rejects Opus's selection,
     haiku writes a plain-English debug note explaining WHY it was rejected
     (`GATE-DEBUG-RULESET.md`). Annotates, never re-judges.
+
+  Each haiku call is its own contract with its own doc — one call per job,
+  never merged or shared: `HAIKU-SUBJECT-CONDITION.md`,
+  `HAIKU-COMP-CLASSIFY.md`, `HAIKU-POCKET-DESIRABILITY.md`,
+  `HAIKU-CLARIFY.md`, `GATE-DEBUG-RULESET.md`.
 - **claude-opus-5-5 — the appraiser.** Reviews the complete evidence bundle
   and makes the final comp selection + ARV call (`services/evaluation/
-  appraiser.ts`, `runOpusAppraiser`). The only model with decision authority.
+  appraiser.ts`, `runOpusAppraiser`, `OPUS-APPRAISER.md`). The only model
+  with decision authority. Also rates the dataset it was handed —
+  `dataQuality` 0-10 per attempt, where 10 means the evidence made the
+  decision easy and unambiguous.
 - **Deterministic code — all plumbing and all refereeing.** Comp fetch,
   geo gating, price coherence, the gate (`verdict-grade.ts`), ARV
   application, valuation math, trust floor. No model edits or overrides it.
@@ -49,22 +61,25 @@ durable object — self-completing, no `awaiting_agent` park:
    fields, renovation evidence, and per-comp rows carrying condition,
    rulesCheck, cover photo URL, geo tiers, sale stamps — everything the
    appraiser sees.
-4. **Appraisal (opus).** `runOpusAppraiser` hands Opus the bundle under
+4. **Pocket desirability (haiku).** `ratePocketDesirability` gathers web
+   signal on the subject's location and haiku scores it 0-10 — evidence
+   the appraiser weighs, stamped onto `harness.pocketScore`.
+5. **Appraisal (opus).** `runOpusAppraiser` hands Opus the bundle under
    `APPRAISER_PROMPT` + `COMP_DOCTRINE` (`comp-doctrine.ts`). Opus returns a
    structured selection or clarification requests; clarifications route to
-   haiku and feed back in (≤3).
-5. **The gate (code).** `gradeVerdict` scores the selection against the
+   haiku and feed back in (≤5).
+6. **The gate (code).** `gradeVerdict` scores the selection against the
    evidence — checks below. Validation coherence (enabled comps, ARV within
    the pick-price envelope) runs first.
-6. **Revision loop.** Gate reject → haiku writes the debug note → the named
+7. **Revision loop.** Gate reject → haiku writes the debug note → the named
    violations + note go back to Opus under `REVISION_PROMPT` → Opus revises
    and reposts (≤2 revisions). The gate is code — it cannot be argued with,
    only satisfied.
-7. **Completion (code).** Accepted selection flows into phase 2 → ARV,
+8. **Completion (code).** Accepted selection flows into phase 2 → ARV,
    rehab level, MAO, wholesale, recommendation → report persisted. If Opus
    exhausts revisions or is unavailable, the deterministic engine's own
    selection completes the job — nothing parks.
-8. **Trust floor (code).** Gate grade < 0.7 composite AND low confidence →
+9. **Trust floor (code).** Gate grade < 0.7 composite AND low confidence →
    `trustFloor: hold`, `requiresHumanReview: true` (goes to the hold list,
   flowstate-workers keeps it in Underwriting). Every other accepted verdict
    is an explicit `clear`.

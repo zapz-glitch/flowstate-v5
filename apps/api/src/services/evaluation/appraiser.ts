@@ -32,7 +32,7 @@ import { gradeVerdict, type VerdictGrade } from './verdict-grade'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
 import { validateAgentSelection } from './index'
 
-const MAX_CLARIFICATIONS = 3
+const MAX_CLARIFICATIONS = 5
 const MAX_REVISIONS = 2
 
 const APPRAISER_PROMPT = `You are the appraiser — the final decision maker on comp selection and ARV for a wholesale real-estate acquisition.
@@ -50,6 +50,10 @@ Return STRICT JSON:
   "arv": number,
   "conf": "high" | "medium" | "low",
   "notes": "<2-4 sentences: your reasoning — what the evidence supports>",
+  "dataQuality": {
+    "score": <0-10: the quality of the dataset you were given — 10 means the evidence made this an easy, unambiguous decision>,
+    "notes": "<one sentence: what was missing or ambiguous, if anything>"
+  },
   "flags": ["<evidence gaps or caveats worth surfacing>"],
   "clarifyRequests": [
     { "compId": "<id or null>", "question": "<targeted question for the haiku sub-agent>" }
@@ -81,6 +85,15 @@ const SELECTION_SCHEMA = {
     conf: { type: 'string', enum: ['high', 'medium', 'low'] },
     notes: { type: 'string' },
     flags: { type: 'array', items: { type: 'string' } },
+    dataQuality: {
+      type: 'object',
+      properties: {
+        score: { type: 'number' },
+        notes: { type: 'string' },
+      },
+      required: ['score', 'notes'],
+      additionalProperties: false,
+    },
     clarifyRequests: {
       type: 'array',
       items: {
@@ -94,7 +107,7 @@ const SELECTION_SCHEMA = {
       },
     },
   },
-  required: ['selectedCompIds', 'drivers', 'arv', 'conf', 'notes', 'flags', 'clarifyRequests'],
+  required: ['selectedCompIds', 'drivers', 'arv', 'conf', 'notes', 'dataQuality', 'flags', 'clarifyRequests'],
   additionalProperties: false,
 } as const
 
@@ -169,6 +182,7 @@ interface ParsedSelection {
   arv?: unknown
   conf?: unknown
   notes?: unknown
+  dataQuality?: unknown
   flags?: unknown
   clarifyRequests?: unknown
 }
@@ -195,6 +209,9 @@ function toAgentSelection(p: ParsedSelection, byId: Set<string>): AgentSelection
     ...(drivers.length ? { drivers } : {}),
     notes: typeof p.notes === 'string' ? p.notes.slice(0, 4000) : undefined,
     flags: Array.isArray(p.flags) ? p.flags.filter((f): f is string => typeof f === 'string').slice(0, 20) : [],
+    ...(typeof (p.dataQuality as { score?: unknown } | undefined)?.score === 'number'
+      ? { dataQuality: { score: Math.max(0, Math.min(10, (p.dataQuality as { score: number }).score)), notes: typeof (p.dataQuality as { notes?: unknown }).notes === 'string' ? (p.dataQuality as { notes: string }).notes.slice(0, 500) : '' } }
+      : {}),
   }
 }
 
@@ -287,6 +304,7 @@ export async function runOpusAppraiser(
     task: 'Review the complete dataset and post the final comp selection + ARV.',
     subject: evidence.subject,
     renovationEvidence: evidence.renovationEvidence ?? null,
+    pocketDesirability: evidence.pocketDesirability ?? null,
     engineSuggestion: {
       // The deterministic engine's own suggestion — context, not an anchor.
       selectedCompIds: evidence.suggestedSelection,
