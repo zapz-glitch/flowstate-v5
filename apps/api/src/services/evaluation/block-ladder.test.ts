@@ -46,6 +46,35 @@ describe('computeBlockLadder', () => {
     const ladder = computeBlockLadder(comps, 'T1')!
     expect(ladder.medianPpsf).toBe(200)
   })
+
+  it('counts priced BG sales for the scope decision — unpriced BG comps do not suppress the tract fallback', () => {
+    const comps = [
+      // 3 BG comps but only one priced — the tract pool must still ladder.
+      { id: 'bg1', pricePerSqft: null, salePrice: null, sameBlockGroup: true, censusTract: 'T1' },
+      { id: 'bg2', pricePerSqft: null, salePrice: null, sameBlockGroup: true, censusTract: 'T1' },
+      sale('bg3', 200, true),
+      sale('t1', 100, false), sale('t2', 300, false), sale('t3', 320, false),
+    ]
+    const ladder = computeBlockLadder(comps, 'T1')!
+    expect(ladder.scope).toBe('tract')
+    expect(ladder.n).toBe(4)
+  })
+
+  it('excludes disabled comps from the pool and the scope count', () => {
+    const comps = [
+      // A disabled same-BG sale (e.g. a $4.8M retail parcel) must not set
+      // the top band or count toward the BG pool minimum.
+      { id: 'retail', pricePerSqft: 560, sameBlockGroup: true, censusTract: 'T1', isEnabled: false },
+      sale('a', 110, true), sale('b', 120, true),
+      sale('t1', 200, false), sale('t2', 210, false), sale('t3', 220, false),
+    ]
+    const ladder = computeBlockLadder(comps, 'T1')!
+    // Only 2 priced + enabled BG sales → tract scope; retail never priced in.
+    expect(ladder.scope).toBe('tract')
+    expect(ladder.n).toBe(5)
+    expect(ladder.medianPpsf).toBe(200)
+    expect(ladder.groups.get('retail')).toBeUndefined()
+  })
 })
 
 describe('compLadderPosition', () => {

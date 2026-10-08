@@ -846,6 +846,10 @@ export async function performAnalysisPhase1(
           const filled = missing.length
             ? await startCompEvidenceBatch(env, missing, {
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+                // Post-geo classify runs just below — don't let the fallback
+                // gather pin geo-less per-comp reads the pool classify skips.
+                gatherOnly: !!env.ANTHROPIC_API_KEY ||
+                  (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY),
               })
             : new Map<string, CompConditionEvidence | null>()
           // Classification runs after geo-stamps land — the classifier reads

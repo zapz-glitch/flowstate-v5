@@ -623,10 +623,13 @@ export class AnalysisJobDO {
         }))
         const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
-          // Decisions lane defers classification — this prefetch fires
-          // before census geo-stamps land, and the batch classify needs
-          // the gated pool's geocode context. Evaluation runs it after.
-          gatherOnly: this.env.CONDITION_READER === 'decisions',
+          // Defer classification whenever a post-geo classifier will run —
+          // this prefetch fires before census geo-stamps land, and the
+          // pool classify needs the gated pool's geocode context. Without
+          // this the gather's geo-less per-comp reads get model-cached and
+          // classifyCompPoolHaiku skips them. Evaluation classifies after.
+          gatherOnly: !!this.env.ANTHROPIC_API_KEY ||
+            (this.env.CONDITION_READER === 'decisions' && !!this.env.OPENAI_API_KEY),
         })
         // Stage-A digest on sale records — no listing data needed, runs
         // beside the listing fetch it precedes in the evidence batch.

@@ -34,6 +34,10 @@ interface LadderComp {
   id: string
   sameBlockGroup?: boolean | null
   censusTract?: string | null
+  /** The appraisal's own eligibility verdict — disabled comps (wrong
+   *  property type, distance, quality) are not market structure for the
+   *  subject's ladder and are excluded. Missing means eligible. */
+  isEnabled?: boolean | null
   pricePerSqft?: number | null
   salePrice?: number | null
   squareFeet?: number | null
@@ -56,13 +60,20 @@ const range = (xs: number[] | undefined): { lo: number; hi: number } | null =>
  * census tract when fewer than 3 priced same-block-group sales exist.
  * Returns null when there isn't enough priced evidence for any ladder.
  */
-export function computeBlockLadder(comps: LadderComp[], subjectTract?: string | null): BlockLadder | null {
-  const bg = comps.filter((c) => c.sameBlockGroup === true)
-  const tract = subjectTract != null ? comps.filter((c) => c.censusTract === subjectTract) : []
-  const pool = bg.length >= 3 ? bg : tract
-  const priced = pool
+const pricedList = (pool: LadderComp[]) =>
+  pool
     .map((c) => ({ id: c.id, ppsf: ppsfOf(c) }))
     .filter((s): s is { id: string; ppsf: number } => s.ppsf != null && s.ppsf > 0)
+
+export function computeBlockLadder(comps: LadderComp[], subjectTract?: string | null): BlockLadder | null {
+  const eligible = comps.filter((c) => c.isEnabled !== false)
+  const bg = eligible.filter((c) => c.sameBlockGroup === true)
+  const tract = subjectTract != null ? eligible.filter((c) => c.censusTract === subjectTract) : []
+  // The pool decision counts PRICED sales — a block group of three
+  // price-less listings must not suppress the tract fallback.
+  const bgPriced = pricedList(bg)
+  const useBg = bgPriced.length >= 3
+  const priced = useBg ? bgPriced : pricedList(tract)
   if (priced.length < 3) return null
   const { groups, topRange } = groupPocketSales(priced)
   const byGroup = new Map<PriceGroup, number[]>()
@@ -71,7 +82,7 @@ export function computeBlockLadder(comps: LadderComp[], subjectTract?: string | 
     byGroup.set(g, [...(byGroup.get(g) ?? []), s.ppsf])
   }
   return {
-    scope: bg.length >= 3 ? 'block_group' : 'tract',
+    scope: useBg ? 'block_group' : 'tract',
     n: priced.length,
     medianPpsf: med(priced.map((s) => s.ppsf))!,
     topMedianPpsf: med(byGroup.get('top') ?? []),
