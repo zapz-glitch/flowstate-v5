@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flowstate-dashboard-core",
+  "compatibility_date": "2025-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "preview_urls": true,
+  "main": ".open-next/worker.js",
+  // core.flowstate.homes — the corelogic-alpha dashboard: identical UI,
+  // pointed at the alpha API which runs the deterministic-selector harness
+  "routes": [
+    { "pattern": "core.flowstate.homes", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "NEXT_PUBLIC_API_URL": "https://api-core.flowstate.homes",
+    "NEXT_PUBLIC_GOOGLE_MAP_KEY": "AIzaSyCQVFWXbhBwmp6mskH8ngBOLNbRds2LVDc"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+  // Secrets (set via wrangler secret put):
+  // - DASHBOARD_INTERNAL_SECRET (shared with API for session-based auth)
+  // - FASTMAIL_API_TOKEN (JMAP token — deal-form email delivery to hello@)
+}
