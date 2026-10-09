@@ -317,16 +317,18 @@ export function runDeterministicSelector(
   // matchProfile tier, so what the selector picks is what d1 counts.
   const digestGeoFit = (r: RankedComp): string | null => {
     const rec = (r.comp as { clefDigest?: Record<string, Record<string, unknown>> | null }).clefDigest
-    const v = rec?.B?.geoFit ?? rec?.A?.geoFit
+    // Stage B only — identical to the gate. A stage-A geoFit is a stale
+    // pre-observable verdict; trusting it marked off-pocket comps in-BG.
+    const v = rec?.B?.geoFit
     return typeof v === 'string' ? v : null
   }
   const inBg = (r: RankedComp) =>
     r.comp.sameBlockGroup === true || ['block_group', 'same_pocket'].includes(digestGeoFit(r) ?? '')
   const inPocket = (r: RankedComp) =>
-    inBg(r) || r.profile.geoTier === 'TRACT' ||
-    (subjectTract != null && r.comp.censusTract === subjectTract)
-  const bgExists = ranked.some(inBg)
-  const inPocketPick = (r: RankedComp) => (bgExists ? inBg(r) : inPocket(r))
+    inBg(r) || (subjectTract != null && r.comp.censusTract === subjectTract)
+  // Picks draw from the gate's whole pocket — BG first, then tract —
+  // never only-BG (a 2-comp BG can't fill a pick set on its own).
+  const inPocketPick = inPocket
 
   // Picks: ARV-qualified comps always join the set first (even below
   // MIN_PICKS — d4 wants every qualified comp used), then in-pocket
@@ -338,15 +340,18 @@ export function runDeterministicSelector(
   const pickable = clean.filter((r) => !asIsPriced(r))
   const arvFirst = (a: RankedComp, b: RankedComp) =>
     Number(arvPool.includes(b)) - Number(arvPool.includes(a)) || rank(a, b)
+  const bgFirst = (a: RankedComp, b: RankedComp) =>
+    Number(inBg(b)) - Number(inBg(a)) || arvFirst(a, b)
   const ordered = [
-    ...pickable.filter(inPocketPick).sort(arvFirst),
+    ...pickable.filter(inPocketPick).sort(bgFirst),
     ...pickable.filter((r) => !inPocketPick(r)).sort(arvFirst),
   ]
   const picks = ordered.slice(0, MAX_PICKS)
   // Drivers carry the pricing weight — in-pocket only. When the pool has
   // zero clean in-pocket comps we fall back to the raw ranking and let
   // the gate grade the pocket risk honestly.
-  const driverIds = picks.filter(inPocketPick).slice(0, MIN_PICKS).map((p) => p.id)
+  const driverIds = [...picks.filter(inBg), ...picks.filter((p) => !inBg(p) && inPocketPick(p))]
+    .slice(0, MIN_PICKS).map((p) => p.id)
   if (driverIds.length === 0) driverIds.push(...picks.slice(0, MIN_PICKS).map((p) => p.id))
   for (const p of picks) p.audit.verdict = 'picked'
 
