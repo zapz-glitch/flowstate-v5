@@ -23,10 +23,22 @@ const inflightGet = new Map<string, Promise<unknown>>()
 const TTL_GET = new Map<string, { at: number; data: unknown }>()
 const TTL_MS = 30_000
 const TTL_PATHS = new Set(['/arv-threshold', '/rehab-config', '/deal-params', '/major-item-costs', '/proximity-config', '/appraisal-presets', '/appraisal-presets/defaults', '/arv-adjustments'])
+// Report reads ride the same 30s window — every report write lands on the
+// report path or a sub-path (/comps, /permits, /share…), which the prefix
+// check in invalidateGetCache clears.
+const TTL_PREFIXES = ['/user/reports/']
 const ttlKey = (path: string) => path.split('?')[0]
+const ttlEligible = (path: string) => TTL_PATHS.has(path) || TTL_PREFIXES.some((p) => path.startsWith(p))
+// TTL keys carry an impersonation prefix ("<imp>:<path>") — compare on the path part.
+const ttlEntryPath = (key: string) => key.slice(key.indexOf(':') + 1)
 function invalidateGetCache(path: string): void {
   const base = ttlKey(path)
-  for (const k of [...TTL_GET.keys()]) if (k.endsWith(base)) TTL_GET.delete(k)
+  for (const k of [...TTL_GET.keys()]) {
+    const kp = ttlEntryPath(k)
+    // Exact match plus either direction of nesting: writing
+    // /user/reports/X/comps clears /user/reports/X (and vice versa).
+    if (kp === base || kp.startsWith(`${base}/`) || base.startsWith(`${kp}/`)) TTL_GET.delete(k)
+  }
 }
 
 async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -36,7 +48,7 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
     return fetchApiInner<T>(path, options)
   }
   const ck = `${getImpersonatedUserId() ?? ''}:${ttlKey(path)}`
-  if (TTL_PATHS.has(ttlKey(path))) {
+  if (ttlEligible(ttlKey(path))) {
     const hit = TTL_GET.get(ck)
     if (hit && Date.now() - hit.at < TTL_MS) return hit.data as T
   }
@@ -44,7 +56,7 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
   const existing = inflightGet.get(key)
   if (existing) return existing as Promise<T>
   const p = fetchApiInner<T>(path, options).then((data) => {
-    if (TTL_PATHS.has(ttlKey(path))) TTL_GET.set(ck, { at: Date.now(), data })
+    if (ttlEligible(ttlKey(path))) TTL_GET.set(ck, { at: Date.now(), data })
     return data
   }).finally(() => {
     if (inflightGet.get(key) === p) inflightGet.delete(key)

@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState, ErrorState } from '@/components/ui/states'
 import { ReportSearchInput } from './search-input'
 import { DeleteReportButton } from './delete-report-button'
+import { ReportLink } from './report-link'
 import { formatAddressCasing, formatCityState } from '@/components/analysis/format-helpers'
 
 const REPORTS_PER_PAGE = 20
@@ -101,8 +102,9 @@ export default async function ReportsPage({
           {/* Mobile card layout */}
           <div className="space-y-3 md:hidden">
             {data.reports.map((report) => (
-              <Link
+              <ReportLink
                 key={report.id}
+                jobId={report.jobId}
                 href={`/dashboard/reports/${report.jobId}`}
                 className="block"
               >
@@ -142,7 +144,7 @@ export default async function ReportsPage({
                     {new Date(report.createdAt).toLocaleDateString()}
                   </p>
                 </Card>
-              </Link>
+              </ReportLink>
             ))}
           </div>
 
@@ -185,12 +187,13 @@ export default async function ReportsPage({
                       className="hover:bg-secondary/30 transition-colors"
                     >
                       <td className="px-6 py-4 text-body-sm text-foreground max-w-[250px] truncate" title={report.propertyAddress}>
-                        <Link
+                        <ReportLink
+                          jobId={report.jobId}
                           href={`/dashboard/reports/${report.jobId}`}
                           className="rounded px-0.5 -mx-0.5 transition-colors hover:text-foreground hover:bg-secondary"
                         >
                           {formatAddressCasing(report.propertyAddress)}
-                        </Link>
+                        </ReportLink>
                       </td>
                       <td className="px-6 py-4 text-body-sm text-foreground-secondary whitespace-nowrap">
                         {formatCityState(report.propertyCity, report.propertyState) || '-'}
@@ -213,12 +216,13 @@ export default async function ReportsPage({
                       </td>
 
                       <td className="px-6 py-4">
-                        <Link
+                        <ReportLink
+                          jobId={report.jobId}
                           href={`/dashboard/reports/${report.jobId}`}
                           className="text-body-sm text-primary hover:text-primary/80 transition-colors"
                         >
                           View
-                        </Link>
+                        </ReportLink>
                       </td>
                       <td className="px-4 py-4 text-center">
                         <DeleteReportButton jobId={report.jobId} address={report.propertyAddress} />
