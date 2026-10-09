@@ -23,6 +23,7 @@
  */
 
 import { gradeVerdict } from './verdict-grade'
+import { groupPocketSales } from './price-groups'
 import { compMatchProfile } from './observable'
 import { exclusionReasons } from './appraiser'
 import { validateAgentSelection } from './index'
@@ -218,6 +219,19 @@ export function runDeterministicSelector(
   }
 
   const clean = ranked.filter((r) => r.audit.verdict === 'eligible')
+  // Selector-side band ladder — the stamped priceLadder was computed over
+  // preset-ENABLED comps only, which starves every band when the preset
+  // ladder over-disables (Madeira: 3/71 enabled → empty ARV band → forced
+  // median fallback regardless of the pocket's real top cluster). Re-group
+  // the clean pocket set: outliers never set the bands here either.
+  const pocketClean = clean.filter((r) => r.profile.geoTier !== 'OFF_POCKET')
+  const selGroups = pocketClean.length >= 3
+    ? groupPocketSales(pocketClean.map((r) => ({ id: r.id, ppsf: r.ppsf }))).groups
+    : null
+  for (const r of clean) {
+    const g = selGroups?.get(r.id)
+    if (g) r.group = g
+  }
   // The three price groups the run reports — ARV band / median / as-is —
   // over clean comps only (outliers never set the bands).
   const groupStats = (g: PriceGroup) => {
