@@ -296,7 +296,7 @@ export function runDeterministicSelector(
     condClass(r) === 'after_renovation' ||
     (r.comp.conditionLabel === 'Renovated' || r.comp.conditionLabel === 'Updated') ||
     r.comp.compTier === 'arv' ||
-    (!condClass(r) && r.group === 'top')
+    (condClass(r) !== 'as_is' && r.group === 'top')
   for (const r of clean) if (isAsIs(r)) r.audit.rules.push('R5:as-is-band')
   // Investor-band pricing is as-is evidence in code too — a bottom-rung
   // comp never picks, same rule as a labeled as_is comp (R5).
