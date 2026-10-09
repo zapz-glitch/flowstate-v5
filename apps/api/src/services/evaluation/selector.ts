@@ -134,7 +134,13 @@ export function runDeterministicSelector(
   evidence: HarnessEvidence,
 ): AppraiserResult {
   const subject = evidence.subject
-  const pool = evidence.comps.filter((c) => c.isEnabled && c.id)
+  // The preset filter ladder (±10yr, 210-day, style-match) belongs to the
+  // legacy manual flow — under TS-as-executioner those tolerances are
+  // recoverable ADJUSTMENTS, not vetoes. Eligibility is owned by R1–R6
+  // below: geo tier, gross physical mismatch, anomalies, priceability.
+  // Preset-disabled comps still carry their disableReasons into the audit
+  // as recoverable notes when they survive the real rules.
+  const pool = evidence.comps.filter((c) => c.id)
   const audits: CompAudit[] = []
   const ranked: RankedComp[] = []
 
@@ -182,13 +188,10 @@ export function runDeterministicSelector(
     // inside it the staleness is a recoverable caution.
     const ageDays = comp.saleDate ? Math.floor((Date.now() - new Date(comp.saleDate).getTime()) / 864e5) : null
     const window = evidence.rules.preferredSaleAgeDays
-    if (ageDays != null && ageDays > window * 2) {
-      audit.verdict = 'excluded'
-      audit.rules.push('R3')
-      audit.reasons.push(`R3 stale sale ${ageDays}d — beyond 2×${window}d`)
-      ranked.push({ id: comp.id!, comp, profile, group, ppsf, audit })
-      continue
-    }
+    // Stale-market doctrine: sale age is a confidence cost, never a veto —
+    // in-pocket renovated evidence still drives ARV in a slow market; the
+    // penalty lands on confidence and rank, not eligibility. R4 anomalies
+    // still catch a stale comp with an off-band price.
     if (ageDays != null && ageDays > window) audit.recoverable.push(`stale ${ageDays}d vs ${window}d`)
 
     // R4 anomalies + the shared hard exclusions (investor-band, divergent
@@ -206,6 +209,11 @@ export function runDeterministicSelector(
       continue
     }
     audit.rules.push('R1', 'R2', 'R3', 'R4')
+    if (!comp.isEnabled && Array.isArray(comp.disableReasons)) {
+      audit.recoverable.push(
+        ...comp.disableReasons.map((r) => `preset-tolerance: ${r}`),
+      )
+    }
     ranked.push({ id: comp.id!, comp, profile, group, ppsf, audit })
   }
 
@@ -315,8 +323,12 @@ export function runDeterministicSelector(
   const medianFitness = picks.map((p) => p.comp.observables?.arvFitnessP ?? 0.5).sort((a, b) => a - b)[Math.floor((picks.length - 1) / 2)]
   const missingInPicks = picks.reduce((n, p) => n + p.audit.missingData.length, 0)
   const thinPool = picks.length < MIN_PICKS
+  const staleDrivers = picks.some((p) =>
+    driverIds.includes(p.id)
+    && p.comp.saleDate != null
+    && (Date.now() - new Date(p.comp.saleDate).getTime()) / 864e5 > evidence.rules.preferredSaleAgeDays * 2)
   const conf: AgentSelection['conf'] =
-    thinPool || medianFallback || missingInPicks > 0 ? 'low'
+    thinPool || medianFallback || staleDrivers || missingInPicks > 0 ? 'low'
     : picks.length >= 4 && bgPicks >= 2 && medianFitness >= 0.6 ? 'high'
     : picks.length >= 3 ? 'medium'
     : 'low'
@@ -342,6 +354,7 @@ export function runDeterministicSelector(
     flags: [
       ...(medianFallback ? ['median_fallback'] : []),
       ...(thinPool ? ['thin_pocket'] : []),
+      ...(staleDrivers ? ['stale_drivers'] : []),
       `price_groups:arv_$${Math.round(arvBand?.medianPpsf ?? 0)}/sf,median_$${Math.round(medianBand?.medianPpsf ?? 0)}/sf,asis_$${Math.round(asIsBand?.medianPpsf ?? 0)}/sf`,
     ],
     notes: `Deterministic selector (${medianFallback ? 'median-band fallback' : 'ARV band'}): ${picks.length} picks — ${bgPicks} block-group match(es), median $${Math.round(medianPpsf)}/sqft × ${subject.squareFeet}sqft subject. Groups: arv $${Math.round(arvBand?.medianPpsf ?? 0)}/sf · median $${Math.round(medianBand?.medianPpsf ?? 0)}/sf · as-is $${Math.round(asIsBand?.medianPpsf ?? 0)}/sf.`,
@@ -356,8 +369,15 @@ export function runDeterministicSelector(
   // remedies: each gate complaint maps to a concrete re-derive (swap a
   // dead pick, re-anchor drivers in-pocket, re-clamp the ARV inside the
   // envelope) — instant, no model, ≤2 remedy cycles.
+  // The gate's enabled set = preset-enabled ∪ R-eligible — a comp that
+  // only failed preset tolerances (style/era/210d) is enabled evidence
+  // here; its flags ride the pick as recoverable adjustments.
+  const eligibleIds = new Set(
+    ranked.filter((r) => r.audit.verdict !== 'excluded' && r.audit.verdict !== 'unpriceable').map((r) => r.id))
+  const gateComps = ctx.appraisalResult.comparables.map((c) =>
+    c.id && !c.isEnabled && eligibleIds.has(c.id) ? { ...c, isEnabled: true } : c)
   const enabledById = new Map(
-    ctx.appraisalResult.comparables
+    gateComps
       .filter((c) => c.isEnabled && c.id)
       .map((c) => [c.id!, c] as const))
   const inPocketIds = new Set(ranked.filter(inPocketPick).map((r) => r.id))
