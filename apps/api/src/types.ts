@@ -73,6 +73,10 @@ export interface Env {
   /** corelogic-alpha scrape budget — max comps the listing-evidence gather
    *  touches per eval (best-ranked working comps first). */
   CORE_SCRAPE_MAX?: string
+  /** corelogic-alpha fetch cap — maxComps sent to the provider (default 40:
+   *  the 30-comp working pool plus a buffer for pocket comps ranked past 30
+   *  by distance). */
+  CORE_FETCH_CAP?: string
 
   // ─── Property Data (ATTOM) ─────────────────────────────────────────────────
   ATTOM_API_KEY?: string

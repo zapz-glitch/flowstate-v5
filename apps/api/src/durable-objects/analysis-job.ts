@@ -41,6 +41,7 @@ import { createPropertyApi } from '../services/property-api'
 import { mergeComparablePools } from '../services/property-api/comparable-pool'
 import {
   resolveCandidateLimit,
+  providerMaxComps,
   expansionRefetchRadius,
   isProvablyDeadComp,
   enrichmentRankScore,
@@ -534,7 +535,14 @@ export class AnalysisJobDO {
     // Candidate pool: request up to the configured/provider-max limit so the
     // appraisal rules see the broadest universe the provider supports in one
     // call (CoreLogic maxComps hard max = 100, no pagination).
-    const candidateLimit = resolveCandidateLimit(this.env, propertyApi.providerName, config.searchOptions.maxComps)
+    // corelogic-alpha: the provider returns comps distance-ordered, so the
+    // fetch cap IS the nearest-N. Working pool is 30; +10 buffer keeps a
+    // pocket comp that ranks 31-40 by distance from being passed on.
+    // monthsBack floors at 12 — the 365-day selector cap makes anything
+    // older dead weight in the response.
+    const candidateLimit = config.harness === 'corelogic'
+      ? Math.min(Number(this.env.CORE_FETCH_CAP) || 40, providerMaxComps(propertyApi.providerName))
+      : resolveCandidateLimit(this.env, propertyApi.providerName, config.searchOptions.maxComps)
     const comparablesParams = {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
@@ -543,9 +551,11 @@ export class AnalysisJobDO {
         // reach ~18 months — the configured window (often ~6mo, derived
         // from sale_age) truncates the exact comps the rules are built to
         // admit. Floor the fetch at the deepest reachable tier.
-        monthsBack: (propertyApi.providerName === 'attom-mcp' || config.harness === 'corelogic')
-          ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
-          : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
+        monthsBack: config.harness === 'corelogic'
+          ? (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12)
+          : propertyApi.providerName === 'attom-mcp'
+            ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
+            : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
         // Sub-1,000sf subjects: evaluation replaces the ±diff band with an
         // absolute 1,000sf ceiling — widen the provider-side diff so
         // qualifying comps aren't culled upstream. CoreLogic applies the
