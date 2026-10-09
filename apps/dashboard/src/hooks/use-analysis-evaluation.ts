@@ -101,7 +101,7 @@ export function useAnalysisEvaluation({
   currentInputRef.current = inputData
   const activeSelection = serverSelection?.source === inputData ? serverSelection : null
   const data = activeSelection?.analysis ?? inputData
-  const pythonAuthoritative = data?.evaluationEngine === 'python-v4' || data?.evaluationEngine === 'ts-v5'
+  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
   // Settings panel open/close
   const [settingsOpen, setSettingsOpen] = useState(false)
 
