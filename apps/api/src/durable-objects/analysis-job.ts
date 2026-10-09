@@ -968,30 +968,36 @@ export class AnalysisJobDO {
       // comp is never dropped. Capped-out comps stay in the pool for
       // groupStats/the benchmark, flagged beyondWorkingPool.
       if (config.harness === 'corelogic') {
+        // Ranked take-N: pocket evidence ALWAYS outranks off-pocket — the
+        // "never pass on a block/subdivision/neighborhood comp" rule is an
+        // ordering guarantee. When the pocket itself is huge (e.g. one
+        // giant block group), the cap trims its weakest-fit members last,
+        // never before an off-pocket comp.
         const WORKING_CAP = Number(this.env.CORE_WORKING_POOL) || 30
-        const keepIdx = new Set<number>()
-        comps.forEach((c, i) => {
-          const g = geos[i]
-          if (g && (g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract)) keepIdx.add(i)
-        })
         const normN = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
         const subjN = new Set(
           [property.subdivision, property.neighborhoodName].map(normN).filter((v): v is string => v != null))
-        comps.forEach((c, i) => {
-          if (!keepIdx.has(i) && [c.subdivision, c.neighborhoodName].map(normN).some((v) => v != null && subjN.has(v))) keepIdx.add(i)
-        })
-        for (const { i } of comps.map((c, i) => ({ c, i }))
-          .filter(({ i }) => !keepIdx.has(i))
-          .sort((a, b) => (a.c.distanceMiles ?? 999) - (b.c.distanceMiles ?? 999))
-          .slice(0, Math.max(0, WORKING_CAP - keepIdx.size))) {
-          keepIdx.add(i)
+        const subjSqft = property.squareFeet ?? 0
+        const rankKey = (c: NormalizedComparable, i: number): number[] => {
+          const g = geos[i]
+          const tier =
+            g?.blockGroup === subjectGeo.blockGroup ? 0
+            : [c.subdivision, c.neighborhoodName].map(normN).some((v) => v != null && subjN.has(v)) ? 1
+            : g?.tract === subjectGeo.tract ? 2 : 3
+          const sqftDiff = subjSqft && c.squareFeet ? Math.abs(c.squareFeet - subjSqft) / subjSqft : 9
+          return [tier, sqftDiff, c.distanceMiles ?? 999]
         }
+        const keepIdx = new Set(
+          comps.map((c, i) => ({ c, i, k: rankKey(c, i) }))
+            .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.k[2] - b.k[2])
+            .slice(0, WORKING_CAP)
+            .map(({ i }) => i))
         workingCompIds = new Set(comps.filter((_, i) => keepIdx.has(i)).map((c) => String(c.id)))
         let cappedN = 0
         for (const c of comps) {
           if (!workingCompIds.has(String(c.id))) { (c as { beyondWorkingPool?: boolean }).beyondWorkingPool = true; cappedN++ }
         }
-        console.log(`[AnalysisJobDO] working pool: ${workingCompIds.size}/${comps.length} comps — ${cappedN} beyond cap (geo+name matches always kept)`)
+        console.log(`[AnalysisJobDO] working pool: ${workingCompIds.size}/${comps.length} comps — ${cappedN} beyond cap (pocket evidence always outranks)`)
       }
       // Stage-B digest — the moment geography resolves, Clef pre-reads the
       // block-group/neighborhood fit for every comp while the enrichment

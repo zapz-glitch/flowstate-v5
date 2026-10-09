@@ -905,7 +905,17 @@ export async function performAnalysisPhase1(
     compEvidenceOn
       ? (async () => {
           const early = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
-          const missing = early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs
+          // Scrape budget: cover-photo/description evidence is gathered
+          // only for the best-ranked working comps (where picks actually
+          // come from) — zero-yield markets (no live listings on sold
+          // stock) can't burn the full 150s batch deadline on the tail.
+          // Observables still run on every working comp — data-only when
+          // no scrape evidence exists.
+          const scrapeCap = params.workingCompIds != null
+            ? Math.min(Number(env.CORE_SCRAPE_MAX) || 15, clefInputs.length)
+            : clefInputs.length
+          const missing = (early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs)
+            .slice(0, scrapeCap)
           const filled = missing.length
             ? await startCompEvidenceBatch(env, missing, {
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },

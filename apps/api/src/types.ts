@@ -70,6 +70,9 @@ export interface Env {
   /** corelogic-alpha working-pool cap — comps the expensive lanes touch
    *  (geo+name matches always kept; fill by distance to this size). */
   CORE_WORKING_POOL?: string
+  /** corelogic-alpha scrape budget — max comps the listing-evidence gather
+   *  touches per eval (best-ranked working comps first). */
+  CORE_SCRAPE_MAX?: string
 
   // ─── Property Data (ATTOM) ─────────────────────────────────────────────────
   ATTOM_API_KEY?: string
