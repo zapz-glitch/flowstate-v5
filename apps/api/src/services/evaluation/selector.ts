@@ -199,7 +199,13 @@ export function runDeterministicSelector(
     // price, non-market sale). 'caution:'/'weak geo' stay advisory.
     const anomalies = anomaliesOf(comp)
     const shared = exclusionReasons(comp, evidence)
-      .filter((r) => !r.startsWith('caution') && !r.startsWith('weak geo'))
+      .filter((r) =>
+        !r.startsWith('caution')
+        && !r.startsWith('weak geo')
+        // 'disabled by the filter rules' IS the preset ladder — the
+        // R-rules own eligibility here, so its catch-all veto is dropped;
+        // the comp's disableReasons ride the pick as recoverable notes.
+        && r !== 'disabled by the filter rules')
       .map((r) => `R4 ${r}`)
     const hard = [...anomalies, ...shared]
     if (hard.length) {
