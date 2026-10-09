@@ -940,17 +940,33 @@ export class AnalysisJobDO {
       }
       // Geocodio backs the lookups (1,000 lookups/min) — wide concurrency is
       // safe; the Census/Firecrawl fallbacks only fire when Geocodio misses.
+      // Under concurrency the Census endpoint IP-blocks and every lookup
+      // pays the ~15s Firecrawl relay — so the queue is closest-first and
+      // exits early once the working pool can be fully pocket-anchored
+      // (distant comps can't tier-match a ~1-2mi block group anyway).
+      const GEO_CAP = Number(this.env.CORE_WORKING_POOL) || 30
+      const LOOKUP_CEILING = Math.max(GEO_CAP * 2, 40)
       const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
       const queue = comps.map((c, i) => ({ c, i }))
+        .sort((a, b) => (a.c.distanceMiles ?? 999) - (b.c.distanceMiles ?? 999))
+      let lookedUp = 0
+      let pocketHits = 0
       await Promise.all(
         Array.from({ length: 15 }, async () => {
           for (let item = queue.shift(); item; item = queue.shift()) {
+            if (lookedUp >= LOOKUP_CEILING || pocketHits >= GEO_CAP) break
             if (item.c.latitude != null && item.c.longitude != null) {
-              geos[item.i] = await lookup(item.c.latitude, item.c.longitude)
+              lookedUp++
+              const g = await lookup(item.c.latitude, item.c.longitude)
+              geos[item.i] = g
+              if (g && (g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract)) pocketHits++
             }
           }
         }),
       )
+      if (lookedUp < comps.length) {
+        console.log(`[AnalysisJobDO] geo lane early-exit: ${lookedUp}/${comps.length} lookups, ${pocketHits} pocket hits`)
+      }
       const geoPassers = comps.filter((c, i) => {
         const g = geos[i]
         if (!g) return false
