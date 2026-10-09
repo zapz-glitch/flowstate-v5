@@ -312,8 +312,16 @@ export function runDeterministicSelector(
   // and drivers are only ever in-pocket picks. Off-pocket picks stay
   // supporting evidence (a warn at most).
   const subjectTract = (subject.censusTract as string | null | undefined) ?? null
+  // Pocket test identical to the gate's (verdict-grade inBg/inPocket):
+  // sameBlockGroup or a stage-A/B Clef digest geoFit — NOT the looser
+  // matchProfile tier, so what the selector picks is what d1 counts.
+  const digestGeoFit = (r: RankedComp): string | null => {
+    const rec = (r.comp as { clefDigest?: Record<string, Record<string, unknown>> | null }).clefDigest
+    const v = rec?.B?.geoFit ?? rec?.A?.geoFit
+    return typeof v === 'string' ? v : null
+  }
   const inBg = (r: RankedComp) =>
-    r.comp.sameBlockGroup === true || r.profile.geoTier === 'BLOCK_GROUP'
+    r.comp.sameBlockGroup === true || ['block_group', 'same_pocket'].includes(digestGeoFit(r) ?? '')
   const inPocket = (r: RankedComp) =>
     inBg(r) || r.profile.geoTier === 'TRACT' ||
     (subjectTract != null && r.comp.censusTract === subjectTract)
@@ -323,12 +331,16 @@ export function runDeterministicSelector(
   // Picks: ARV-qualified comps always join the set first (even below
   // MIN_PICKS — d4 wants every qualified comp used), then in-pocket
   // comps from either band, then the remaining median fill.
-  const pocketPicks = clean.filter((r) => !asIsPriced(r) && inPocketPick(r)).sort(rank)
+  // d1 pocket anchoring in the ordering itself: EVERY pickable in-pocket
+  // comp outranks every off-pocket comp — an off-pocket ARV comp never
+  // cuts ahead of an in-pocket median comp while pocket stock remains.
+  // Inside each side, ARV-qualified comps first, then the rank.
+  const pickable = clean.filter((r) => !asIsPriced(r))
+  const arvFirst = (a: RankedComp, b: RankedComp) =>
+    Number(arvPool.includes(b)) - Number(arvPool.includes(a)) || rank(a, b)
   const ordered = [
-    ...arvPool.filter(inPocketPick),
-    ...arvPool.filter((r) => !inPocketPick(r)),
-    ...pocketPicks.filter((r) => !arvPool.includes(r)),
-    ...medianPool.filter((r) => !inPocketPick(r)),
+    ...pickable.filter(inPocketPick).sort(arvFirst),
+    ...pickable.filter((r) => !inPocketPick(r)).sort(arvFirst),
   ]
   const picks = ordered.slice(0, MAX_PICKS)
   // Drivers carry the pricing weight — in-pocket only. When the pool has

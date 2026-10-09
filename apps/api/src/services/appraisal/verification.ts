@@ -152,8 +152,10 @@ export function verifyCompEvidence(
     if (preferredSaleAgeDays == null || preferredSaleAgeDays <= 0) {
       staleness = 'unverified'
     } else if (saleAgeDays > preferredSaleAgeDays) {
+      // Stale is recorded on the comp — the caution reads via
+      // exclusionReasons. It is never a veto: in a stale market the
+      // freshest renovated sale IS the evidence (doctrine).
       staleness = 'stale'
-      flags.push(`Sale is ${saleAgeDays} days old — outside preferred ${preferredSaleAgeDays}-day window`)
     } else {
       staleness = 'current'
     }
