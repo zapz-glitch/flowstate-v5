@@ -543,15 +543,20 @@ export class AnalysisJobDO {
         // reach ~18 months — the configured window (often ~6mo, derived
         // from sale_age) truncates the exact comps the rules are built to
         // admit. Floor the fetch at the deepest reachable tier.
-        monthsBack: propertyApi.providerName === 'attom-mcp'
+        monthsBack: (propertyApi.providerName === 'attom-mcp' || config.harness === 'corelogic')
           ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
           : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
         // Sub-1,000sf subjects: evaluation replaces the ±diff band with an
         // absolute 1,000sf ceiling — widen the provider-side diff so
-        // qualifying comps aren't culled upstream.
-        sqftDiff: (property.squareFeet != null && property.squareFeet < 1000)
-          ? Math.max(apiFilterParams.sqftDiff ?? 0, 1000)
-          : apiFilterParams.sqftDiff,
+        // qualifying comps aren't culled upstream. CoreLogic applies the
+        // window server-side and starves the pool (±200sf → 0 comps), so
+        // the alpha harness lets the filter ladder do the fit work and
+        // fetches unbounded by size.
+        sqftDiff: config.harness === 'corelogic'
+          ? undefined
+          : (property.squareFeet != null && property.squareFeet < 1000)
+            ? Math.max(apiFilterParams.sqftDiff ?? 0, 1000)
+            : apiFilterParams.sqftDiff,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
@@ -868,10 +873,16 @@ export class AnalysisJobDO {
     // subject's census block group or tract. Non-passers stay in the pool
     // unenriched with sameBlockGroup/crossesMajorRoad/censusTract stamped.
     const isAttomMcp = propertyApi.providerName === 'attom-mcp'
+    // The census geo-gate + gated enrichment is provider-agnostic — the
+    // corelogic-alpha harness needs the same lane (geocode every comp,
+    // stamp tract/BG/subdivision matches, enrich the in-pocket passers).
+    // attom-only calls inside (market-context supplement, deed/bulk id
+    // sets) degrade silently under other providers.
+    const geoGateActive = isAttomMcp || config.harness === 'corelogic'
     const gateAndEnrich = async (
       comps: NormalizedComparable[],
     ): Promise<NormalizedComparable[]> => {
-      if (!isAttomMcp || property.latitude == null || property.longitude == null) return comps
+      if (!geoGateActive || property.latitude == null || property.longitude == null) return comps
       const subjectGeo = await fetchCensusGeography(
         property.latitude,
         property.longitude,
@@ -1145,7 +1156,7 @@ export class AnalysisJobDO {
       flagUnverified(merged)
       return merged
     }
-    if (isAttomMcp) {
+    if (geoGateActive) {
       enrichedComps = await gateAndEnrich(rawComps)
       retrieval.candidatesEnriched = candidatesEnriched
       console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
@@ -1190,7 +1201,7 @@ export class AnalysisJobDO {
       // attom-mcp census gate has already enriched passers; merging from
       // rawComps would clobber the enriched records.
       const merged = mergeComparablePools(enrichedComps, wider.data.comparables)
-      if (isAttomMcp) {
+      if (geoGateActive) {
         // mergeComparablePools prefers the expanded pool's copy of a duped
         // comp — which is the unenriched variant. Overlay the enrichment
         // fields the gate paid for onto the winner.
@@ -1252,7 +1263,7 @@ export class AnalysisJobDO {
       let newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
       for (const c of newCandidates) poolCompIds.add(c.id)
       candidatesPruned += newCandidates.filter((c) => isDeadComp(c)).length
-      if (isAttomMcp) {
+      if (geoGateActive) {
         newCandidates = await gateAndEnrich(newCandidates)
         retrieval.candidatesEnriched = candidatesEnriched
         // Stage-C digest for expansion-refetch enriched comps — same read
@@ -1407,7 +1418,7 @@ export class AnalysisJobDO {
       // comps the ladder admitted must stay enabled through evaluation.
       // Agent runs keep the caller's overrides verbatim instead — the
       // ruleset is the doctrine, not the preset ladder.
-      ...(isAttomMcp && config.harness !== 'agent' && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
+      ...(geoGateActive && config.harness !== 'agent' && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
         ? {
             appraisalRules: {
               ...(config.evalParams.appraisalRules ?? {}),

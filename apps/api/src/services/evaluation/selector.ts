@@ -233,8 +233,16 @@ export function runDeterministicSelector(
   const condClass = (r: RankedComp): string | null =>
     (r.comp.classification as { type?: string } | null | undefined)?.type ?? null
   const isAsIs = (r: RankedComp) => condClass(r) === 'as_is'
+  // ARV-qualified — same definition the gate uses (carriesArvEvidence):
+  // verified flip, renovated classification, Renovated/Updated condition
+  // label, or ARV comp tier. Providers that don't populate one field still
+  // qualify through the others.
   const isRenovated = (r: RankedComp) =>
-    condClass(r) === 'after_renovation' || (!condClass(r) && r.group === 'top')
+    (r.comp as { verifiedFlip?: boolean }).verifiedFlip === true ||
+    condClass(r) === 'after_renovation' ||
+    (r.comp.conditionLabel === 'Renovated' || r.comp.conditionLabel === 'Updated') ||
+    r.comp.compTier === 'arv' ||
+    (!condClass(r) && r.group === 'top')
   for (const r of clean) if (isAsIs(r)) r.audit.rules.push('R5:as-is-band')
   const arvPool = clean.filter((r) => !isAsIs(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !isAsIs(r) && !isRenovated(r)).sort(rank)
@@ -255,12 +263,15 @@ export function runDeterministicSelector(
   const bgExists = ranked.some(inBg)
   const inPocketPick = (r: RankedComp) => (bgExists ? inBg(r) : inPocket(r))
 
-  const pickPool = (medianFallback ? medianPool : arvPool)
+  // Picks: ARV-qualified comps always join the set first (even below
+  // MIN_PICKS — d4 wants every qualified comp used), then in-pocket
+  // comps from either band, then the remaining median fill.
   const pocketPicks = clean.filter(inPocketPick).sort(rank)
   const ordered = [
-    ...pickPool.filter(inPocketPick),
-    ...pocketPicks.filter((r) => !pickPool.includes(r)),
-    ...pickPool.filter((r) => !inPocketPick(r)),
+    ...arvPool.filter(inPocketPick),
+    ...arvPool.filter((r) => !inPocketPick(r)),
+    ...pocketPicks.filter((r) => !arvPool.includes(r)),
+    ...medianPool.filter((r) => !inPocketPick(r)),
   ]
   const picks = ordered.slice(0, MAX_PICKS)
   // Drivers carry the pricing weight — in-pocket only. When the pool has
@@ -289,10 +300,14 @@ export function runDeterministicSelector(
 
   const ppsfs = picks.map((p) => p.ppsf).sort((a, b) => a - b)
   const medianPpsf = ppsfs.length % 2 ? ppsfs[(ppsfs.length - 1) / 2] : (ppsfs[ppsfs.length / 2 - 1] + ppsfs[ppsfs.length / 2]) / 2
-  // R6: the ARV anchors inside the picks' price envelope ±10% — a large
-  // subject on small comps would otherwise extrapolate past the top sale.
+  // R6: the ARV anchors inside the ARV-qualified pool's price envelope
+  // ±10% — the same bounds d7 measures (qualified comps' sale prices
+  // widened 10%). With thin qualified evidence the picks' own envelope
+  // binds instead — extrapolating past the top sale fails either way.
   const rawArv = medianPpsf * (subject.squareFeet ?? 0)
-  const prices = picks.map((p) => p.comp.salePrice!).sort((a, b) => a - b)
+  const qualifiedPrices = arvPool.map((r) => r.comp.salePrice!).filter((p) => p != null && p > 0)
+  const envSource = qualifiedPrices.length >= 2 ? qualifiedPrices : picks.map((p) => p.comp.salePrice!)
+  const prices = envSource.slice().sort((a, b) => a - b)
   const arv = Math.round(Math.min(Math.max(rawArv, prices[0] * 0.9), prices[prices.length - 1] * 1.1) / 500) * 500
 
   const bgPicks = picks.filter((p) => p.profile.geoTier === 'BLOCK_GROUP').length
