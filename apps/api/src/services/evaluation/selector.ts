@@ -430,9 +430,9 @@ export function runDeterministicSelector(
   // only failed preset tolerances (style/era/210d) is enabled evidence
   // here; its flags ride the pick as recoverable adjustments.
   const eligibleIds = new Set(
-    ranked.filter((r) => r.audit.verdict !== 'excluded' && r.audit.verdict !== 'unpriceable').map((r) => r.id))
+    ranked.filter((r) => r.audit.verdict !== 'excluded' && r.audit.verdict !== 'unpriceable').map((r) => String(r.id)))
   const gateComps = ctx.appraisalResult.comparables.map((c) =>
-    c.id && !c.isEnabled && eligibleIds.has(c.id) ? { ...c, isEnabled: true } : c)
+    c.id != null && !c.isEnabled && eligibleIds.has(String(c.id)) ? { ...c, isEnabled: true } : c)
   const enabledById = new Map(
     gateComps
       .filter((c) => c.isEnabled && c.id)
@@ -442,7 +442,7 @@ export function runDeterministicSelector(
   let lastFails: string[] = []
   let verdict = selection
   for (let cycle = 0; cycle <= 2; cycle++) {
-    const fails = validateAgentSelection(verdict, ctx.appraisalResult.comparables)
+    const fails = validateAgentSelection(verdict, gateComps)
     const grade = gradeVerdict(evidence, verdict)
     if (fails.length) {
       grade.failures.push('coherence_validation')
@@ -477,7 +477,7 @@ export function runDeterministicSelector(
     model: 'deterministic-selector',
     attempts,
     clarifications: [],
-    debugNotes: lastFails.length ? lastFails : accepted ? ledger : [...(attempts.at(-1)?.grade.gateFeedback ?? []), ...ledger],
+    debugNotes: lastFails.length ? [...lastFails, ...ledger] : accepted ? ledger : [...(attempts.at(-1)?.grade.gateFeedback ?? []), ...ledger],
     unavailable: false,
   }
 }
