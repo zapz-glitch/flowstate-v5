@@ -231,13 +231,38 @@ export function runDeterministicSelector(
   // median fallback regardless of the pocket's real top cluster). Re-group
   // the clean pocket set: outliers never set the bands here either.
   const pocketClean = clean.filter((r) => r.profile.geoTier !== 'OFF_POCKET')
-  const selGroups = pocketClean.length >= 3
-    ? groupPocketSales(pocketClean.map((r) => ({ id: r.id, ppsf: r.ppsf }))).groups
+  const selGrouping = pocketClean.length >= 3
+    ? groupPocketSales(pocketClean.map((r) => ({ id: r.id, ppsf: r.ppsf })))
     : null
   for (const r of clean) {
-    const g = selGroups?.get(r.id)
+    const g = selGrouping?.groups.get(r.id)
     if (g) r.group = g
   }
+  // Ladder outliers are code-flagged anomalies — a sale standing alone
+  // above the pocket's top cluster (the $3.3M waterfront mansion in a
+  // $700k interior pocket) is geography without price evidence. R4.
+  for (const r of ranked) {
+    if (r.audit.verdict === 'eligible' && selGrouping?.outliers.has(r.id)) {
+      r.audit.verdict = 'excluded'
+      r.audit.rules.push('R4')
+      r.audit.reasons.push(`R4 ladder-outlier — $${Math.round(r.ppsf)}/sf stands alone above the pocket's top cluster`)
+    }
+  }
+  // Explicit outsized-premium bound — >2.5x the clean pocket's median
+  // $/sf is the same anomaly even when the ladder didn't flag it.
+  const pocketPpsfs = pocketClean.map((r) => r.ppsf).sort((a, b) => a - b)
+  const pocketMedian = pocketPpsfs.length ? pocketPpsfs[Math.floor((pocketPpsfs.length - 1) / 2)] : 0
+  for (const r of ranked) {
+    if (r.audit.verdict === 'eligible' && pocketMedian > 0 && r.ppsf > pocketMedian * 2.5) {
+      r.audit.verdict = 'excluded'
+      r.audit.rules.push('R4')
+      r.audit.reasons.push(`R4 outsized-premium — $${Math.round(r.ppsf)}/sf is ${(r.ppsf / pocketMedian).toFixed(1)}x the pocket median`)
+    }
+  }
+  // clean is re-derived below after the outlier pass.
+  const cleanSet = new Set(ranked.filter((r) => r.audit.verdict === 'eligible').map((r) => r.id))
+  clean.length = 0
+  clean.push(...ranked.filter((r) => cleanSet.has(r.id)))
   // The three price groups the run reports — ARV band / median / as-is —
   // over clean comps only (outliers never set the bands).
   const groupStats = (g: PriceGroup) => {
@@ -273,8 +298,11 @@ export function runDeterministicSelector(
     r.comp.compTier === 'arv' ||
     (!condClass(r) && r.group === 'top')
   for (const r of clean) if (isAsIs(r)) r.audit.rules.push('R5:as-is-band')
-  const arvPool = clean.filter((r) => !isAsIs(r) && isRenovated(r)).sort(rank)
-  const medianPool = clean.filter((r) => !isAsIs(r) && !isRenovated(r)).sort(rank)
+  // Investor-band pricing is as-is evidence in code too — a bottom-rung
+  // comp never picks, same rule as a labeled as_is comp (R5).
+  const asIsPriced = (r: RankedComp) => isAsIs(r) || r.group === 'bottom'
+  const arvPool = clean.filter((r) => !asIsPriced(r) && isRenovated(r)).sort(rank)
+  const medianPool = clean.filter((r) => !asIsPriced(r) && !isRenovated(r)).sort(rank)
   const medianFallback = arvPool.length < MIN_PICKS
 
   // d1 pocket anchoring — pricing weight stays in the block group (or the
@@ -295,7 +323,7 @@ export function runDeterministicSelector(
   // Picks: ARV-qualified comps always join the set first (even below
   // MIN_PICKS — d4 wants every qualified comp used), then in-pocket
   // comps from either band, then the remaining median fill.
-  const pocketPicks = clean.filter(inPocketPick).sort(rank)
+  const pocketPicks = clean.filter((r) => !asIsPriced(r) && inPocketPick(r)).sort(rank)
   const ordered = [
     ...arvPool.filter(inPocketPick),
     ...arvPool.filter((r) => !inPocketPick(r)),
@@ -333,7 +361,16 @@ export function runDeterministicSelector(
   // ±10% — the same bounds d7 measures (qualified comps' sale prices
   // widened 10%). With thin qualified evidence the picks' own envelope
   // binds instead — extrapolating past the top sale fails either way.
-  const rawArv = medianPpsf * (subject.squareFeet ?? 0)
+  // ARV prices off the ARV-qualified picks when they exist — doctrine:
+  // "ARV comps that match our rules, if none then median." Median-of-all-
+  // picks only anchors when the ARV band genuinely came up empty.
+  const arvPicks = picks.filter((p) => arvPool.includes(p))
+  const pricedPpsfs = (arvPicks.length >= 2 ? arvPicks : picks)
+    .map((p) => p.ppsf).sort((a, b) => a - b)
+  const pricingMedian = pricedPpsfs.length % 2
+    ? pricedPpsfs[(pricedPpsfs.length - 1) / 2]
+    : (pricedPpsfs[pricedPpsfs.length / 2 - 1] + pricedPpsfs[pricedPpsfs.length / 2]) / 2
+  const rawArv = pricingMedian * (subject.squareFeet ?? 0)
   const qualifiedPrices = arvPool.map((r) => r.comp.salePrice!).filter((p) => p != null && p > 0)
   const envSource = qualifiedPrices.length >= 2 ? qualifiedPrices : picks.map((p) => p.comp.salePrice!)
   const prices = envSource.slice().sort((a, b) => a - b)
