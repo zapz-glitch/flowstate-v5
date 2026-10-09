@@ -46,13 +46,14 @@ You also receive the block-group PRICE LADDER (blockLadder): the pocket's sales 
 
 Each comp also carries OBSERVABLE ANSWERS (observables): small evidence reads from its cover photo + description + closed price + street view — pricePosition vs the pocket benchmark (codePosition is the code-verified tier), descCondition, coverPhotoEvidence, renoClaimP, priceConditionAgreement, unexplainedPremiumP, finalTier, physicalMatchP (probability the comp's street view physically matches the subject — style/stories/garage/curb appeal), and arvFitnessP (probability the comp is a finished/renovated/move-in-ready version of the subject — the ARV-grade ladder: flipper-complete highest, maintained ~70-80s, fixer/investor lowest). The marketBenchmark block is the matched-pocket distribution those positions classify against. Read the tiers as: priced ABOVE_MEDIAN ≈ renovated/ARV-band evidence, at MEDIAN ≈ median-market evidence, priced far BELOW_MEDIAN ≈ investor/as-is evidence — but a price tier is not proof of condition; weight conflicts the observables preserved (e.g. above-median price with DISTRESSED description or an unexplainedPremium flag ≈ 1 means a suspect comp, not an ARV anchor).
 
-Each comp row also carries exclusionReasons — code-stamped disqualifiers (geo, stale sale, uncorroborated price, investor-priced). These are facts, not suggestions: an exclusionReason means the comp is disqualified evidence unless the reason is demonstrably wrong.
+Each comp row also carries exclusionReasons — code-stamped disqualifiers (geo, uncorroborated price, investor-priced) plus soft cautions (stale sale). These are facts, not suggestions: a hard exclusionReason means the comp is disqualified evidence unless the reason is demonstrably wrong. A stale-sale caution is NOT a disqualification — see rule 5.
 
 Your job, IN ORDER:
 1. DISQUALIFY FIRST. Read every comp's exclusionReasons and the observables — confirm the disqualifications and set those comps aside before selecting anything. A comp that is merely cheap-but-legal ("investor-grade") is real data but not ARV evidence.
 2. From the survivors, pick the comps that set the ARV — the genuinely renovated retail evidence — name which picks drove the number, and post the ARV. Prefer high arvFitnessP AND high physicalMatchP: a comp that both fits the rules and resembles the subject's finished state is the strongest evidence.
 3. GEOGRAPHY IS STRICT — never reach outside the pocket for a better-matching house. Order: same block group → same neighborhood → same census tract. If NO in-pocket comp qualifies, select the median comps of the subject's block group (median-of-BG fallback) — the pocket's own market, not a similar house across town.
 4. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence.
+5. STALENESS IS A CAUTION, NOT A VETO. When the market itself is stale, the pocket's renovated sales are the freshest ARV evidence that exists — a completed in-pocket flip IS the realized ARV and belongs in the drivers even past the preferred-sale-age line. Staleness lowers your confidence, not the comp's eligibility — note it in conf/dataQuality instead of excluding or demoting the sale to supporting-only.
 
 If anything is missing or ambiguous, you may ask the Decisions sub-agent to clarify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Decisions answers with probability + verdict; you decide.
 
@@ -205,7 +206,7 @@ function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: Harness
   if (c.saleDate) {
     const ageDays = Math.floor((Date.now() - new Date(c.saleDate).getTime()) / 864e5)
     if (Number.isFinite(ageDays) && ageDays > rules.preferredSaleAgeDays) {
-      reasons.push(`stale sale (${ageDays}d old vs ${rules.preferredSaleAgeDays}d rule)`)
+      reasons.push(`caution: stale sale (${ageDays}d old vs ${rules.preferredSaleAgeDays}d rule) — not a disqualifier; in a stale market, in-pocket renovated sales still qualify as drivers`)
     }
   }
   const v = c.evidenceVerification as Record<string, unknown> | null | undefined
