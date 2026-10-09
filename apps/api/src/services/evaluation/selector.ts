@@ -27,6 +27,7 @@ import { compMatchProfile } from './observable'
 import { exclusionReasons } from './appraiser'
 import { validateAgentSelection } from './index'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
+import type { AppraisedComparable } from '../appraisal/types'
 import type { AppraiserResult } from './appraiser'
 import type { CompMatchProfile } from './observable'
 
@@ -282,14 +283,14 @@ export function runDeterministicSelector(
   for (const p of picks) p.audit.verdict = 'picked'
 
   const attempts: SelectionAttempt[] = []
-  if (picks.length < MIN_PICKS || !subject.squareFeet) {
+  if (picks.length < 2 || !subject.squareFeet) {
     return {
       selection: null,
       model: 'deterministic-selector',
       attempts,
       clarifications: [],
       debugNotes: [
-        `selector: ${picks.length} qualified comps in ${medianFallback ? 'median' : 'arv'} band — needs ${MIN_PICKS}+`,
+        `selector: ${picks.length} qualified comps in ${medianFallback ? 'median' : 'arv'} band — needs 2+`,
         `groups: arv=${arvBand?.n ?? 0} median=${medianBand?.n ?? 0} as-is=${asIsBand?.n ?? 0} of ${ranked.length} priced`,
         ...audits.filter((a) => a.verdict === 'excluded').slice(0, 8).map((a) => `${a.id}: ${a.reasons.join('; ')}`),
         ...(subject.squareFeet ? [] : ['subject squareFeet missing — cannot price $/sqft']),
@@ -313,8 +314,9 @@ export function runDeterministicSelector(
   const bgPicks = picks.filter((p) => p.profile.geoTier === 'BLOCK_GROUP').length
   const medianFitness = picks.map((p) => p.comp.observables?.arvFitnessP ?? 0.5).sort((a, b) => a - b)[Math.floor((picks.length - 1) / 2)]
   const missingInPicks = picks.reduce((n, p) => n + p.audit.missingData.length, 0)
+  const thinPool = picks.length < MIN_PICKS
   const conf: AgentSelection['conf'] =
-    medianFallback || missingInPicks > 0 ? 'low'
+    thinPool || medianFallback || missingInPicks > 0 ? 'low'
     : picks.length >= 4 && bgPicks >= 2 && medianFitness >= 0.6 ? 'high'
     : picks.length >= 3 ? 'medium'
     : 'low'
@@ -339,6 +341,7 @@ export function runDeterministicSelector(
     ...(Object.keys(adjustments).length ? { adjustments } : {}),
     flags: [
       ...(medianFallback ? ['median_fallback'] : []),
+      ...(thinPool ? ['thin_pocket'] : []),
       `price_groups:arv_$${Math.round(arvBand?.medianPpsf ?? 0)}/sf,median_$${Math.round(medianBand?.medianPpsf ?? 0)}/sf,asis_$${Math.round(asIsBand?.medianPpsf ?? 0)}/sf`,
     ],
     notes: `Deterministic selector (${medianFallback ? 'median-band fallback' : 'ARV band'}): ${picks.length} picks — ${bgPicks} block-group match(es), median $${Math.round(medianPpsf)}/sqft × ${subject.squareFeet}sqft subject. Groups: arv $${Math.round(arvBand?.medianPpsf ?? 0)}/sf · median $${Math.round(medianBand?.medianPpsf ?? 0)}/sf · as-is $${Math.round(asIsBand?.medianPpsf ?? 0)}/sf.`,
@@ -349,21 +352,42 @@ export function runDeterministicSelector(
   }
 
   // Same coherence bounds + revision gate the model seat faced — enabled
-  // comps only, priceable picks, d1–d8 checks.
-  const fails = validateAgentSelection(selection, ctx.appraisalResult.comparables)
-  const grade = gradeVerdict(evidence, selection)
-  if (fails.length) {
-    grade.failures.push('coherence_validation')
-    grade.gateFails.push('validation')
-    grade.gateFeedback.push(...fails)
+  // comps only, priceable picks, d1–d8 checks. A reject gets deterministic
+  // remedies: each gate complaint maps to a concrete re-derive (swap a
+  // dead pick, re-anchor drivers in-pocket, re-clamp the ARV inside the
+  // envelope) — instant, no model, ≤2 remedy cycles.
+  const enabledById = new Map(
+    ctx.appraisalResult.comparables
+      .filter((c) => c.isEnabled && c.id)
+      .map((c) => [c.id!, c] as const))
+  const inPocketIds = new Set(ranked.filter(inPocketPick).map((r) => r.id))
+  let accepted = false
+  let lastFails: string[] = []
+  let verdict = selection
+  for (let cycle = 0; cycle <= 2; cycle++) {
+    const fails = validateAgentSelection(verdict, ctx.appraisalResult.comparables)
+    const grade = gradeVerdict(evidence, verdict)
+    if (fails.length) {
+      grade.failures.push('coherence_validation')
+      grade.gateFails.push('validation')
+      grade.gateFeedback.push(...fails)
+    }
+    const ok = fails.length === 0 && grade.gateFails.length === 0
+    attempts.push({
+      selection: verdict,
+      grade,
+      decision: ok ? 'accepted' : 'rejected',
+      at: new Date().toISOString(),
+    })
+    if (ok) { accepted = true; break }
+    lastFails = [...fails, ...grade.gateFeedback]
+    if (cycle === 2) break
+    const remedied = remedySelection(verdict, lastFails, {
+      ordered, enabledById, inPocketIds, minDrivers: MIN_PICKS,
+    })
+    if (!remedied) break
+    verdict = remedied
   }
-  const accepted = fails.length === 0 && grade.gateFails.length === 0
-  attempts.push({
-    selection,
-    grade,
-    decision: accepted ? 'accepted' : 'rejected',
-    at: new Date().toISOString(),
-  })
 
   // The audit ledger rides debugNotes — every excluded comp names its
   // rule; the report trace shows the disprove-first path either way.
@@ -372,11 +396,73 @@ export function runDeterministicSelector(
     .map((a) => `${a.id}: ${a.reasons.join('; ')}`)
 
   return {
-    selection: accepted ? selection : null,
+    selection: accepted ? verdict : null,
     model: 'deterministic-selector',
     attempts,
     clarifications: [],
-    debugNotes: fails.length ? fails : accepted ? ledger : [...grade.gateFeedback, ...ledger],
+    debugNotes: lastFails.length ? lastFails : accepted ? ledger : [...(attempts.at(-1)?.grade.gateFeedback ?? []), ...ledger],
     unavailable: false,
   }
+}
+
+/** Gate-feedback → deterministic fix. Every remedy is a pure re-derive on
+ *  the ranked pool — replace a dead pick, re-anchor drivers in-pocket,
+ *  re-clamp the ARV inside the pick envelope. Returns null when no
+ *  feedback maps to a fixable cause (the honest reject stands). */
+function remedySelection(
+  sel: AgentSelection,
+  feedback: string[],
+  deps: {
+    ordered: RankedComp[]
+    enabledById: Map<string, AppraisedComparable>
+    inPocketIds: Set<string>
+    minDrivers: number
+  },
+): AgentSelection | null {
+  const picks = [...sel.selectedCompIds]
+  let drivers = [...(sel.drivers ?? [])]
+  let arv = sel.arv
+  let changed = false
+  const pickPrices = () =>
+    picks.map((id) => deps.enabledById.get(id)?.salePrice).filter((p): p is number => p != null && p > 0)
+  for (const f of feedback) {
+    const notEnabled = /selected comp (\S+) is not an enabled pool member/.exec(f)
+    if (notEnabled) {
+      const next = deps.ordered.find((r) => !picks.includes(r.id) && deps.enabledById.has(r.id))
+      const i = picks.indexOf(notEnabled[1])
+      if (i >= 0) { if (next) picks[i] = next.id; else picks.splice(i, 1); changed = true }
+      continue
+    }
+    if (/driver (\S+) is not in selectedCompIds/.test(f)) {
+      drivers = drivers.filter((d) => picks.includes(d))
+      changed = true
+      continue
+    }
+    if (/outside the selected-evidence envelope/i.test(f)) {
+      const prices = pickPrices()
+      if (prices.length) {
+        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices) * 0.75), Math.max(...prices) * 1.25) / 500) * 500
+        if (clamped !== arv) { arv = clamped; changed = true }
+      }
+      continue
+    }
+    // Pocket anchoring — drivers must be in-pocket picks
+    if (/outside.*pocket|driver.*pocket|pocket.*driver|off.pocket.*driver/i.test(f)) {
+      const inP = picks.filter((id) => deps.inPocketIds.has(id))
+      const nd = inP.length ? inP.slice(0, deps.minDrivers) : picks.slice(0, deps.minDrivers)
+      if (nd.join() !== drivers.join()) { drivers = nd; changed = true }
+      continue
+    }
+    // ARV extrapolating past the pick envelope — clamp inside it
+    if (/extrapolat|above the (envelope|top)|beyond the/i.test(f)) {
+      const prices = pickPrices()
+      if (prices.length) {
+        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices)), Math.max(...prices)) / 500) * 500
+        if (clamped !== arv) { arv = clamped; changed = true }
+      }
+    }
+  }
+  if (!drivers.length && picks.length) drivers = picks.slice(0, deps.minDrivers)
+  if (!changed && drivers.join() !== (sel.drivers ?? []).join()) changed = true
+  return changed ? { ...sel, selectedCompIds: picks, drivers, arv } : null
 }

@@ -855,6 +855,9 @@ export class AnalysisJobDO {
     }
 
     let enrichedComps = rawComps
+    // corelogic-alpha working pool — populated inside the geo lane once
+    // census stamps land; the expensive lanes below only touch these ids.
+    let workingCompIds: Set<string> | null = null
     const poolCompIds = new Set(rawComps.map((c) => c.id))
     // Param-flex ladder record — how far numeric tolerances stretched to
     // admit evidence (0 = strict tier admitted it).
@@ -957,6 +960,39 @@ export class AnalysisJobDO {
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
       })
+      // corelogic-alpha working-pool cap — the set every expensive lane
+      // (listing scrape, Decisions observables, paid enrichment queue) may
+      // touch. EVERY geo match (block group or tract) and every
+      // provider-stamped name match (subdivision/neighborhood) always
+      // stays; the remainder fills closest-first to the cap so a pocket
+      // comp is never dropped. Capped-out comps stay in the pool for
+      // groupStats/the benchmark, flagged beyondWorkingPool.
+      if (config.harness === 'corelogic') {
+        const WORKING_CAP = Number(this.env.CORE_WORKING_POOL) || 30
+        const keepIdx = new Set<number>()
+        comps.forEach((c, i) => {
+          const g = geos[i]
+          if (g && (g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract)) keepIdx.add(i)
+        })
+        const normN = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+        const subjN = new Set(
+          [property.subdivision, property.neighborhoodName].map(normN).filter((v): v is string => v != null))
+        comps.forEach((c, i) => {
+          if (!keepIdx.has(i) && [c.subdivision, c.neighborhoodName].map(normN).some((v) => v != null && subjN.has(v))) keepIdx.add(i)
+        })
+        for (const { i } of comps.map((c, i) => ({ c, i }))
+          .filter(({ i }) => !keepIdx.has(i))
+          .sort((a, b) => (a.c.distanceMiles ?? 999) - (b.c.distanceMiles ?? 999))
+          .slice(0, Math.max(0, WORKING_CAP - keepIdx.size))) {
+          keepIdx.add(i)
+        }
+        workingCompIds = new Set(comps.filter((_, i) => keepIdx.has(i)).map((c) => String(c.id)))
+        let cappedN = 0
+        for (const c of comps) {
+          if (!workingCompIds.has(String(c.id))) { (c as { beyondWorkingPool?: boolean }).beyondWorkingPool = true; cappedN++ }
+        }
+        console.log(`[AnalysisJobDO] working pool: ${workingCompIds.size}/${comps.length} comps — ${cappedN} beyond cap (geo+name matches always kept)`)
+      }
       // Stage-B digest — the moment geography resolves, Clef pre-reads the
       // block-group/neighborhood fit for every comp while the enrichment
       // ladder runs beside it. The batch is ALSO awaited (bounded) below:
@@ -1024,7 +1060,9 @@ export class AnalysisJobDO {
         [property.subdivision, property.neighborhoodName].map(normName).filter((v): v is string => v != null))
       const sameName = (c: NormalizedComparable) =>
         [c.subdivision, c.neighborhoodName].map(normName).some((v) => v != null && subjectNames.has(v))
-      const outside = comps.filter((c, i) => geos[i] != null && !geoPasserIds.has(c.id) && spendable(c))
+      const outside = comps.filter((c, i) => geos[i] != null && !geoPasserIds.has(c.id) && spendable(c)
+        // Paid enrichment never leaves the working pool on corelogic-alpha.
+        && (workingCompIds == null || workingCompIds.has(String(c.id))))
       const scopes: Array<{ name: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent'; comps: NormalizedComparable[] }> = [
         { name: 'tract', comps: geoPassers.filter((c) => c.censusTract != null && c.censusTract === subjectGeo.tract) },
         { name: 'block_group', comps: geoPassers.filter((c) => !(c.censusTract != null && c.censusTract === subjectGeo.tract)) },
@@ -1156,8 +1194,11 @@ export class AnalysisJobDO {
       flagUnverified(merged)
       return merged
     }
+    let geoLaneMs = 0
     if (geoGateActive) {
+      const tGeo = Date.now()
       enrichedComps = await gateAndEnrich(rawComps)
+      geoLaneMs = Date.now() - tGeo
       retrieval.candidatesEnriched = candidatesEnriched
       console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
       // Stage-C digest — enriched block-matched comps get the full read
@@ -1447,6 +1488,9 @@ export class AnalysisJobDO {
       // Comp evidence started the moment comps landed — a Map promise the
       // pipeline awaits instead of launching its own batch late.
       prefetchedCompEvidence,
+      // corelogic-alpha working pool — every lane below (evidence scrape,
+      // observables, Redfin details) restricts to these ids when set.
+      workingCompIds,
       // Clef agent-assist digests — stage A (comps-landed), B (post-geocode
       // inside the census gate), C (post-enrichment). Merged per comp here;
       // the pipeline stamps each stage's answers as comp.clefDigest.{A,B,C}.
@@ -1491,7 +1535,11 @@ export class AnalysisJobDO {
         // Pocket desirability only needs the subject property — fire it
         // overlapped with phase 1 (comp gather is the long pole) instead
         // of serially after it.
-        const pocketDesirabilityPromise = ratePocketDesirability(this.env, bundle.property).catch(() => null)
+        // Pocket desirability is a haiku read only the model seat consumed —
+        // the deterministic selector doesn't read it; skip the ~15s call.
+        const pocketDesirabilityPromise = config.harness === 'corelogic'
+          ? Promise.resolve(null)
+          : ratePocketDesirability(this.env, bundle.property).catch(() => null)
         const ctx = await performAnalysisPhase1({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
         if (ctx.photoBundlePromise) ctx.photoBundle = await ctx.photoBundlePromise
@@ -1620,7 +1668,7 @@ export class AnalysisJobDO {
                   marketBenchmark: ctx.marketBenchmark ?? null,
                 }
               : null,
-            latency: { appraiserMs, phase2Ms },
+            latency: { appraiserMs, phase2Ms, geoLaneMs, workingPoolSize: (workingCompIds as Set<string> | null)?.size ?? null },
           }
           const resp = evalResult.response as unknown as Record<string, unknown>
           resp.harness = {

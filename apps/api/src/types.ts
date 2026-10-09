@@ -67,6 +67,9 @@ export interface Env {
   CORELOGIC_CLIENT_SECRET_7?: string
   CORELOGIC_CLIENT_ID_8?: string
   CORELOGIC_CLIENT_SECRET_8?: string
+  /** corelogic-alpha working-pool cap — comps the expensive lanes touch
+   *  (geo+name matches always kept; fill by distance to this size). */
+  CORE_WORKING_POOL?: string
 
   // ─── Property Data (ATTOM) ─────────────────────────────────────────────────
   ATTOM_API_KEY?: string

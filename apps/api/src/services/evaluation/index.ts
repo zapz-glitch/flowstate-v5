@@ -173,6 +173,11 @@ export interface EvaluationParams {
    * batch inside evaluate.
    */
   prefetchedCompEvidence?: Promise<Map<string, CompConditionEvidence | null> | null> | null
+  /** corelogic-alpha working pool — comp ids the expensive lanes (evidence
+   *  scrape, observables, Redfin details) may touch. Every geo/name match
+   *  is kept by construction; capped-out comps are flagged, not removed,
+   *  so statistics still see the full pool. */
+  workingCompIds?: Set<string> | null
   /**
    * Clef agent-assist digests — stage A (comps-landed), B (post-geocode),
    * C (post-enrichment) advisory reads per comp. Serialized as
@@ -756,10 +761,16 @@ export async function performAnalysisPhase1(
   }))
   appraisalResult.selectedCompIds = [...arvIds]
 
+  // Working-pool cap (corelogic-alpha): the scrape/observables/Redfin lanes
+  // only touch comps the geo lane kept — geo+name matches plus closest fill.
+  const inWorkingPool = (c: { id?: string | number | null }) =>
+    params.workingCompIds == null || params.workingCompIds.has(String(c.id))
+
   // Redfin MLS details run in parallel with vision/valuation. Construction
   // evidence covers every geo match; the original top-15 cohort remains a
   // separate set because only those comps may supplement appraisal inputs.
   const legacyRedfinCompTargets = appraisalResult.comparables
+    .filter(inWorkingPool)
     .slice()
     .sort((a, b) =>
       Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
@@ -770,6 +781,7 @@ export async function performAnalysisPhase1(
   // Geo doctrine: block group > neighborhood/subdivision > tract (fallback tier).
   const geoPriority = (comp: AppraisedComparable): number | null => compGeoPriority(bundle.property, comp)
   const geoMatchedRedfinTargets = appraisalResult.comparables
+    .filter(inWorkingPool)
     .map((comp) => ({ comp, priority: geoPriority(comp) }))
     .filter((entry): entry is { comp: AppraisedComparable; priority: number } => entry.priority != null)
     .sort((a, b) => a.priority - b.priority
@@ -777,7 +789,7 @@ export async function performAnalysisPhase1(
     .map(({ comp }) => comp)
   const geoMatchedRedfinIds = new Set(geoMatchedRedfinTargets.map((comp) => comp.id))
   const constructionFillTargets = appraisalResult.comparables
-    .filter((comp) => !geoMatchedRedfinIds.has(comp.id))
+    .filter((comp) => !geoMatchedRedfinIds.has(comp.id) && inWorkingPool(comp))
     .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
     .slice(0, Math.max(0, 15 - geoMatchedRedfinTargets.length))
   const constructionRedfinTargets = [...geoMatchedRedfinTargets, ...constructionFillTargets]
@@ -808,6 +820,7 @@ export async function performAnalysisPhase1(
   // still overlap vision and valuation. Awaited where the comp_curb_appeal
   // step records.
   const clefCompsSorted = appraisalResult.comparables
+    .filter(inWorkingPool)
     .slice()
     .sort((a, b) =>
       Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
