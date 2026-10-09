@@ -224,7 +224,7 @@ const COMP_QUESTIONS = {
   },
   c6_unexplained_premium: {
     type: 'noul' as const,
-    instructions: 'Is this COMP priced substantially above similar neighborhood sales without visible, descriptive, or property-feature evidence that reasonably explains the premium?',
+    instructions: 'EXTREME-VARIANCE CHECK ONLY: is this COMP priced at an outsized level versus the supplied price distribution — the kind of far-outlier sale (e.g. a $1M+ sale inside a ~$300k pocket) that looks like bad data or a non-market transaction rather than a plausible retail sale? A renovated or well-conditioned comp selling modestly above the pocket median is EXPLAINED by its renovation and is NOT unexplained — score near 0 for it. Score high only for extreme variance no evidence could plausibly cover.',
   },
   c7_final_tier: {
     type: 'choice' as const, criteria: TIER_CHOICES,

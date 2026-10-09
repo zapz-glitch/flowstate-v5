@@ -293,7 +293,7 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
       checks.d8 = 'warn'
       failures.push('d8_unexplained_premium_picked')
       for (const c of premiumPicks) {
-        gateFeedback.push(`d8: pick ${c.id} (${c.address ?? 'unknown'}) carries an unexplained-premium flag from the observable lane — justify it or drop it`)
+        gateFeedback.push(`d8: pick ${c.id} (${c.address ?? 'unknown'}) is flagged as an extreme-variance outlier sale — justify it or drop it`)
       }
     } else if (evidence.comps.some((c) => c.observables != null)) {
       checks.d8 = 'pass'
