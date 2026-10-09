@@ -483,6 +483,12 @@ export function runDeterministicSelector(
   const ledger = audits
     .filter((a) => a.verdict === 'excluded')
     .map((a) => `${a.id}: ${a.reasons.join('; ')}`)
+  // Debug line: every comp the pocket test flags, its verdict, group and
+  // flags — shows exactly why gate-pocket comps did or didn't pick.
+  const pickIds = new Set(picks.map((p) => String(p.id)))
+  const pocketLedger = ranked.filter(inPocket).map((r) =>
+    `${r.id}:${r.audit.verdict}${r.group === 'bottom' ? ':bottom' : ''}${isAsIs(r) ? ':asis' : ''}${inBg(r) ? ':BG' : ':TRACT'}${pickIds.has(String(r.id)) ? ':PICKED' : ''}`)
+  ledger.unshift(`pocket: ${pocketLedger.join(' ')}`)
 
   return {
     selection: accepted ? verdict : null,
