@@ -22,7 +22,8 @@
  */
 
 const API_URL = process.env.API_URL ?? 'http://localhost:8787'
-const API_KEY = process.env.API_KEY ?? 'fs_devinspecabtest1234567890abcdef'
+const API_KEY = process.env.API_KEY
+if (!API_KEY) { console.error('FAIL [startup]: set API_KEY (your local fs_… key from apps/api/.dev.vars)'); process.exit(1) }
 const ADDRESS = process.argv[2] ?? '1327 Georgia Ave, Dunedin, FL 34698'
 
 let stage = 'startup'

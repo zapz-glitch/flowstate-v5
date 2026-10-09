@@ -814,14 +814,15 @@ export async function performAnalysisPhase1(
       || Number(b.isEnabled) - Number(a.isEnabled)
       || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
     .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
+  const compGeoById = new Map(bundle.comparables.map((c) => [c.id, c]))
   const clefInputs = clefCompsSorted.map((comp) => ({
     propertyId: comp.id,
     address: comp.address,
     city: comp.city,
     state: comp.state,
     zipCode: comp.zipCode,
-    latitude: comp.latitude ?? null,
-    longitude: comp.longitude ?? null,
+    latitude: compGeoById.get(comp.id)?.latitude ?? null,
+    longitude: compGeoById.get(comp.id)?.longitude ?? null,
     salePrice: comp.salePrice ?? undefined,
     saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
     yearBuilt: comp.yearBuilt ?? undefined,
@@ -911,12 +912,15 @@ export async function performAnalysisPhase1(
             .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
           if (observablesOn) {
             // C1-C7 per comp — cover photo + description + closed price vs
-            // the code-computed pocket benchmark. Parallel lanes.
-            console.log(`[observables] comp lane start — ${classifyInputs.length} comps, benchmark ${marketBenchmark?.scope ?? 'null'} n=${marketBenchmark?.n ?? 0}`)
+            // the code-computed pocket benchmark. Parallel lanes. Runs over
+            // EVERY clef comp: a timed-out listing still carries price +
+            // geocode, which is enough for price-position + imagery reads.
+            console.log(`[observables] comp lane start — ${clefInputs.length} comps, benchmark ${marketBenchmark?.scope ?? 'null'} n=${marketBenchmark?.n ?? 0}`)
             let oi = 0
             const lane = async () => {
-              while (oi < classifyInputs.length) {
-                const { evidence: ev, comp } = classifyInputs[oi++]!
+              while (oi < clefInputs.length) {
+                const comp = clefInputs[oi++]!
+                const ev = early?.get(comp.propertyId) ?? filled.get(comp.propertyId) ?? null
                 const ppsf = comp.salePrice && comp.squareFeet ? comp.salePrice / comp.squareFeet : null
                 const ob = await decisionsCompObservables(env, {
                   comp: {
@@ -930,11 +934,11 @@ export async function performAnalysisPhase1(
                   },
                   salePrice: comp.salePrice ?? null,
                   ppsf,
-                  description: ev.listing?.description ?? null,
-                  coverImage: ev._images?.[0] ?? null,
-                  coverPhotoUrl: ev.listing?.coverPhotoUrl ?? null,
-                  latitude: (comp as { latitude?: number }).latitude ?? null,
-                  longitude: (comp as { longitude?: number }).longitude ?? null,
+                  description: ev?.listing?.description ?? null,
+                  coverImage: ev?._images?.[0] ?? null,
+                  coverPhotoUrl: ev?.listing?.coverPhotoUrl ?? null,
+                  latitude: comp.latitude ?? null,
+                  longitude: comp.longitude ?? null,
                   subjectStreetViewImage: await subjectStreetViewPromise,
                   subjectRef: {
                     squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
@@ -958,11 +962,36 @@ export async function performAnalysisPhase1(
                 // left the field empty. Observable never overrides provider data.
                 if (ob?.siteExposure && !(comp as { siteInfluence?: string }).siteInfluence) {
                   const inf = EXPOSURE_TO_INFLUENCE[ob.siteExposure]
-                  if (inf) (comp as { siteInfluence?: string }).siteInfluence = inf
+                  if (inf) {
+                    (comp as { siteInfluence?: string }).siteInfluence = inf
+                    // The traffic_* deductions read appraisalResult.comparables —
+                    // stamp the pool entry too, not just this lane's temp object.
+                    const poolComp = appraisalResult.comparables.find((x) => x.id === comp.propertyId)
+                    if (poolComp && !(poolComp as { siteInfluence?: string }).siteInfluence) {
+                      (poolComp as { siteInfluence?: string }).siteInfluence = inf
+                    }
+                  }
                 }
               }
             }
-            await Promise.all(Array.from({ length: Math.min(12, classifyInputs.length) }, () => lane()))
+            await Promise.all(Array.from({ length: Math.min(12, clefInputs.length) }, () => lane()))
+            // Decisions-outage rescue: the batch ran gatherOnly, so a dead
+            // lane leaves every comp unclassified. Fall back to the legacy
+            // classify path rather than appraising condition-blind.
+            if (Object.keys(compObservables).length === 0 && classifyInputs.length) {
+              console.warn('[observables] lane answered 0 comps — falling back to comp classify')
+              if (env.ANTHROPIC_API_KEY) {
+                await classifyCompPoolHaiku(
+                  env, classifyInputs,
+                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+                ).catch(() => null)
+              } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+                await classifyCompBatchDecisions(
+                  env, classifyInputs,
+                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+                ).catch(() => null)
+              }
+            }
           } else if (env.ANTHROPIC_API_KEY) {
             await classifyCompPoolHaiku(
               env, classifyInputs,

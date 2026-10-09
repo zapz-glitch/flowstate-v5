@@ -210,7 +210,8 @@ function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: Harness
     }
   }
   const v = c.evidenceVerification as Record<string, unknown> | null | undefined
-  if (v?.priceCheck === 'unverified' || v?.priceCheck === 'divergent') reasons.push('price uncorroborated by AVM')
+  if (v?.priceCheck === 'divergent') reasons.push('price contradicts its own AVM')
+  else if (v?.priceCheck === 'unverified') reasons.push('caution: no AVM on record to corroborate price — treat as unverified evidence, not a disqualifier')
   const vsMed = c.priceLadder?.ppsfVsMedian
   if (typeof vsMed === 'number' && vsMed < 0.75) {
     reasons.push('fits rules but priced far below the pocket — investor-grade sale, not ARV evidence')
