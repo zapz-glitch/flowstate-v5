@@ -115,6 +115,23 @@ export async function getSession(): Promise<Session | null> {
   }
 }
 
+/**
+ * Like getSession(), but only a real auth failure (401/403) returns null —
+ * a dead or erroring API throws instead. Use where "not authenticated"
+ * would be a misleading error for a transient outage.
+ */
+export async function getSessionStrict(): Promise<Session | null> {
+  const cookieStore = await cookies()
+  const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+  const response = await fetch(`${API_URL}/auth/get-session`, {
+    headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+    credentials: 'include',
+  })
+  if (response.status === 401 || response.status === 403) return null
+  if (!response.ok) throw new Error(`Session check failed (${response.status})`)
+  return (await response.json()) as Session
+}
+
 // ─── API Keys ────────────────────────────────────────────────────────────────
 
 export interface ApiKey {
