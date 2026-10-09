@@ -53,6 +53,8 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
+import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
+import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
@@ -812,14 +814,15 @@ export async function performAnalysisPhase1(
       || Number(b.isEnabled) - Number(a.isEnabled)
       || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
     .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
+  const compGeoById = new Map(bundle.comparables.map((c) => [c.id, c]))
   const clefInputs = clefCompsSorted.map((comp) => ({
     propertyId: comp.id,
     address: comp.address,
     city: comp.city,
     state: comp.state,
     zipCode: comp.zipCode,
-    latitude: comp.latitude ?? null,
-    longitude: comp.longitude ?? null,
+    latitude: compGeoById.get(comp.id)?.latitude ?? null,
+    longitude: compGeoById.get(comp.id)?.longitude ?? null,
     salePrice: comp.salePrice ?? undefined,
     saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
     yearBuilt: comp.yearBuilt ?? undefined,
@@ -835,9 +838,56 @@ export async function performAnalysisPhase1(
   // Agent harness: comp evidence is core input, not a shadow lane — run
   // the batch whenever a condition reader exists even without the CLEF
   // flag (haiku classify feeds the Opus appraiser).
+  // Prototype: Decisions observable lane — small answerable questions
+  // (S1-S7 subject / C1-C7 per comp) replace the whole-condition classify.
+  // Price boundaries are code-computed; Decisions classifies, Sonnet
+  // appraises. Falls back to the classify pool when Decisions is absent.
+  const observablesOn = params.harness === 'agent' && isDecisionsAvailable(env)
+  const marketBenchmark = observablesOn
+    ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
+    : null
+  const compObservables: Record<string, CompObservables> = {}
+  // c9 site-exposure answer → the siteInfluence strings the preset's
+  // traffic_* deductions parse (fronting/siding/backing).
+  const EXPOSURE_TO_INFLUENCE: Record<string, string> = {
+    FRONTING: 'fronts_traffic',
+    SIDING: 'sides_traffic',
+    BACKING: 'backs_traffic',
+  }
+  // Subject S1-S7 — ALL listing photos (100% coverage) + description +
+  // the pocket benchmark. Runs beside the comp observable lane.
+  const subjectObservablesPromise: Promise<SubjectObservables | null> = observablesOn
+    ? photoBundlePromise.then((pb) => {
+        const entry = pb?.subject
+        const photos = entry?.photos ?? []
+        const listPrice = (entry?.metadata?.listPrice as number | undefined) ?? (bundle.property.listingDetails?.listPrice as number | undefined) ?? null
+        return decisionsSubjectObservables(env, {
+          subject: {
+            address: bundle.property.address, city: bundle.property.city, state: bundle.property.state,
+            zipCode: bundle.property.zipCode, bedrooms: bundle.property.bedrooms, bathrooms: bundle.property.bathrooms,
+            squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
+            lotSizeAcres: bundle.property.lotSizeAcres, censusBlockGroup: bundle.property.censusBlockGroup,
+            censusTract: bundle.property.censusTract, neighborhoodName: bundle.property.neighborhoodName,
+            subdivision: bundle.property.subdivision, propertyType: bundle.property.propertyType,
+            latitude: bundle.property.latitude, longitude: bundle.property.longitude,
+          },
+          photoUrls: photos,
+          coverPhotoUrl: photos[0] ?? null,
+          description: entry?.description ?? null,
+          benchmark: marketBenchmark,
+          askPrice: listPrice,
+          askPpsf: listPrice != null && bundle.property.squareFeet ? listPrice / bundle.property.squareFeet : null,
+        })
+      }).catch((err) => { console.warn('[observables] subject call failed', err?.message ?? err); return null })
+    : Promise.resolve(null)
+  // Subject street view — fetched once per eval, shared by every comp
+  // call's c10 physical-similarity read (its image is the reference pair).
+  const subjectStreetViewPromise = observablesOn
+    ? fetchStreetViewTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
+    : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
-    (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env)))
+    (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
@@ -860,7 +910,89 @@ export async function performAnalysisPhase1(
           const classifyInputs = clefInputs
             .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
             .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
-          if (env.ANTHROPIC_API_KEY) {
+          if (observablesOn) {
+            // C1-C7 per comp — cover photo + description + closed price vs
+            // the code-computed pocket benchmark. Parallel lanes. Runs over
+            // EVERY clef comp: a timed-out listing still carries price +
+            // geocode, which is enough for price-position + imagery reads.
+            console.log(`[observables] comp lane start — ${clefInputs.length} comps, benchmark ${marketBenchmark?.scope ?? 'null'} n=${marketBenchmark?.n ?? 0}`)
+            let oi = 0
+            const lane = async () => {
+              while (oi < clefInputs.length) {
+                const comp = clefInputs[oi++]!
+                const ev = early?.get(comp.propertyId) ?? filled.get(comp.propertyId) ?? null
+                const ppsf = comp.salePrice && comp.squareFeet ? comp.salePrice / comp.squareFeet : null
+                const ob = await decisionsCompObservables(env, {
+                  comp: {
+                    propertyId: comp.propertyId, address: comp.address,
+                    salePrice: comp.salePrice, squareFeet: comp.squareFeet,
+                    yearBuilt: comp.yearBuilt, saleDate: comp.saleDate,
+                    neighborhoodName: comp.neighborhoodName, censusTract: comp.censusTract,
+                    sameBlockGroup: comp.sameBlockGroup,
+                    lotSizeAcres: (comp as { lotSizeAcres?: number }).lotSizeAcres ?? null,
+                    pool: (comp as { pool?: string }).pool ?? null,
+                  },
+                  salePrice: comp.salePrice ?? null,
+                  ppsf,
+                  description: ev?.listing?.description ?? null,
+                  coverImage: ev?._images?.[0] ?? null,
+                  coverPhotoUrl: ev?.listing?.coverPhotoUrl ?? null,
+                  latitude: comp.latitude ?? null,
+                  longitude: comp.longitude ?? null,
+                  subjectStreetViewImage: await subjectStreetViewPromise,
+                  subjectRef: {
+                    squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
+                    lotSizeAcres: bundle.property.lotSizeAcres,
+                    bedrooms: bundle.property.bedrooms, bathrooms: bundle.property.bathrooms,
+                    stories: bundle.property.stories,
+                    foundationType: bundle.property.construction?.foundationType ?? null,
+                    constructionType: bundle.property.construction?.type ?? null,
+                    exteriorWalls: bundle.property.construction?.exteriorWalls ?? null,
+                    roofType: bundle.property.construction?.roofType ?? null,
+                    censusTract: bundle.property.censusTract,
+                    neighborhoodName: bundle.property.neighborhoodName,
+                    subdivision: bundle.property.subdivision,
+                  },
+                  benchmark: marketBenchmark,
+                }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
+                if (ob) compObservables[comp.propertyId] = ob
+                else console.warn('[observables] no observables for', comp.propertyId)
+                // Satellite site-exposure → siteInfluence: feeds the preset's
+                // traffic_fronting/siding/backing deductions when the provider
+                // left the field empty. Observable never overrides provider data.
+                if (ob?.siteExposure && !(comp as { siteInfluence?: string }).siteInfluence) {
+                  const inf = EXPOSURE_TO_INFLUENCE[ob.siteExposure]
+                  if (inf) {
+                    (comp as { siteInfluence?: string }).siteInfluence = inf
+                    // The traffic_* deductions read appraisalResult.comparables —
+                    // stamp the pool entry too, not just this lane's temp object.
+                    const poolComp = appraisalResult.comparables.find((x) => x.id === comp.propertyId)
+                    if (poolComp && !(poolComp as { siteInfluence?: string }).siteInfluence) {
+                      (poolComp as { siteInfluence?: string }).siteInfluence = inf
+                    }
+                  }
+                }
+              }
+            }
+            await Promise.all(Array.from({ length: Math.min(12, clefInputs.length) }, () => lane()))
+            // Decisions-outage rescue: the batch ran gatherOnly, so a dead
+            // lane leaves every comp unclassified. Fall back to the legacy
+            // classify path rather than appraising condition-blind.
+            if (Object.keys(compObservables).length === 0 && classifyInputs.length) {
+              console.warn('[observables] lane answered 0 comps — falling back to comp classify')
+              if (env.ANTHROPIC_API_KEY) {
+                await classifyCompPoolHaiku(
+                  env, classifyInputs,
+                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+                ).catch(() => null)
+              } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+                await classifyCompBatchDecisions(
+                  env, classifyInputs,
+                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+                ).catch(() => null)
+              }
+            }
+          } else if (env.ANTHROPIC_API_KEY) {
             await classifyCompPoolHaiku(
               env, classifyInputs,
               { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
@@ -871,6 +1003,7 @@ export async function performAnalysisPhase1(
               { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
             ).catch(() => null)
           }
+          console.log(`[observables] comp lane done — ${Object.keys(compObservables).length}/${clefInputs.length} answered`)
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null
@@ -1097,6 +1230,7 @@ export async function performAnalysisPhase1(
   // them as evidence alongside the condition tier (vision-capable).
   const compCoverPhotos: Record<string, string> = {}
   const compConditions: Record<string, CompConditionResult> = {}
+  const clefEvidenceDebug: NonNullable<Phase1Context['clefEvidenceDebug']> = []
   // What the classifier could read per comp — the appraiser weighs
   // photo-verified reads above description-only ones.
   const compEvidenceCoverage: Record<string, 'photo+desc' | 'photo' | 'desc'> = {}
@@ -1111,7 +1245,17 @@ export async function performAnalysisPhase1(
   if (clefCompPromise) {
     clefResolvePromise = clefCompPromise.then(async (settled) => {
       const map: CompCurbAppealMap = {}
-      for (const ev of settled) {
+      for (const [i, ev] of settled.entries()) {
+        const fedId = ev?.propertyId ?? clefInputs[i]?.propertyId ?? `idx${i}`
+        clefEvidenceDebug.push({
+          propertyId: fedId,
+          evidence: ev,
+          listingSource: ev?.listing?.source ?? null,
+          coverage: ev?.listing ? (ev.listing.coverPhotoUrl && ev.listing.description ? 'photo+desc' : ev.listing.coverPhotoUrl ? 'photo' : ev.listing.description ? 'desc' : null) : null,
+          skippedReason: ev?.skippedReason ?? null,
+          classified: !!(ev?.condition && ev.listing),
+        })
+        if (!ev) continue
         const details = ev?.listing?.details
         if (ev?.listing?.coverPhotoUrl) compCoverPhotos[ev.propertyId] = ev.listing.coverPhotoUrl
         if (ev?.listing) {
@@ -1362,6 +1506,7 @@ export async function performAnalysisPhase1(
   // Await the DERIVED promise — stamps + permit resolution must land
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
+  const subjectObservables = await subjectObservablesPromise.catch(() => null)
   // Clef digests settle inside the same window — stage A/B/C advisory
   // reads merged per comp for the harness evidence bundle.
   const compDigestMap = params.compDigests ? await params.compDigests.catch(() => null) : null
@@ -1380,6 +1525,7 @@ export async function performAnalysisPhase1(
     jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
     filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
     compCurbAppeal, compDigests, compCoverPhotos, compConditions, compEvidenceCoverage, compListingPhysicalDetails, subjectListingDetails,
+    clefEvidenceDebug, compObservables, subjectObservables, marketBenchmark,
     redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
     sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
@@ -1933,6 +2079,21 @@ export interface Phase1Context {
   /** Listing-evidence coverage per comp — 'photo+desc' | 'photo' | 'desc';
    *  absent entries had no listing evidence at all. */
   compEvidenceCoverage?: Record<string, 'photo+desc' | 'photo' | 'desc'>
+  /** Per-comp evidence-pipeline status for observability — what each fed
+   *  comp ended with (listing source, coverage, skip reason, classified). */
+  clefEvidenceDebug?: Array<{
+    propertyId: string
+    evidence: CompConditionEvidence | null
+    listingSource: string | null
+    coverage: string | null
+    skippedReason: string | null
+    classified: boolean
+  }>
+  /** Decisions observable lane — S1-S7 subject + C1-C7 per comp answers,
+   *  with the code-computed pocket benchmark they classified against. */
+  compObservables?: Record<string, CompObservables>
+  subjectObservables?: SubjectObservables | null
+  marketBenchmark?: PocketBenchmark | null
   compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
   subjectListingDetails: RedfinDetailsResult | null
   redfinDetailsEnabled: boolean
@@ -2025,8 +2186,16 @@ function buildBSubjectFields(
     squareFeet: bundle.property.squareFeet ?? null,
     yearBuilt: bundle.property.yearBuilt ?? null,
     censusTract: bundle.property.censusTract ?? null,
+    censusBlockGroup: bundle.property.censusBlockGroup ?? null,
     neighborhoodName: bundle.property.neighborhoodName ?? null,
     subdivision: bundle.property.subdivision ?? null,
+    bedrooms: bundle.property.bedrooms ?? null,
+    bathrooms: bundle.property.bathrooms ?? null,
+    stories: bundle.property.stories ?? null,
+    foundationType: bundle.property.construction?.foundationType ?? null,
+    constructionType: bundle.property.construction?.type ?? null,
+    exteriorWalls: bundle.property.construction?.exteriorWalls ?? null,
+    roofType: bundle.property.construction?.roofType ?? null,
     landAssessedValue: bundle.property.landAssessedValue ?? null,
     taxAssessment: bundle.property.assessedValue ?? null,
     assessedValue: bundle.property.assessedValue ?? null,
@@ -2062,6 +2231,13 @@ export function toBCompsOf(
     yearBuilt: comp.yearBuilt ?? null,
     lotSizeAcres: comp.lotSizeAcres ?? null,
     lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
+    bedrooms: comp.bedrooms ?? null,
+    bathrooms: comp.bathrooms ?? null,
+    stories: comp.stories ?? null,
+    foundationType: comp.construction?.foundationType ?? null,
+    constructionType: comp.construction?.type ?? null,
+    exteriorWalls: comp.construction?.exteriorWalls ?? null,
+    roofType: comp.construction?.roofType ?? null,
     landAssessedValue: comp.landAssessedValue ?? null,
     propertyType: comp.propertyType ?? null,
     crossesMajorRoad: comp.crossesMajorRoad ?? null,
@@ -2262,7 +2438,12 @@ export interface HarnessEvidence {
    *  own call (docs/HAIKU-POCKET-DESIRABILITY.md), attached after the
    *  bundle is built so the appraiser sees it. */
   pocketDesirability?: import('./pocket-desirability').PocketDesirability
-  comps: Array<BComp & { id: string; salePriceFormatted?: string; coverPhotoUrl?: string | null }>
+  comps: Array<BComp & { id: string; salePriceFormatted?: string; coverPhotoUrl?: string | null; observables?: CompObservables | null }>
+  /** Pocket benchmark the Decisions lane classified against — median/
+   *  p25/p75 over the matched set + a reliability flag. */
+  marketBenchmark?: PocketBenchmark | null
+  /** Subject S1-S7 observable answers (all listing photos + description). */
+  subjectObservables?: SubjectObservables | null
   /** Block-group price ladder — the pocket's sales split into natural-
    *  break clusters; top median ≈ ARV band, bottom median ≈ as-is band.
    *  The appraiser's price-position evidence (median-relative pricing). */
@@ -2355,7 +2536,10 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
       id: comp.id,
       ...bcomps[i]!,
       priceLadder: compLadderPosition(comp, ladder),
+      observables: ctx.compObservables?.[comp.id] ?? null,
     })),
+    marketBenchmark: ctx.marketBenchmark ?? null,
+    subjectObservables: ctx.subjectObservables ?? null,
     renovationEvidence: buildRenoEvidence(ctx, compClassifications),
     suggestedSelection: ctx.appraisalResult.selectedCompIds ?? [],
     classifications: Object.fromEntries(compClassifications),

@@ -23,7 +23,7 @@ import type { HarnessEvidence, AgentSelection } from './index'
 export type CheckResult = 'pass' | 'fail' | 'warn' | 'skipped'
 
 export interface VerdictGrade {
-  checks: Record<'d1' | 'd2' | 'd4' | 'd5' | 'd6' | 'd7', CheckResult>
+  checks: Record<'d1' | 'd2' | 'd4' | 'd5' | 'd6' | 'd7' | 'd8', CheckResult>
   /** pass=1, warn=0.5 over non-skipped checks, minus flat soft penalties. */
   score: number
   /** Machine-readable failure classes — the 'improve' loop input. */
@@ -126,7 +126,7 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
   const gateFeedback: string[] = []
   let scorePenalty = 0
   const checks: VerdictGrade['checks'] = {
-    d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass',
+    d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass',
   }
 
   const byId = new Map(evidence.comps.map((c) => [c.id, c] as const))
@@ -272,6 +272,34 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     }
   } else {
     checks.d7 = 'skipped'
+  }
+
+  // ── d8: observable price-position discipline ──────────────────────────
+  // The Decisions lane's code-verified tier (observables.codePosition):
+  // ABOVE_MEDIAN = ARV-band evidence, MEDIAN = median-market, BELOW_MEDIAN
+  // = investor/as-is band. A driver priced in the investor band contradicts
+  // the ARV verdict — same rule as d4, anchored on price position instead
+  // of condition labels. Unexplained premium flags on picks must surface.
+  const belowDrivers = drivers.filter((c) => c.observables?.codePosition === 'BELOW_MEDIAN')
+  if (belowDrivers.length > 0) {
+    checks.d8 = 'fail'
+    failures.push('d8_driver_in_investor_band')
+    for (const c of belowDrivers) {
+      gateFeedback.push(`d8: pricing comp ${c.id} (${c.address ?? 'unknown'}) is priced in the pocket's below-median band (code-verified) — investor-band stock cannot drive an ARV verdict`)
+    }
+  } else {
+    const premiumPicks = picks.filter((c) => (c.observables?.unexplainedPremiumP ?? 0) >= 0.7)
+    if (premiumPicks.length > 0) {
+      checks.d8 = 'warn'
+      failures.push('d8_unexplained_premium_picked')
+      for (const c of premiumPicks) {
+        gateFeedback.push(`d8: pick ${c.id} (${c.address ?? 'unknown'}) is flagged as an extreme-variance outlier sale — justify it or drop it`)
+      }
+    } else if (evidence.comps.some((c) => c.observables != null)) {
+      checks.d8 = 'pass'
+    } else {
+      checks.d8 = 'skipped'
+    }
   }
 
   // Composite — pass=1, warn=0.5, skipped out of the denominator, minus

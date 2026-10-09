@@ -1538,6 +1538,18 @@ export class AnalysisJobDO {
                   rulesCheck: c.rulesCheck ?? null,
                 }]),
               ),
+              // Per-comp evidence status — comps the classify pool was fed
+              // and what each one ended with, so a 0-classified run shows
+              // whether gathers timed out, listings were empty, or the
+              // classify itself failed.
+              compEvidence: Object.fromEntries(
+                (ctx.clefEvidenceDebug ?? []).map((d) => [d.propertyId, {
+                  listing: d.listingSource ?? (d.evidence === null ? null : 'none'),
+                  coverage: d.coverage ?? null,
+                  skipped: d.skippedReason ?? null,
+                  classified: d.classified,
+                }]),
+              ),
             },
             opus: {
               model: appraisal?.model ?? null,
@@ -1562,6 +1574,13 @@ export class AnalysisJobDO {
               attempts: (appraisal?.attempts ?? []).map((a) => a.grade),
               finalDecision: decision != null ? 'accepted' : appraisal?.unavailable ? 'appraiser_unavailable' : 'rejected_deterministic_fallback',
             },
+            observables: ctx.compObservables || ctx.subjectObservables || ctx.marketBenchmark
+              ? {
+                  subject: ctx.subjectObservables ?? null,
+                  comps: ctx.compObservables ?? null,
+                  marketBenchmark: ctx.marketBenchmark ?? null,
+                }
+              : null,
             latency: { appraiserMs, phase2Ms },
           }
           const resp = evalResult.response as unknown as Record<string, unknown>

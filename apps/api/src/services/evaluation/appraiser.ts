@@ -5,18 +5,18 @@
  * plumbing; Opus reviews the complete dataset and posts the final comp
  * selection + ARV, verified by the deterministic gate.
  *
- * Flow (docs/EVAL-AGENT-RULESET — Opus seat):
- *   1. Opus reads the full evidence bundle and returns a selection. It
- *      may first issue bounded clarify requests — haiku answers as a
- *      sub-agent (classify missing info or find it in the listing
- *      evidence). Haiku has no decision authority; Opus decides.
+ * Flow (docs/EVAL-AGENT-RULESET — Sonnet seat):
+ *   1. Sonnet reads the full evidence bundle and returns a selection. It
+ *      may first issue bounded clarify requests — the Decisions model
+ *      answers as a yes/no + probability sub-agent. Decisions has no
+ *      decision authority; Sonnet decides.
  *   2. The deterministic gate (verdict-grade) grades the selection:
  *      pocket discipline, flagged picks, as-is drivers, coherence
  *      outliers, envelope. Fails come back as named violations.
- *   3. On a gate fail, haiku writes a debug note explaining WHY the
- *      selection failed in plain terms (docs/GATE-DEBUG-RULESET) —
- *      annotation, never a second judgment. Gate feedback + the debug
- *      note go back to Opus, which revises (≤2 rounds).
+ *   3. On a gate fail, each failed check is cross-examined by a targeted
+ *      Decisions question on the picked comps — never the same question
+ *      re-asked. Findings + gate feedback go back to Sonnet, which
+ *      revises at MAX reasoning effort (≤2 rounds).
  *   4. After the budget: the deterministic engine's own selection
  *      completes — a persistently failing pool ships its honest
  *      fallback, never a forced number.
@@ -26,7 +26,10 @@
  * accepted/final selection was.
  */
 
-import { createSpecialistProvider, createReasoningProvider } from '../llm'
+import { createSpecialistProvider } from '../llm'
+import { decisionsRun, type DecisionsEnv } from '../decisions'
+import { fetchImageAsBase64 } from '../llm/image-utils'
+import { compMatchProfile } from './observable'
 import { COMP_DOCTRINE } from './comp-doctrine'
 import { gradeVerdict, type VerdictGrade } from './verdict-grade'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
@@ -41,9 +44,18 @@ You receive the COMPLETE dataset: the subject property with its haiku-assigned c
 
 You also receive the block-group PRICE LADDER (blockLadder): the pocket's sales split by $/sf into natural top/middle/bottom clusters — the top-cluster median is the ARV band, the bottom-cluster median is the as-is/investor band. Each comp carries its ladder rung and $/sf ratios (priceLadder.ppsfVsMedian, priceLadder.ppsfVsTop) plus evidenceCoverage ('photo+desc' | 'photo' | 'desc' | null) saying what the classifier could actually see — weigh photo-verified reads above description-only ones, and treat 'desc'-only or null coverage as weak condition evidence.
 
-Your job: choose the comps that set the ARV (the genuinely renovated retail evidence — never as-is/investor-marketed stock), name which picks drove the number, and post the ARV. Prefer in-pocket comps (same block group > neighborhood > census tract) whose $/sf sits in the top ladder rung at or near the top-cluster median — that is ARV pricing the market itself proved. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence.
+Each comp also carries OBSERVABLE ANSWERS (observables): small evidence reads from its cover photo + description + closed price + street view — pricePosition vs the pocket benchmark (codePosition is the code-verified tier), descCondition, coverPhotoEvidence, renoClaimP, priceConditionAgreement, unexplainedPremiumP (extreme-variance outlier detector — near 1 only means a far-outlier sale like $1M in a $300k pocket; a renovated comp's modest premium is explained and scores ~0), finalTier, physicalMatchP (probability the comp's street view physically matches the subject — style/stories/garage/curb appeal), and arvFitnessP (probability the comp is a finished/renovated/move-in-ready version of the subject — the ARV-grade ladder: flipper-complete highest, maintained ~70-80s, fixer/investor lowest). The marketBenchmark block is the matched-pocket distribution those positions classify against. Read the tiers as: priced ABOVE_MEDIAN ≈ renovated/ARV-band evidence, at MEDIAN ≈ median-market evidence, priced far BELOW_MEDIAN ≈ investor/as-is evidence — but a price tier is not proof of condition; weight conflicts the observables preserved (e.g. above-median price with DISTRESSED description means a suspect comp, not an ARV anchor — while unexplainedPremium ≈ 1 means an extreme outlier, likely bad data).
 
-If anything is missing or ambiguous, you may ask your haiku sub-agent to clarify or classify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Haiku answers; you decide.
+Each comp row also carries exclusionReasons — code-stamped disqualifiers (geo, uncorroborated price, investor-priced) plus soft cautions (stale sale). These are facts, not suggestions: a hard exclusionReason means the comp is disqualified evidence unless the reason is demonstrably wrong. A stale-sale caution is NOT a disqualification — see rule 5.
+
+Your job, IN ORDER:
+1. DISQUALIFY FIRST. Read every comp's exclusionReasons and the observables — confirm the disqualifications and set those comps aside before selecting anything. A comp that is merely cheap-but-legal ("investor-grade") is real data but not ARV evidence.
+2. From the survivors, pick the comps that set the ARV — the genuinely renovated retail evidence — name which picks drove the number, and post the ARV. Prefer high arvFitnessP AND high physicalMatchP: a comp that both fits the rules and resembles the subject's finished state is the strongest evidence.
+3. GEOGRAPHY IS STRICT — never reach outside the pocket for a better-matching house. Order: same block group → same neighborhood → same census tract. If NO in-pocket comp qualifies, select the median comps of the subject's block group (median-of-BG fallback) — the pocket's own market, not a similar house across town.
+4. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence.
+5. STALENESS IS A CAUTION, NOT A VETO. When the market itself is stale, the pocket's renovated sales are the freshest ARV evidence that exists — a completed in-pocket flip IS the realized ARV and belongs in the drivers even past the preferred-sale-age line. Staleness lowers your confidence, not the comp's eligibility — note it in conf/dataQuality instead of excluding or demoting the sale to supporting-only.
+
+If anything is missing or ambiguous, you may ask the Decisions sub-agent to clarify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Decisions answers with probability + verdict; you decide.
 
 Return STRICT JSON:
 {
@@ -58,7 +70,7 @@ Return STRICT JSON:
   },
   "flags": ["<evidence gaps or caveats worth surfacing>"],
   "clarifyRequests": [
-    { "compId": "<id or null>", "question": "<targeted question for the haiku sub-agent>" }
+    { "compId": "<id or null>", "question": "<targeted question for the Decisions sub-agent>" }
   ]
 }
 Set "clarifyRequests" to an empty array when you're ready to decide — presence of requests means you want answers BEFORE this selection is final (the harness will call you again with the findings; keep deciding fields null-safe but always include them).
@@ -67,15 +79,7 @@ DOCTRINE:
 ${COMP_DOCTRINE}
 `
 
-const REVISION_PROMPT = `The deterministic gate REJECTED your previous selection. It is code, not a model — it cannot be argued with, only satisfied. Review the named violations and the debug note, correct the selection, and post again under the same JSON contract.
-`
-
-const CLARIFY_PROMPT = `You are the haiku sub-agent to the appraiser. Answer the question from the comp listing evidence and facts provided — classify or find the missing information. One comp, one question, one answer. No verdicts, no comp-selection advice: you have no decision authority.
-
-Return STRICT JSON: { "answer": "<1-3 sentences citing the evidence>", "confidence": 0.0-1.0 }
-`
-
-const GATE_DEBUG_PROMPT = `You are the gate debugger — you explain gate rejections, never re-judge them. The deterministic gate rejected the appraiser's selection; read the named violations, the selection, and the evidence pool, then write a debug note: which comp(s) caused each violation, what rule they tripped, and the concrete fix (swap/remove/re-anchor). Under 150 words. Plain text, no verdict.
+const REVISION_PROMPT = `The deterministic gate REJECTED your previous selection.  It is code, not a model — it cannot be argued with, only satisfied. Review the named violations and the debug note, correct the selection, and post again under the same JSON contract.
 `
 
 const SELECTION_SCHEMA = {
@@ -110,16 +114,6 @@ const SELECTION_SCHEMA = {
     },
   },
   required: ['selectedCompIds', 'drivers', 'arv', 'conf', 'notes', 'dataQuality', 'flags', 'clarifyRequests'],
-  additionalProperties: false,
-} as const
-
-const CLARIFY_SCHEMA = {
-  type: 'object',
-  properties: {
-    answer: { type: 'string' },
-    confidence: { type: 'number' },
-  },
-  required: ['answer', 'confidence'],
   additionalProperties: false,
 } as const
 
@@ -180,11 +174,49 @@ function appraiserCompRows(evidence: HarnessEvidence) {
     verification: c.evidenceVerification
       ? (() => { const { flags: _flags, ...fields } = c.evidenceVerification; return fields })()
       : null,
+    // Code-stamped disqualifiers — the disprove-first half of the sheet.
+    // Empty means nothing deterministic could rule the comp out.
+    exclusionReasons: exclusionReasons(c, evidence),
+    // Deterministic match sheet — geo tier + physical variance vs the
+    // subject, computed in code. Instant, auditable, no model call.
+    matchProfile: compMatchProfile(evidence.subject, c),
     coverPhotoUrl: c.coverPhotoUrl ?? null,
     evidenceCoverage: c.evidenceCoverage ?? null,
     priceLadder: c.priceLadder ?? null,
+    observables: c.observables ?? null,
     adjustedPrice: c.adjustedPrice ?? null,
   }))
+}
+
+/** Deterministic disqualifiers, stamped per comp row — the disprove-first
+ *  half of the evidence sheet. Code owns the verdict; the appraiser's job
+ *  is to confirm and move on. */
+function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: HarnessEvidence): string[] {
+  const rules = evidence.rules
+  const reasons: string[] = []
+  if (c.isEnabled === false) reasons.push('disabled by the filter rules')
+  const mp = compMatchProfile(evidence.subject, c)
+  if (mp.geoTier === 'OFF_POCKET') {
+    reasons.push(c.distanceMiles != null
+      ? `no geo match — outside block group/neighborhood/subdivision/tract (${c.distanceMiles.toFixed(1)} mi)`
+      : 'no geo match — outside block group/neighborhood/subdivision/tract')
+  } else if (mp.geoTier === 'TRACT') {
+    reasons.push('weak geo — tract-level match only (outside block group/neighborhood/subdivision)')
+  }
+  if (c.saleDate) {
+    const ageDays = Math.floor((Date.now() - new Date(c.saleDate).getTime()) / 864e5)
+    if (Number.isFinite(ageDays) && ageDays > rules.preferredSaleAgeDays) {
+      reasons.push(`caution: stale sale (${ageDays}d old vs ${rules.preferredSaleAgeDays}d rule) — not a disqualifier; in a stale market, in-pocket renovated sales still qualify as drivers`)
+    }
+  }
+  const v = c.evidenceVerification as Record<string, unknown> | null | undefined
+  if (v?.priceCheck === 'divergent') reasons.push('price contradicts its own AVM')
+  else if (v?.priceCheck === 'unverified') reasons.push('caution: no AVM on record to corroborate price — treat as unverified evidence, not a disqualifier')
+  const vsMed = c.priceLadder?.ppsfVsMedian
+  if (typeof vsMed === 'number' && vsMed < 0.75) {
+    reasons.push('fits rules but priced far below the pocket — investor-grade sale, not ARV evidence')
+  }
+  return reasons
 }
 
 interface ParsedSelection {
@@ -228,71 +260,103 @@ function toAgentSelection(p: ParsedSelection, byId: Set<string>): AgentSelection
 
 /** Haiku clarify — one question answered from the comp's listing
  *  evidence. Sub-agent only: no verdict authority. */
-async function haikuClarify(
-  env: Parameters<typeof createSpecialistProvider>[0],
+/** Decisions clarify — the appraiser's evidence sub-agent. Turns each
+ *  clarify request into yes/no + probability questions on the comp row;
+ *  probability scoring at speed, zero reasoning seat. */
+async function decisionsClarify(
+  env: Parameters<typeof createSpecialistProvider>[0] & DecisionsEnv,
   evidence: HarnessEvidence,
   req: { compId: string | null; question: string },
 ): Promise<ClarifyFinding | null> {
-  const provider = createReasoningProvider(env, 'openai/gpt-6-luna')
-  if (!provider) return null
   const comp = req.compId ? evidence.comps.find((c) => c.id === req.compId) : undefined
-  const context = {
-    subject: evidence.subject,
-    comp: comp
-      ? appraiserCompRows({ ...evidence, comps: [comp] })[0]
-      : null,
-    question: req.question,
-  }
-  const res = await provider.execute({
-    prompt: `${CLARIFY_PROMPT}\n\nCONTEXT:\n${JSON.stringify(context)}`,
-    responseFormat: 'json',
-    jsonSchema: { name: 'clarify_answer', schema: CLARIFY_SCHEMA },
-    maxTokens: 512,
+  const img = comp?.coverPhotoUrl ? await fetchImageAsBase64(comp.coverPhotoUrl).catch(() => null) : null
+  const res = await decisionsRun(env, {
+    state: {
+      role: 'Evidence clarification — answer ONLY from the supplied property data.',
+      question: req.question,
+      subject: evidence.subject,
+      comp: comp ? appraiserCompRows({ ...evidence, comps: [comp] })[0] : null,
+      rules: [
+        'Answer only what the supplied evidence supports.',
+        'A low probability means the evidence does not support the claim — not that the claim is false.',
+      ],
+    },
+    questions: {
+      clarify_verdict: {
+        type: 'choice',
+        criteria: {
+          SUPPORTS: 'the evidence supports the proposition in the question',
+          REFUTES: 'the evidence contradicts it',
+          UNVERIFIED: 'the evidence cannot settle it either way',
+        },
+        instructions: `Decide whether the supplied evidence settles this question: "${req.question}"`,
+      },
+      clarify_probability: {
+        type: 'noul',
+        instructions: req.question,
+      },
+    },
+    images: img ? [{ content_type: img.mimeType, base64: img.base64 }] : [],
   }).catch(() => null)
-  let parsed: { answer?: unknown; confidence?: unknown } | null = null
-  try {
-    parsed = res?.data?.content
-      ? JSON.parse(res.data.content.replace(/^```(?:json)?\s*|\s*```$/g, '').trim())
-      : null
-  } catch { parsed = null }
-  const answer = typeof parsed?.answer === 'string' ? parsed.answer : null
-  if (!answer) return null
+  const a = res?.answers as Record<string, { choice?: string | boolean | null; probability?: number; confidence?: number }> | undefined
+  if (!a) return null
+  const verdict = typeof a.clarify_verdict?.choice === 'string' ? a.clarify_verdict.choice : 'UNVERIFIED'
+  const p = typeof a.clarify_probability?.probability === 'number' ? a.clarify_probability.probability : null
   return {
     compId: req.compId,
     question: req.question,
-    answer,
-    confidence: typeof parsed?.confidence === 'number' ? parsed.confidence : 0.5,
+    answer: `${verdict} — probability ${p == null ? 'n/a' : p.toFixed(2)}`,
+    confidence: typeof a.clarify_verdict?.confidence === 'number' ? a.clarify_verdict.confidence : (p ?? 0.5),
   }
 }
 
-/** Haiku gate debugger — explains WHY the deterministic gate rejected a
- *  selection in plain terms for the run record and the revision prompt.
- *  Annotates; never re-judges. */
-async function haikuGateDebug(
-  env: Parameters<typeof createSpecialistProvider>[0],
+/** Gate-failure cross-examination — when the gate rejects, each failed
+ *  check becomes a targeted Decisions question per picked comp: does the
+ *  evidence ACTUALLY violate the named rule? Never re-asks the same
+ *  question — it probes whether the violation is real. Findings feed the
+ *  next revision round through clarificationFindings. */
+async function gateFailClarify(
+  env: Parameters<typeof createSpecialistProvider>[0] & DecisionsEnv,
   evidence: HarnessEvidence,
   selection: AgentSelection,
   grade: VerdictGrade,
-): Promise<string | null> {
-  const provider = createReasoningProvider(env, 'openai/gpt-6-luna')
-  if (!provider) return null
-  const picked = new Set(selection.selectedCompIds)
-  const context = {
-    selection: {
-      arv: selection.arv,
-      conf: selection.conf,
-      picks: appraiserCompRows({ ...evidence, comps: evidence.comps.filter((c) => picked.has(c.id)) }),
-      notes: selection.notes ?? null,
-    },
-    violations: { checks: grade.checks, failures: grade.failures, feedback: grade.gateFeedback },
-    pool: appraiserCompRows(evidence),
+): Promise<ClarifyFinding[]> {
+  const fails = grade.gateFails.length > 0 ? grade.gateFails : grade.failures
+  if (fails.length === 0) return []
+  const feedback = grade.gateFeedback.join('; ')
+  const pickedRows = appraiserCompRows({ ...evidence, comps: evidence.comps.filter((c) => selection.selectedCompIds.includes(c.id)) })
+  const questions: Record<string, { type: 'noul'; instructions: string }> = {}
+  for (const row of pickedRows) {
+    for (const fail of fails) {
+      questions[`xq_${fail}_${row.compId}`] = {
+        type: 'noul',
+        instructions: `The deterministic gate rejected the selection of comp ${row.address ?? row.compId} citing "${fail}" (detail: ${feedback}). Given ONLY this comp's supplied data, is that violation actually true of this comp? Answer the violation probability — cross-examine, do not re-derive the comp's classification.`,
+      }
+    }
   }
-  const res = await provider.execute({
-    prompt: `${GATE_DEBUG_PROMPT}\n\nCONTEXT:\n${JSON.stringify(context)}`,
-    maxTokens: 512,
+  if (Object.keys(questions).length === 0) return []
+  const res = await decisionsRun(env, {
+    state: {
+      role: 'Gate-failure cross-examination — verify whether named violations are real.',
+      gateViolations: { checks: grade.checks, failures: grade.failures, feedback: grade.gateFeedback },
+      pickedComps: pickedRows,
+      rules: ['Judge only whether the named violation is true of each comp.', 'A high probability confirms the violation; a low probability says the evidence does not support it.'],
+    },
+    questions,
   }).catch(() => null)
-  const text = res?.data?.content?.trim()
-  return text ? text.slice(0, 1500) : null
+  const findings: ClarifyFinding[] = []
+  for (const [name, a] of Object.entries(res?.answers ?? {})) {
+    const ans = a as { probability?: number; confidence?: number }
+    if (typeof ans?.probability !== 'number') continue
+    const [fail, compId] = name.replace(/^xq_/, '').split(/_(.+)/)
+    findings.push({
+      compId: compId ?? null,
+      question: `gate violation "${fail}" real?`,
+      answer: `violation probability ${ans.probability.toFixed(2)}`,
+      confidence: ans.confidence ?? 0.5,
+    })
+  }
+  return findings
 }
 
 /** Run the Opus appraiser over a frozen evidence bundle. The bundle is
@@ -306,7 +370,9 @@ export async function runOpusAppraiser(
   const out: AppraiserResult = {
     selection: null, model: null, attempts: [], clarifications: [], debugNotes: [], unavailable: false,
   }
-  const provider = createSpecialistProvider(env, 'expert')
+  // Sonnet 5.5 is the appraiser seat on the observable-evidence lane —
+  // high effort on the first pass, max effort on every retry.
+  const provider = createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
   if (!provider) { out.unavailable = true; return out }
   out.model = provider.model
 
@@ -330,6 +396,8 @@ export async function runOpusAppraiser(
     },
     classificationSummary: evidence.classificationSummary ?? null,
     blockLadder: evidence.blockLadder ?? null,
+    marketBenchmark: evidence.marketBenchmark ?? null,
+    subjectObservables: evidence.subjectObservables ?? null,
     comps: appraiserCompRows(evidence),
   }
 
@@ -338,6 +406,7 @@ export async function runOpusAppraiser(
   let clarificationBlock: ClarifyFinding[] = []
   let lastGrade: VerdictGrade | null = null
   let lastDebug: string | null = null
+  let emptyResponseRetry = false
 
   // Decision loop — clarify rounds count against MAX_CLARIFICATIONS; gate
   // rejects consume revisions; a passing grade (or a plain-text answer we
@@ -356,10 +425,15 @@ export async function runOpusAppraiser(
       prompt,
       responseFormat: 'json',
       jsonSchema: { name: 'appraiser_selection', schema: SELECTION_SCHEMA },
-      maxTokens: 4096,
-    }).catch(() => null)
+      maxTokens: 16384, // thinking shares this budget — 4096 starves high/xhigh effort into empty responses
+      reasoning: { enabled: true, effort: (lastGrade || emptyResponseRetry) ? 'xhigh' : 'high' },
+    }).catch((e) => { console.warn('[appraiser] execute failed', e?.message ?? e); return null })
     const parsed = res?.data?.content ? parseSelection(res.data.content) : null
-    if (!parsed) { out.unavailable = out.attempts.length === 0; break }
+    if (!parsed) {
+      console.warn('[appraiser] unparseable response', JSON.stringify({ hasData: !!res?.data, hasContent: !!res?.data?.content, preview: typeof res?.data?.content === 'string' ? res.data.content.slice(0, 300) : null, err: res?.error ?? null }))
+      if (!emptyResponseRetry) { emptyResponseRetry = true; continue } // one retry at xhigh before failing closed
+      out.unavailable = out.attempts.length === 0; break
+    }
 
     // Clarify round — Opus asks, haiku answers, loop continues.
     const wantsClarify = Array.isArray(parsed.clarifyRequests)
@@ -369,7 +443,7 @@ export async function runOpusAppraiser(
       const reqs = (parsed.clarifyRequests as Array<{ compId?: unknown; question?: unknown }>)
         .filter((r) => typeof r.question === 'string' && r.question.length > 0)
         .slice(0, MAX_CLARIFICATIONS - clarificationsUsed)
-      const answers = await Promise.all(reqs.map((r) => haikuClarify(env, evidence, {
+      const answers = await Promise.all(reqs.map((r) => decisionsClarify(env, evidence, {
         compId: typeof r.compId === 'string' && compIds.has(r.compId) ? r.compId : null,
         question: String(r.question),
       })))
@@ -385,7 +459,7 @@ export async function runOpusAppraiser(
       const vfails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
       if (vfails.length > 0) {
         const grade: VerdictGrade = {
-          checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass' },
+          checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass' },
           score: 0, failures: ['coherence_validation'], warnings: [], scorePenalty: 0,
           gateFails: ['validation'], gateFeedback: vfails, gradedAt: new Date().toISOString(),
         }
@@ -400,7 +474,7 @@ export async function runOpusAppraiser(
       // Unusable selection shape — one more chance counts as a revision.
       if (++revisionsUsed > MAX_REVISIONS) break
       lastGrade = {
-        checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass' },
+        checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass' },
         score: 0, failures: ['malformed_selection'], warnings: [], scorePenalty: 0,
         gateFails: ['shape'], gateFeedback: ['selection was missing comps or a positive ARV — repost under the schema'], gradedAt: new Date().toISOString(),
       }
@@ -424,10 +498,15 @@ export async function runOpusAppraiser(
       return out
     }
 
-    // Gate fail → haiku debug note + revision round while budget lasts.
+    // Gate fail → Decisions cross-examines each failed check on the picked
+    // comps; findings ride the next attempt's clarificationFindings.
     lastGrade = grade
-    lastDebug = await haikuGateDebug(env, evidence, sel, grade)
-    if (lastDebug) out.debugNotes.push(lastDebug)
+    const xqFindings = await gateFailClarify(env, evidence, sel, grade)
+    if (xqFindings.length > 0) {
+      clarificationBlock = [...clarificationBlock, ...xqFindings]
+      out.clarifications = clarificationBlock
+    }
+    lastDebug = null
     if (++revisionsUsed > MAX_REVISIONS) {
       out.attempts[out.attempts.length - 1]!.decision = 'rejected'
       break
