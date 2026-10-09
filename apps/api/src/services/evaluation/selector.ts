@@ -239,7 +239,35 @@ export function runDeterministicSelector(
   const arvPool = clean.filter((r) => !isAsIs(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !isAsIs(r) && !isRenovated(r)).sort(rank)
   const medianFallback = arvPool.length < MIN_PICKS
-  const picks = (medianFallback ? medianPool : arvPool).slice(0, MAX_PICKS)
+
+  // d1 pocket anchoring — pricing weight stays in the block group (or the
+  // tract when the pool has no BG comps at all). Mirrors verdict-grade:
+  // a driver outside the pocket fails while any in-pocket comp remains
+  // unpicked, so in-pocket comps fill picks FIRST — across both bands —
+  // and drivers are only ever in-pocket picks. Off-pocket picks stay
+  // supporting evidence (a warn at most).
+  const subjectTract = (subject.censusTract as string | null | undefined) ?? null
+  const inBg = (r: RankedComp) =>
+    r.comp.sameBlockGroup === true || r.profile.geoTier === 'BLOCK_GROUP'
+  const inPocket = (r: RankedComp) =>
+    inBg(r) || r.profile.geoTier === 'TRACT' ||
+    (subjectTract != null && r.comp.censusTract === subjectTract)
+  const bgExists = ranked.some(inBg)
+  const inPocketPick = (r: RankedComp) => (bgExists ? inBg(r) : inPocket(r))
+
+  const pickPool = (medianFallback ? medianPool : arvPool)
+  const pocketPicks = clean.filter(inPocketPick).sort(rank)
+  const ordered = [
+    ...pickPool.filter(inPocketPick),
+    ...pocketPicks.filter((r) => !pickPool.includes(r)),
+    ...pickPool.filter((r) => !inPocketPick(r)),
+  ]
+  const picks = ordered.slice(0, MAX_PICKS)
+  // Drivers carry the pricing weight — in-pocket only. When the pool has
+  // zero clean in-pocket comps we fall back to the raw ranking and let
+  // the gate grade the pocket risk honestly.
+  const driverIds = picks.filter(inPocketPick).slice(0, MIN_PICKS).map((p) => p.id)
+  if (driverIds.length === 0) driverIds.push(...picks.slice(0, MIN_PICKS).map((p) => p.id))
   for (const p of picks) p.audit.verdict = 'picked'
 
   const attempts: SelectionAttempt[] = []
@@ -292,7 +320,7 @@ export function runDeterministicSelector(
     arv,
     conf,
     selectedCompIds: picks.map((p) => p.id),
-    drivers: picks.slice(0, MIN_PICKS).map((p) => p.id),
+    drivers: driverIds,
     ...(Object.keys(adjustments).length ? { adjustments } : {}),
     flags: [
       ...(medianFallback ? ['median_fallback'] : []),
