@@ -19,6 +19,7 @@ const sourceSerif = localFont({
   display: 'swap',
 })
 import { ThemeProvider } from '@/components/theme-provider'
+import { AppToaster } from '@/components/AppToaster'
 import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar'
 import { StaleActionGuard } from '@/components/StaleActionGuard'
 import { VersionGuard } from '@/components/VersionGuard'
@@ -77,6 +78,7 @@ export default function RootLayout({
       <body className={`${inter.variable} ${sourceSerif.variable} font-sans antialiased`}>
         <ThemeProvider>
           {children}
+          <AppToaster />
         </ThemeProvider>
         <ServiceWorkerRegistrar />
         <StaleActionGuard />

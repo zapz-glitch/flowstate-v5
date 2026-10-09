@@ -382,7 +382,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   }, [])
 
   const requireServerEvaluation = useCallback(() => {
-    toast.info('Python V4 results are fixed for this run. Change evaluation settings and run Analyze again.')
+    toast.info('Results are fixed for this run. Change evaluation settings and run Analyze again.')
   }, [])
 
   return {
