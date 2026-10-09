@@ -66,8 +66,16 @@ export interface BSubject {
   squareFeet: number | null
   yearBuilt?: number | null
   censusTract?: string | null
+  censusBlockGroup?: string | null
   subdivision?: string | null
   neighborhoodName?: string | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  stories?: number | null
+  foundationType?: string | null
+  constructionType?: string | null
+  exteriorWalls?: string | null
+  roofType?: string | null
   landAssessedValue?: number | null
   taxAssessment?: number | null
   assessedValue?: number | null
@@ -94,6 +102,13 @@ export interface BComp {
   yearBuilt?: number | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  stories?: number | null
+  foundationType?: string | null
+  constructionType?: string | null
+  exteriorWalls?: string | null
+  roofType?: string | null
   landAssessedValue?: number | null
   propertyType?: string | null
   crossesMajorRoad?: boolean | null

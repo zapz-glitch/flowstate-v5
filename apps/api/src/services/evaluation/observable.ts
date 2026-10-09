@@ -250,6 +250,94 @@ const COMP_QUESTIONS = {
   },
 }
 
+// ─── Deterministic match profile (code, not model) ──────────────────────
+
+const normalizeGeoName = (value?: string | null) =>
+  value?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+
+const normToken = (v?: string | null) => (v?.toLowerCase().trim() ?? null) || null
+const eqToken = (a?: string | null, b?: string | null): boolean | null => {
+  const na = normToken(a), nb = normToken(b)
+  if (!na || !nb) return null // no data — not a match and not a miss
+  return na === nb || na.includes(nb) || nb.includes(na)
+}
+const deltaPct = (a?: number | null, b?: number | null): number | null =>
+  typeof a === 'number' && typeof b === 'number' && b > 0 ? (a - b) / b : null
+const delta = (a?: number | null, b?: number | null): number | null =>
+  typeof a === 'number' && typeof b === 'number' ? a - b : null
+
+export interface MatchLike {
+  squareFeet?: number | null
+  yearBuilt?: number | null
+  lotSizeAcres?: number | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  stories?: number | null
+  foundationType?: string | null
+  constructionType?: string | null
+  exteriorWalls?: string | null
+  roofType?: string | null
+  censusTract?: string | null
+  neighborhoodName?: string | null
+  subdivision?: string | null
+  sameBlockGroup?: boolean | null
+}
+
+export interface CompMatchProfile {
+  /** Two-dimension geo answer — a comp can be BG+neighborhood matched at
+   *  once. Deepest tier wins the ordering. */
+  blockGroupMatch: boolean
+  neighborhoodMatch: boolean
+  subdivisionMatch: boolean
+  tractMatch: boolean
+  geoTier: 'BLOCK_GROUP' | 'NEIGHBORHOOD' | 'SUBDIVISION' | 'TRACT' | 'OFF_POCKET'
+  /** Physical variance vs the subject — signed deltas/% deltas, null when
+   *  the data point is missing on either side. */
+  sqftDeltaPct: number | null
+  yearBuiltDelta: number | null
+  lotDeltaPct: number | null
+  bedsDelta: number | null
+  bathsDelta: number | null
+  storiesMatch: boolean | null
+  foundationMatch: boolean | null
+  constructionMatch: boolean | null
+  exteriorWallsMatch: boolean | null
+  roofTypeMatch: boolean | null
+}
+
+/** Code-computed comp-vs-subject match sheet — instant, deterministic.
+ *  Geo hierarchy: block group > neighborhood > subdivision > tract; a comp
+ *  may satisfy several at once (BG inside neighborhood), so the booleans
+ *  are independent and geoTier names the deepest satisfied tier. */
+export function compMatchProfile(subject: MatchLike, comp: MatchLike): CompMatchProfile {
+  const blockGroupMatch = comp.sameBlockGroup === true
+  const subjectNeighborhood = normalizeGeoName(subject.neighborhoodName)
+  const neighborhoodMatch = subjectNeighborhood != null
+    && normalizeGeoName(comp.neighborhoodName) === subjectNeighborhood
+  const subdivisionMatch = subject.subdivision != null
+    && comp.subdivision != null
+    && normalizeGeoName(comp.subdivision) === normalizeGeoName(subject.subdivision)
+  const tractMatch = !!subject.censusTract && comp.censusTract === subject.censusTract
+  const geoTier: CompMatchProfile['geoTier'] = blockGroupMatch ? 'BLOCK_GROUP'
+    : neighborhoodMatch ? 'NEIGHBORHOOD'
+    : subdivisionMatch ? 'SUBDIVISION'
+    : tractMatch ? 'TRACT'
+    : 'OFF_POCKET'
+  return {
+    blockGroupMatch, neighborhoodMatch, subdivisionMatch, tractMatch, geoTier,
+    sqftDeltaPct: deltaPct(comp.squareFeet, subject.squareFeet),
+    yearBuiltDelta: delta(comp.yearBuilt, subject.yearBuilt),
+    lotDeltaPct: deltaPct(comp.lotSizeAcres, subject.lotSizeAcres),
+    bedsDelta: delta(comp.bedrooms, subject.bedrooms),
+    bathsDelta: delta(comp.bathrooms, subject.bathrooms),
+    storiesMatch: eqToken(comp.stories != null ? String(comp.stories) : null, subject.stories != null ? String(subject.stories) : null),
+    foundationMatch: eqToken(comp.foundationType, subject.foundationType),
+    constructionMatch: eqToken(comp.constructionType, subject.constructionType),
+    exteriorWallsMatch: eqToken(comp.exteriorWalls, subject.exteriorWalls),
+    roofTypeMatch: eqToken(comp.roofType, subject.roofType),
+  }
+}
+
 // ─── Answer shapes ───────────────────────────────────────────────────────
 
 export interface SubjectObservables {
@@ -464,6 +552,8 @@ export async function decisionsCompObservables(
     /** Subject street-view image for the c10 physical-similarity lane —
      *  fetched once per eval and shared across every comp call. */
     subjectStreetViewImage?: { base64: string; content_type?: string } | null
+    /** Subject's geo/physical fields — feeds the code-computed matchProfile. */
+    subjectRef?: MatchLike
     benchmark: PocketBenchmark | null
   },
 ): Promise<CompObservables | null> {
@@ -487,6 +577,7 @@ export async function decisionsCompObservables(
     pricePerSqft: input.ppsf ?? null,
     codePricePosition: pos,
     matchedMarket: input.benchmark,
+    matchProfile: compMatchProfile(input.subjectRef ?? {}, input.comp),
     description: input.description ?? null,
     imageOrder: [
       ...(img ? ['comp listing cover photo'] : []),

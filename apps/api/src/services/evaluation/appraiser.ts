@@ -29,6 +29,7 @@
 import { createSpecialistProvider } from '../llm'
 import { decisionsRun, type DecisionsEnv } from '../decisions'
 import { fetchImageAsBase64 } from '../llm/image-utils'
+import { compMatchProfile } from './observable'
 import { COMP_DOCTRINE } from './comp-doctrine'
 import { gradeVerdict, type VerdictGrade } from './verdict-grade'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
@@ -174,7 +175,10 @@ function appraiserCompRows(evidence: HarnessEvidence) {
       : null,
     // Code-stamped disqualifiers — the disprove-first half of the sheet.
     // Empty means nothing deterministic could rule the comp out.
-    exclusionReasons: exclusionReasons(c, evidence.rules),
+    exclusionReasons: exclusionReasons(c, evidence),
+    // Deterministic match sheet — geo tier + physical variance vs the
+    // subject, computed in code. Instant, auditable, no model call.
+    matchProfile: compMatchProfile(evidence.subject, c),
     coverPhotoUrl: c.coverPhotoUrl ?? null,
     evidenceCoverage: c.evidenceCoverage ?? null,
     priceLadder: c.priceLadder ?? null,
@@ -186,13 +190,17 @@ function appraiserCompRows(evidence: HarnessEvidence) {
 /** Deterministic disqualifiers, stamped per comp row — the disprove-first
  *  half of the evidence sheet. Code owns the verdict; the appraiser's job
  *  is to confirm and move on. */
-function exclusionReasons(c: HarnessEvidence['comps'][number], rules: HarnessEvidence['rules']): string[] {
+function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: HarnessEvidence): string[] {
+  const rules = evidence.rules
   const reasons: string[] = []
   if (c.isEnabled === false) reasons.push('disabled by the filter rules')
-  if (c.sameBlockGroup === false) {
-    reasons.push(c.distanceMiles != null && c.distanceMiles > 1
-      ? `outside block group (${c.distanceMiles.toFixed(1)} mi)`
-      : 'outside block group')
+  const mp = compMatchProfile(evidence.subject, c)
+  if (mp.geoTier === 'OFF_POCKET') {
+    reasons.push(c.distanceMiles != null
+      ? `no geo match — outside block group/neighborhood/subdivision/tract (${c.distanceMiles.toFixed(1)} mi)`
+      : 'no geo match — outside block group/neighborhood/subdivision/tract')
+  } else if (mp.geoTier === 'TRACT') {
+    reasons.push('weak geo — tract-level match only (outside block group/neighborhood/subdivision)')
   }
   if (c.saleDate) {
     const ageDays = Math.floor((Date.now() - new Date(c.saleDate).getTime()) / 864e5)
