@@ -1164,7 +1164,7 @@ export interface AnalysisResponse {
   /** Present when the Evaluation Agent drove comp selection — its verdict
    *  plus the pocket/deal-economics classification it was assigned. */
   harness?: {
-    source: 'agent'
+    source: 'agent' | 'corelogic' | string
     pocketScore?: number | null
     dealEconomics?: string | null
     notes?: string

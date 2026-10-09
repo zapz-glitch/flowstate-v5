@@ -723,7 +723,14 @@ class PropertyApi implements PropertyApiService {
     params: PropertySearchParams,
     fallbackProvider?: PropertyProvider,
   ): Promise<PropertySearchResponse> {
-    const primaryResult = await this.searchProperty(params);
+    let primaryResult: PropertySearchResponse
+    try {
+      primaryResult = await this.searchProperty(params);
+    } catch (e) {
+      // Adapters that throw (missing credentials, entitlement errors)
+      // surface as a primary failure so the fallback chain still engages.
+      primaryResult = { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
 
     if (primaryResult.success) {
       return primaryResult;
@@ -732,7 +739,7 @@ class PropertyApi implements PropertyApiService {
     // Try fallback provider if specified
     const fallback =
       fallbackProvider ||
-      (this.currentConfig.provider === 'corelogic' ? 'attom' : 'corelogic');
+      (this.currentConfig.provider === 'corelogic' ? 'attom-mcp' : 'corelogic');
     const fallbackProviderAdapter = this.providers.get(fallback);
 
     if (!fallbackProviderAdapter) {
@@ -749,6 +756,11 @@ class PropertyApi implements PropertyApiService {
 
     if (fallbackResult.success) {
       console.log('PropertyAPI: Fallback provider succeeded', { fallback });
+      // The primary is unusable for this job (missing credentials,
+      // entitlement failure) — switch the active provider so downstream
+      // calls (permits, flood, enrichment, parcel bridge) resolve on the
+      // working provider instead of retrying the dead one per-call.
+      this.setProvider(fallback);
     }
 
     return fallbackResult;
@@ -758,7 +770,12 @@ class PropertyApi implements PropertyApiService {
     params: ComparablesSearchParams,
     fallbackProvider?: PropertyProvider,
   ): Promise<ComparablesSearchResponse> {
-    const primaryResult = await this.getComparables(params);
+    let primaryResult: ComparablesSearchResponse
+    try {
+      primaryResult = await this.getComparables(params);
+    } catch (e) {
+      primaryResult = { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
 
     if (primaryResult.success) {
       return primaryResult;
@@ -766,7 +783,7 @@ class PropertyApi implements PropertyApiService {
 
     const fallback =
       fallbackProvider ||
-      (this.currentConfig.provider === 'corelogic' ? 'attom' : 'corelogic');
+      (this.currentConfig.provider === 'corelogic' ? 'attom-mcp' : 'corelogic');
     const fallbackProviderAdapter = this.providers.get(fallback);
 
     if (!fallbackProviderAdapter) {
@@ -782,7 +799,11 @@ class PropertyApi implements PropertyApiService {
       },
     );
 
-    return fallbackProviderAdapter.getComparables(params);
+    const fallbackResult = await fallbackProviderAdapter.getComparables(params);
+    if (fallbackResult.success) {
+      this.setProvider(fallback);
+    }
+    return fallbackResult;
   }
 
   getKeyStatus(): {

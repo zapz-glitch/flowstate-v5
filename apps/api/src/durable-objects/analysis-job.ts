@@ -31,6 +31,7 @@ import {
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
 import { runOpusAppraiser } from '../services/evaluation/appraiser'
+import { runDeterministicSelector } from '../services/evaluation/selector'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
@@ -171,7 +172,7 @@ export interface StartStreamingRequest {
   }
   /** 'agent' pauses the run at the evidence-complete boundary and waits for
    *  the Evaluation Agent's comp-selection verdict instead of evaluateB. */
-  harness?: 'agent'
+  harness?: 'agent' | 'corelogic'
 }
 
 export class AnalysisJobDO {
@@ -385,6 +386,10 @@ export class AnalysisJobDO {
     // Explicit reruns bypass every KV cache on this instance — the point
     // of Rerun is fresh comps, fresh property fields, fresh photos.
     propertyApi.setSkipCache(!!config.skipCache)
+    // Corelogic harness: the legacy Cotality provider — same endpoints,
+    // same order (subject details + permits, then comparables), regardless
+    // of the deployment's default provider.
+    if (config.harness === 'corelogic') propertyApi.setProvider('corelogic')
     const filters = [...(config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS)] as AppraisalFilter[]
     // Inject defaults for filter types the preset doesn't define — same
     // merge performAnalysis does, so pruning/params see the identical
@@ -434,30 +439,42 @@ export class AnalysisJobDO {
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
-    let searchResult = await propertyApi.searchProperty({
+    // Corelogic harness resolves the subject on the resilient facade —
+    // a credentialess/entitlement-failed primary falls back to attom-mcp
+    // transparently instead of erroring the whole job.
+    const searchParams = {
       address: config.search.address,
       streetAddress: config.search.streetAddress,
       city: config.search.city,
       state: config.search.state,
       zipCode: config.search.zipCode,
-    })
+    }
+    let searchResult = config.harness === 'corelogic'
+      ? await propertyApi.searchPropertyWithFallback(searchParams)
+      : await propertyApi.searchProperty(searchParams)
 
     // ATTOM address-string miss → parcel-GIS bridge: Census geocode →
     // county parcel lookup → APN → exact fipsApn resolve on ATTOM. 100%
     // ATTOM — a parcel hit resumes the full pipeline; a miss fails the
     // run as PROPERTY_NOT_FOUND below.
-    if (!searchResult.success && propertyApi.providerName === 'attom-mcp') {
+    if (!searchResult.success && (propertyApi.providerName === 'attom-mcp' || config.harness === 'corelogic')) {
       console.log('[AnalysisJobDO] attom-mcp could not resolve subject — trying parcel-GIS bridge')
       await this.pushEvent('property_fetch', { message: 'ATTOM address lookup missed — resolving parcel via county records...' })
       const parcel = await resolveParcelApn(config.search.address ??
         [config.search.streetAddress, config.search.city, config.search.state, config.search.zipCode].filter(Boolean).join(', '))
       if (parcel) {
-        const byParcel = await propertyApi.searchProperty({
-          address: config.search.address,
-          fips: parcel.fips,
-          apn: parcel.apn,
-        })
-        if (byParcel.success) {
+        const byParcel = config.harness === 'corelogic'
+          ? await propertyApi.searchPropertyWithFallback({
+              address: config.search.address,
+              fips: parcel.fips,
+              apn: parcel.apn,
+            }).catch(() => null)
+          : await propertyApi.searchProperty({
+              address: config.search.address,
+              fips: parcel.fips,
+              apn: parcel.apn,
+            })
+        if (byParcel?.success) {
           console.log('[AnalysisJobDO] parcel bridge succeeded — ATTOM pipeline resumes on attomId', byParcel.data?.id)
           await this.pushEvent('property_fetch', { message: 'Parcel resolved — continuing on ATTOM...' })
           searchResult = byParcel
@@ -545,7 +562,9 @@ export class AnalysisJobDO {
     }
     if (config.enrichment?.permits !== false) sendProgress(permitsRequested())
 
-    const compsPromise = propertyApi.getComparables(comparablesParams)
+    const compsPromise = config.harness === 'corelogic'
+      ? propertyApi.getComparablesWithFallback(comparablesParams)
+      : propertyApi.getComparables(comparablesParams)
 
     // ── Clef digest passes — the agent-assist layer, three stages ──────
     // A rides the comps-landed tap (sale records only), B fires inside the
@@ -649,6 +668,9 @@ export class AnalysisJobDO {
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
             .then((result) => { sendProgress(permitsReceived(result)); return result })
+            // Corelogic harness: a credentialess/uncalled permits endpoint
+            // degrades to 'no permits on file', never kills the run.
+            .catch(() => null)
         : Promise.resolve(null),
       // Flood zone: OPT-IN only — the First Street signal is scraped from the
       // Redfin listing during photo fetch instead (free via Firecrawl).
@@ -1449,7 +1471,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      if (config.harness === 'agent') {
+      if (config.harness === 'agent' || config.harness === 'corelogic') {
         // Self-completing harness: phase 1 freezes the evidence bundle,
         // then the Opus appraiser reviews the complete dataset and posts
         // the final selection — verified by the deterministic gate, with
@@ -1476,14 +1498,20 @@ export class AnalysisJobDO {
           })
         }
         const appraiserStart = Date.now()
-        const appraisal = await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+        // Corelogic harness: code is the selection seat — no model call.
+        // The gate still verifies; a reject completes on the deterministic
+        // engine below. Agent harness keeps the Sonnet appraiser.
+        const appraisal = config.harness === 'corelogic'
+          ? runDeterministicSelector(ctx, evidence)
+          : await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
+        const seat = config.harness === 'corelogic' ? 'Selector' : `Opus (${appraisal?.model ?? 'unavailable'})`
         const appraiserNote = appraisal == null
           ? 'appraiser unavailable — deterministic engine completes'
           : decision
-            ? `Opus (${appraisal.model}) selected ${decision.selectedCompIds.length} comps, ARV $${decision.arv.toLocaleString()} — ${appraisal.attempts.length} attempt(s), ${appraisal.clarifications.length} clarification(s)`
-            : `Opus gate-rejected ${appraisal.attempts.length} attempt(s) — deterministic engine completes`
+            ? `${seat} selected ${decision.selectedCompIds.length} comps, ARV $${decision.arv.toLocaleString()} — ${appraisal.attempts.length} attempt(s), ${appraisal.clarifications.length} clarification(s)`
+            : `${seat} gate-rejected ${appraisal.attempts.length} attempt(s) — deterministic engine completes`
         ctx.steps.push({
           step: 'appraiser', label: 'appraiser',
           status: decision ? 'completed' : 'skipped',
@@ -1585,7 +1613,7 @@ export class AnalysisJobDO {
           }
           const resp = evalResult.response as unknown as Record<string, unknown>
           resp.harness = {
-            ...((resp.harness as Record<string, unknown> | undefined) ?? { source: 'agent' }),
+            ...((resp.harness as Record<string, unknown> | undefined) ?? { source: config.harness ?? 'agent' }),
             // Haiku owns pocket desirability — its read is authoritative
             // over any score a selection happened to carry.
             ...(pocketDesirability ? { pocketScore: pocketDesirability.score } : {}),

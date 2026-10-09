@@ -29,6 +29,10 @@ export interface Env {
   // ─── Property Data Provider ────────────────────────────────────────────────
   /** Active provider: 'corelogic' | 'attom' (default: 'corelogic') */
   PROPERTY_PROVIDER?: string
+  /** Deployment-level eval harness when the request doesn't name one:
+   *  'agent' (Sonnet appraiser) | 'corelogic' (deterministic selector).
+   *  alpha.flowstate sets 'corelogic'; unset = deterministic engine. */
+  DEFAULT_HARNESS?: string
   /**
    * Candidate-pool size for comparable retrieval (system config — not an
    * owner-facing Appraisal Rule). Defaults to the provider maximum

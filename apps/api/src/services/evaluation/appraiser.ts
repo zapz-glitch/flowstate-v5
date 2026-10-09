@@ -191,7 +191,7 @@ function appraiserCompRows(evidence: HarnessEvidence) {
 /** Deterministic disqualifiers, stamped per comp row — the disprove-first
  *  half of the evidence sheet. Code owns the verdict; the appraiser's job
  *  is to confirm and move on. */
-function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: HarnessEvidence): string[] {
+export function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: HarnessEvidence): string[] {
   const rules = evidence.rules
   const reasons: string[] = []
   if (c.isEnabled === false) reasons.push('disabled by the filter rules')

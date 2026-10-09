@@ -193,7 +193,7 @@ export interface EvaluationParams {
    *  caller's appraisal overrides are verbatim — no DEFAULT_FILTERS /
    *  DEFAULT_ADJUSTMENTS injection — so enablement reflects only the hard
    *  data gates; the agent weighs the doctrine's geo/age/size preferences. */
-  harness?: 'agent'
+  harness?: 'agent' | 'corelogic'
 }
 
 export interface GroupBResult {
@@ -485,7 +485,7 @@ export async function performAnalysisPhase1(
   let filters: AppraisalFilter[]
   let adjustments: AppraisalAdjustment[]
 
-  if (params.harness === 'agent') {
+  if (params.harness === 'agent' || params.harness === 'corelogic') {
     // Ruleset-governed run — the caller's overrides are the whole grid.
     // No default injection: an empty override means "no filters", so comps
     // stay enabled unless a hard data gate fails. The agent weighs geo /
@@ -842,7 +842,7 @@ export async function performAnalysisPhase1(
   // (S1-S7 subject / C1-C7 per comp) replace the whole-condition classify.
   // Price boundaries are code-computed; Decisions classifies, Sonnet
   // appraises. Falls back to the classify pool when Decisions is absent.
-  const observablesOn = params.harness === 'agent' && isDecisionsAvailable(env)
+  const observablesOn = (params.harness === 'agent' || params.harness === 'corelogic') && isDecisionsAvailable(env)
   const marketBenchmark = observablesOn
     ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
     : null
@@ -887,7 +887,7 @@ export async function performAnalysisPhase1(
     : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
-    (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
+    ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
@@ -1955,7 +1955,7 @@ export async function performAnalysisPhase2(
     // The agent's pocket/deal-economics classification rides the report —
     // same persistence path as every other field on the response.
     response.harness = {
-      source: 'agent',
+      source: params.harness ?? 'agent',
       pocketScore: agentSelection.pocketScore ?? null,
       dealEconomics: agentSelection.dealEconomics ?? null,
       ...(pricedReno ? {
@@ -1995,7 +1995,7 @@ export async function performAnalysisPhase2(
       // verdict; a deterministic-fallback run synthesizes the equivalent
       // selection from its own B result so it is graded the same way
       // (spec §4). Never blocks the response.
-      ...(params.harness === 'agent' && pipelineBResult != null
+      ...((params.harness === 'agent' || params.harness === 'corelogic') && pipelineBResult != null
         ? {
             verdictGrade: gradeVerdict(
               buildHarnessEvidence(ctx),
