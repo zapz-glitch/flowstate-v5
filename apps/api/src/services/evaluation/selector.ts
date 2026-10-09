@@ -9,7 +9,7 @@
  *   R2 physical eligibility — foundation/construction/style/size/era;
  *      gross mismatches exclude, recoverable differences ADJUST —
  *      never auto-reject a strong comp.
- *   R3 sale recency — inside 2× preferred window or it drops;
+ *   R3 sale recency — hard 365-day cap; inside the window
  *      stale-but-usable is a recoverable caution.
  *   R4 anomaly — divergent AVM, unexplained premium, investor-band
  *      pricing, hard shared exclusions.
@@ -185,15 +185,19 @@ export function runDeterministicSelector(
     }
     audit.recoverable.push(...phys.recoverable)
 
-    // R3 sale recency — beyond 2× the preferred window drops outright;
-    // inside it the staleness is a recoverable caution.
+    // R3 sale recency — hard 365-day cap (user rule): a comp sold more
+    // than a year ago is out entirely. Between the preferred window and
+    // the cap the staleness is a recoverable caution, never a veto.
     const ageDays = comp.saleDate ? Math.floor((Date.now() - new Date(comp.saleDate).getTime()) / 864e5) : null
     const window = evidence.rules.preferredSaleAgeDays
-    // Stale-market doctrine: sale age is a confidence cost, never a veto —
-    // in-pocket renovated evidence still drives ARV in a slow market; the
-    // penalty lands on confidence and rank, not eligibility. R4 anomalies
-    // still catch a stale comp with an off-band price.
-    if (ageDays != null && ageDays > window) audit.recoverable.push(`stale ${ageDays}d vs ${window}d`)
+    const SALE_AGE_CAP_DAYS = 365
+    if (ageDays != null && ageDays > SALE_AGE_CAP_DAYS) {
+      audit.verdict = 'excluded'
+      audit.rules.push('R3')
+      audit.reasons.push(`R3 sale ${ageDays}d old — beyond 365d cap`)
+    } else if (ageDays != null && ageDays > window) {
+      audit.recoverable.push(`stale ${ageDays}d vs ${window}d`)
+    }
 
     // R4 anomalies + the shared hard exclusions (investor-band, divergent
     // price, non-market sale). 'caution:'/'weak geo' stay advisory.

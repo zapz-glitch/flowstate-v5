@@ -1001,7 +1001,9 @@ export class AnalysisJobDO {
             : [c.subdivision, c.neighborhoodName].map(normN).some((v) => v != null && subjN.has(v)) ? 1
             : g?.tract === subjectGeo.tract ? 2 : 3
           const sqftDiff = subjSqft && c.squareFeet ? Math.abs(c.squareFeet - subjSqft) / subjSqft : 9
-          return [tier, sqftDiff, c.distanceMiles ?? 999]
+          // Distance-first inside each tier — the cap keeps the 30 comps
+          // physically closest to the subject; pocket tier still outranks.
+          return [tier, c.distanceMiles ?? 999, sqftDiff]
         }
         const keepIdx = new Set(
           comps.map((c, i) => ({ c, i, k: rankKey(c, i) }))
