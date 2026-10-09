@@ -458,9 +458,17 @@ export function runDeterministicSelector(
   let accepted = false
   let lastFails: string[] = []
   let verdict = selection
+  // Grade against the R-eligible view: same evidence comps, but a comp
+  // that only failed preset tolerances reads enabled here — otherwise
+  // flaggedOutlier vetoes every expanded-pool pick on isEnabled alone.
+  const gradeComps = evidence.comps.map((c) =>
+    c.id != null && c.isEnabled === false && eligibleIds.has(String(c.id))
+      ? { ...c, isEnabled: true }
+      : c)
+  const gradeEvidence = { ...evidence, comps: gradeComps }
   for (let cycle = 0; cycle <= 2; cycle++) {
     const fails = validateAgentSelection(verdict, gateComps)
-    const grade = gradeVerdict(evidence, verdict)
+    const grade = gradeVerdict(gradeEvidence, verdict)
     if (fails.length) {
       grade.failures.push('coherence_validation')
       grade.gateFails.push('validation')
@@ -523,9 +531,45 @@ function remedySelection(
   let drivers = [...(sel.drivers ?? [])]
   let arv = sel.arv
   let changed = false
+  const removed = new Set<string>()
+  const nextPick = () =>
+    deps.ordered.find((r) => !picks.includes(r.id) && !removed.has(r.id) && deps.enabledById.has(r.id))?.id ?? null
   const pickPrices = () =>
     picks.map((id) => deps.enabledById.get(id)?.salePrice).filter((p): p is number => p != null && p > 0)
   for (const f of feedback) {
+    // d1 — the gate names the pocket comps it wants picked; swap each
+    // flagged driver for the first unpicked gate-pocket id.
+    const d1 = /pricing comp (\S+).*?remain: ([0-9,\s…]+)/.exec(f)
+    if (d1) {
+      const off = d1[1]
+      const pocketIds = d1[2].split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s))
+      const swap = pocketIds.find((id) => !picks.includes(id) && deps.enabledById.has(id))
+      if (swap) {
+        const i = picks.indexOf(off)
+        if (i >= 0) picks[i] = swap
+        else if (!picks.includes(swap)) picks.push(swap)
+        const di = drivers.indexOf(off)
+        if (di >= 0) drivers[di] = swap
+        else if (!drivers.includes(swap)) drivers.push(swap)
+        removed.add(off)
+        changed = true
+      }
+      continue
+    }
+    // d2 — vetoed pick: drop it and refill from the ranked pool.
+    const d2 = /pick (\S+) \([^)]*\) is not market evidence/.exec(f)
+    if (d2) {
+      const i = picks.indexOf(d2[1])
+      if (i >= 0) {
+        removed.add(d2[1])
+        const next = nextPick()
+        if (next) picks[i] = next
+        else picks.splice(i, 1)
+        drivers = drivers.filter((d) => d !== d2[1])
+        changed = true
+      }
+      continue
+    }
     const notEnabled = /selected comp (\S+) is not an enabled pool member/.exec(f)
     if (notEnabled) {
       const next = deps.ordered.find((r) => !picks.includes(r.id) && deps.enabledById.has(r.id))
@@ -562,6 +606,12 @@ function remedySelection(
       }
     }
   }
+  // Drivers must live inside picks and stay minDrivers deep — pocket
+  // members first, then the pick order.
+  drivers = drivers.filter((d) => picks.includes(d))
+  const inP = picks.filter((id) => deps.inPocketIds.has(id) && !drivers.includes(id))
+  drivers = [...drivers, ...inP, ...picks.filter((p) => !drivers.includes(p) && !inP.includes(p))]
+    .slice(0, deps.minDrivers)
   if (!drivers.length && picks.length) drivers = picks.slice(0, deps.minDrivers)
   if (!changed && drivers.join() !== (sel.drivers ?? []).join()) changed = true
   return changed ? { ...sel, selectedCompIds: picks, drivers, arv } : null
