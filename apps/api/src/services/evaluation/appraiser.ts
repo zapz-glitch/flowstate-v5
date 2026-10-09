@@ -405,6 +405,7 @@ export async function runOpusAppraiser(
   let clarificationBlock: ClarifyFinding[] = []
   let lastGrade: VerdictGrade | null = null
   let lastDebug: string | null = null
+  let emptyResponseRetry = false
 
   // Decision loop — clarify rounds count against MAX_CLARIFICATIONS; gate
   // rejects consume revisions; a passing grade (or a plain-text answer we
@@ -423,12 +424,13 @@ export async function runOpusAppraiser(
       prompt,
       responseFormat: 'json',
       jsonSchema: { name: 'appraiser_selection', schema: SELECTION_SCHEMA },
-      maxTokens: 4096,
-      reasoning: { enabled: true, effort: lastGrade ? 'xhigh' : 'high' },
+      maxTokens: 16384, // thinking shares this budget — 4096 starves high/xhigh effort into empty responses
+      reasoning: { enabled: true, effort: (lastGrade || emptyResponseRetry) ? 'xhigh' : 'high' },
     }).catch((e) => { console.warn('[appraiser] execute failed', e?.message ?? e); return null })
     const parsed = res?.data?.content ? parseSelection(res.data.content) : null
     if (!parsed) {
       console.warn('[appraiser] unparseable response', JSON.stringify({ hasData: !!res?.data, hasContent: !!res?.data?.content, preview: typeof res?.data?.content === 'string' ? res.data.content.slice(0, 300) : null, err: res?.error ?? null }))
+      if (!emptyResponseRetry) { emptyResponseRetry = true; continue } // one retry at xhigh before failing closed
       out.unavailable = out.attempts.length === 0; break
     }
 
