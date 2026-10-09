@@ -67,6 +67,27 @@ interface CompAudit {
   missingData: string[]
 }
 
+type MatchDim = 'twin' | 'close' | 'moderate' | 'poor' | 'unknown'
+
+/** Per-dimension labels — the raw value AND the label are both preserved
+ *  per field; a comp never collapses into one score. pricePosition is
+ *  where the comp sold inside ITS pocket's ladder; priceEvidence is how
+ *  useful that sale is for THIS subject's renovated value — two separate
+ *  questions, two separate labels. */
+interface CompLabels {
+  geo: CompMatchProfile['geoTier']
+  sqft: MatchDim
+  year: MatchDim
+  lot: MatchDim
+  style: 'match' | 'differs' | 'unknown'
+  saleAge: 'fresh' | 'stale' | 'aged_out' | 'unknown'
+  pricePosition: 'top' | 'median' | 'bottom' | 'outlier' | 'unknown'
+  priceEvidence: 'arv' | 'median' | 'as_is' | 'none'
+  sanity: 'clean' | 'anomalous'
+  /** Recoverable physical differences — "fewest exceptions wins". */
+  diffs: number
+}
+
 interface RankedComp {
   id: string
   comp: HarnessEvidence['comps'][number]
@@ -74,6 +95,7 @@ interface RankedComp {
   group: PriceGroup
   ppsf: number
   audit: CompAudit
+  labels?: CompLabels
 }
 
 /** Ladder rung for a comp — the stamped group when present, else the
@@ -277,12 +299,18 @@ export function runDeterministicSelector(
   const medianBand = groupStats('middle')
   const asIsBand = groupStats('bottom')
 
-  // Disprove-first ordering inside a band: geo tier outranks everything,
-  // then ARV-fitness, physical similarity, and price position.
+  // Lexicographic pick order — compare the most important criterion
+  // first, move to the next only on a tie: geo tier → fewest recoverable
+  // diffs → physical twin count → Decisions arv-fitness → price position.
+  // A strong attribute can never compensate for a higher-priority
+  // weakness; there is no weighted score anywhere in the pick path.
+  const twinCount = (r: RankedComp) =>
+    r.labels ? [r.labels.sqft, r.labels.year, r.labels.lot].filter((d) => d === 'twin').length : 0
   const rank = (a: RankedComp, b: RankedComp) =>
     GEO_TIER_RANK[a.profile.geoTier] - GEO_TIER_RANK[b.profile.geoTier]
+    || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
+    || twinCount(b) - twinCount(a)
     || (b.comp.observables?.arvFitnessP ?? 0.5) - (a.comp.observables?.arvFitnessP ?? 0.5)
-    || (b.comp.observables?.physicalMatchP ?? 0.5) - (a.comp.observables?.physicalMatchP ?? 0.5)
     || b.ppsf - a.ppsf
 
   // R5 condition band decides the pick pool — an as-is/distressed sale at
@@ -305,6 +333,34 @@ export function runDeterministicSelector(
   // Investor-band pricing is as-is evidence in code too — a bottom-rung
   // comp never picks, same rule as a labeled as_is comp (R5).
   const asIsPriced = (r: RankedComp) => isAsIs(r) || r.group === 'bottom'
+  // Per-dimension labels (doctrine: raw + label, never one score). A comp
+  // with one recoverable diff and one with three are different evidence
+  // even at the same geo tier — `diffs` counts the exceptions.
+  const physDim = (delta: number | null, twin: number, close: number, mod: number): MatchDim =>
+    delta == null ? 'unknown'
+      : Math.abs(delta) <= twin ? 'twin'
+      : Math.abs(delta) <= close ? 'close'
+      : Math.abs(delta) <= mod ? 'moderate' : 'poor'
+  for (const r of ranked) {
+    const styleDiffs = r.audit.recoverable.filter((x) =>
+      /stories|foundation|construction|exterior|roof|beds|baths/.test(x)).length
+    r.labels = {
+      geo: r.profile.geoTier,
+      sqft: physDim(r.profile.sqftDeltaPct, 10, 15, PHYS.sqftDeltaPct.recoverable),
+      year: physDim(r.profile.yearBuiltDelta, 5, 10, PHYS.yearBuiltDelta.recoverable),
+      lot: physDim(r.profile.lotDeltaPct, 25, 50, PHYS.lotDeltaPct.recoverable),
+      style: r.audit.recoverable.length === 0 ? 'match' : styleDiffs > 0 ? 'differs' : 'match',
+      saleAge: r.audit.reasons.some((x) => x.includes('365d cap')) ? 'aged_out'
+        : r.audit.recoverable.some((x) => x.startsWith('stale')) ? 'stale'
+        : r.comp.saleDate ? 'fresh' : 'unknown',
+      pricePosition: selGrouping?.outliers.has(r.id) ? 'outlier'
+        : r.group === 'top' ? 'top' : r.group === 'bottom' ? 'bottom' : 'median',
+      priceEvidence: r.audit.verdict === 'excluded' || r.audit.verdict === 'unpriceable' ? 'none'
+        : asIsPriced(r) ? 'as_is' : isRenovated(r) ? 'arv' : 'median',
+      sanity: r.audit.rules.includes('R4') ? 'anomalous' : 'clean',
+      diffs: r.audit.recoverable.length,
+    }
+  }
   const arvPool = clean.filter((r) => !asIsPriced(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !asIsPriced(r) && !isRenovated(r)).sort(rank)
   const medianFallback = arvPool.length < MIN_PICKS
@@ -333,6 +389,20 @@ export function runDeterministicSelector(
   // Picks draw from the gate's whole pocket — BG first, then tract —
   // never only-BG (a 2-comp BG can't fill a pick set on its own).
   const inPocketPick = inPocket
+
+  // Similarity-qualified pocket median $/sf — the base price position is
+  // labeled against. Pocket members only (the gate's own in-pocket
+  // test), arm's-length and non-outlier by construction of `clean`.
+  // Twin-gated: ≥3 pocket comps sqft-close to the subject → median over
+  // those; else the broad pocket median rides flagged as the wider read.
+  const pocketMembers = clean.filter(inPocketPick)
+  const pocketTwins = pocketMembers.filter((r) => r.labels?.sqft === 'twin' || r.labels?.sqft === 'close')
+  const medianBase = (pocketTwins.length >= 3 ? pocketTwins : pocketMembers)
+    .map((r) => r.ppsf).sort((a, b) => a - b)
+  const qualifiedMedianPpsf = medianBase.length
+    ? medianBase[Math.floor((medianBase.length - 1) / 2)]
+    : 0
+  const medianScope = pocketTwins.length >= 3 ? 'similarity-qualified' : 'broad-pocket'
 
   // Picks: ARV-qualified comps always join the set first (even below
   // MIN_PICKS — d4 wants every qualified comp used), then in-pocket
@@ -434,6 +504,7 @@ export function runDeterministicSelector(
       ...(thinPool ? ['thin_pocket'] : []),
       ...(staleDrivers ? ['stale_drivers'] : []),
       `price_groups:arv_$${Math.round(arvBand?.medianPpsf ?? 0)}/sf,median_$${Math.round(medianBand?.medianPpsf ?? 0)}/sf,asis_$${Math.round(asIsBand?.medianPpsf ?? 0)}/sf`,
+      `pocket_base:$${Math.round(qualifiedMedianPpsf)}/sf(${medianScope},n=${medianBase.length})`,
     ],
     notes: `Deterministic selector (${medianFallback ? 'median-band fallback' : 'ARV band'}): ${picks.length} picks — ${bgPicks} block-group match(es), median $${Math.round(medianPpsf)}/sqft × ${subject.squareFeet}sqft subject. Groups: arv $${Math.round(arvBand?.medianPpsf ?? 0)}/sf · median $${Math.round(medianBand?.medianPpsf ?? 0)}/sf · as-is $${Math.round(asIsBand?.medianPpsf ?? 0)}/sf.`,
     dataQuality: {
@@ -505,6 +576,11 @@ export function runDeterministicSelector(
   const pickIds = new Set(picks.map((p) => String(p.id)))
   const pocketLedger = ranked.filter(inPocket).map((r) =>
     `${r.id}:${r.audit.verdict}${r.group === 'bottom' ? ':bottom' : ''}${isAsIs(r) ? ':asis' : ''}${inBg(r) ? ':BG' : ':TRACT'}${pickIds.has(String(r.id)) ? ':PICKED' : ''}`)
+  // Per-pick label dump — every pick shows its full label vector so the
+  // audit explains exactly why one comp beat another.
+  const pickLabels = picks.map((p) =>
+    `${p.id}[${p.labels ? `${p.labels.geo}|sqft:${p.labels.sqft}|yr:${p.labels.year}|lot:${p.labels.lot}|price:${p.labels.pricePosition}→${p.labels.priceEvidence}|diffs:${p.labels.diffs}` : ''}]`)
+  ledger.unshift(`labels: ${pickLabels.join(' ')}`)
   ledger.unshift(`pocket: ${pocketLedger.join(' ')}`)
 
   return {
