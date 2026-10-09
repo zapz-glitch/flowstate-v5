@@ -53,7 +53,7 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
-import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
+import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
@@ -879,6 +879,11 @@ export async function performAnalysisPhase1(
         })
       }).catch((err) => { console.warn('[observables] subject call failed', err?.message ?? err); return null })
     : Promise.resolve(null)
+  // Subject street view — fetched once per eval, shared by every comp
+  // call's c10 physical-similarity read (its image is the reference pair).
+  const subjectStreetViewPromise = observablesOn
+    ? fetchStreetViewTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
+    : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
     (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
@@ -930,6 +935,7 @@ export async function performAnalysisPhase1(
                   coverPhotoUrl: ev.listing?.coverPhotoUrl ?? null,
                   latitude: (comp as { latitude?: number }).latitude ?? null,
                   longitude: (comp as { longitude?: number }).longitude ?? null,
+                  subjectStreetViewImage: await subjectStreetViewPromise,
                   benchmark: marketBenchmark,
                 }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
                 if (ob) compObservables[comp.propertyId] = ob

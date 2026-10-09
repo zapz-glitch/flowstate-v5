@@ -104,6 +104,29 @@ export function positionFor(ppsf: number | null, bench: PocketBenchmark): { tier
 
 // ─── Question banks (verbatim spec) ─────────────────────────────────────
 
+/** Doctrine injected into every Decisions call's context — the model reads
+ *  this before judging each comp so it knows what it's looking at.
+ *  Exclusion reasons FIRST, inclusion reasons SECOND: the lane's job is to
+ *  disprove comps before it proves them. */
+export const DECISIONS_DOCTRINE = `EXCLUSION RULES — disqualify first:
+- Outside the block group with no neighborhood or trade-area match — exclude.
+- Square footage outside the subject's band, or materially different year built — exclude.
+- Stale sale, or an uncorroborated price (no AVM support, nominal/data_error flags) — exclude.
+- Fits the rules but priced far below the pocket — an investor sale; real data, not ARV-grade evidence.
+- Condition that cannot represent the subject's finished state — not ARV evidence.
+
+CONDITION DOCTRINE:
+- DATED = move-in ready but older house by year built, especially when no notable cosmetic or big-ticket renovations appear in the description.
+- RENOVATED = cosmetics AND big-ticket items replaced, especially when the description emphasizes new condition or renovation status.
+- DISTRESSED = "fixer upper", "TLC", "sweat equity", "bring your vision", "as-is", or similar keywords — a full renovation is required.
+- MAINTAINED = lived-in and serviceable with some updated big-ticket items; not retail-renovated.
+
+INCLUSION RULES — only after exclusions pass:
+- Geography: same block group > same neighborhood > same subdivision > pocket median fallback.
+- Physical similarity to the subject (style, stories, garage layout, curb appeal) — judged from street view, never condition.
+- ARV-fitness ladder: newly renovated / flipper-complete = highest score; move-in ready or lived-in with updated big-ticket items ≈ 70-80s; investor sale / fixer / TLC / "bring your vision" = lowest score for ARV use.
+- The goal is maximizing after-repair value within the rules — the strongest honest valuation makes the strongest honest offer to the seller.`
+
 const COND_CHOICES = {
   RENOVATED: 'clearly renovated or substantially updated for retail resale',
   MAINTAINED: 'well-kept, dated finishes but nothing visibly broken',
@@ -121,7 +144,7 @@ const TIER_CHOICES = {
 const SUBJECT_QUESTIONS = {
   s1_overall_condition: {
     type: 'choice' as const, criteria: COND_CHOICES,
-    instructions: "Based on all available property photos and the listing description, which condition best describes the SUBJECT?",
+    instructions: "Based on all available property photos and the listing description, which condition best describes the SUBJECT? DATED = move-in ready but older house by year built, especially when no notable cosmetic or big-ticket renovations appear in the description. RENOVATED = cosmetics AND big-ticket items replaced, especially when the description emphasizes new condition or renovation status. DISTRESSED = fixer upper, TLC, sweat equity, bring your vision, as-is, or similar keywords — a full renovation is required. MAINTAINED = lived-in and serviceable with some updated big-ticket items; not retail-renovated.",
   },
   s2_reno_evidence: {
     type: 'noul' as const,
@@ -183,7 +206,7 @@ const COMP_QUESTIONS = {
   },
   c2_desc_condition: {
     type: 'choice' as const, criteria: COND_CHOICES,
-    instructions: 'What property condition does the listing description support? Do not infer renovation from the sale price.',
+    instructions: 'What property condition does the listing description support? Do not infer renovation from the sale price. DATED = older house by year built with no notable cosmetic or big-ticket renovation claims in the description. RENOVATED = description claims cosmetics and big-ticket items replaced, or emphasizes new condition / renovation status. DISTRESSED = fixer upper, TLC, sweat equity, bring your vision, as-is keywords — a full renovation is required. MAINTAINED = lived-in with some updates, serviceable but not retail-renovated.',
   },
   c3_cover_evidence: {
     type: 'choice' as const,
@@ -216,6 +239,14 @@ const COMP_QUESTIONS = {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
     instructions: 'When a satellite image is supplied (roads/business labels overlaid), does the COMP have adverse site exposure? Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. UNVERIFIED when no satellite image is present; do not infer exposure from price or description alone.',
+  },
+  c10_physical_match: {
+    type: 'noul' as const,
+    instructions: 'When street-view images are supplied (the SUBJECT street view comes LAST), score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when images are absent or the styles clearly differ.',
+  },
+  c11_arv_fitness: {
+    type: 'noul' as const,
+    instructions: 'Score the probability that this COMP represents a finished, renovated, or move-in-ready version of the subject property — an ARV-grade sale. Highest scores: newly renovated or flipper-complete listings (description emphasizes new this, new that). Around 70-80: move-in ready, lived-in condition with updated big-ticket items. Lowest scores: investor sales or listings needing full renovation — fixer upper, TLC, sweat equity, bring your vision, as-is keywords.',
   },
 }
 
@@ -259,6 +290,12 @@ export interface CompObservables {
   premiumAttributes: string | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
+  /** P(comp is a physical match to the subject) — street view lane. */
+  physicalMatchP: number | null
+  /** P(comp is a finished/renovated/move-in-ready version of the subject) —
+   *  ARV-fitness ladder: flipper-complete highest, maintained ~70-80s,
+   *  fixer/investor lowest. */
+  arvFitnessP: number | null
   confidence: Record<string, number>
   model: string
   durationMs: number
@@ -294,6 +331,24 @@ async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
   return { base64: btoa(bin), content_type: mime }
 }
 
+/** Curb-level Street View image for the physical-similarity lane — subject
+ *  fetched once per eval by the caller; comps fetched per call. Returns null
+ *  when Street View Static is unavailable or the coverage is missing. */
+export async function fetchStreetViewTile(env: Env, loc: { latitude?: number | null; longitude?: number | null }) {
+  const key = env.GOOGLE_MAPS_KEY
+  const lat = loc.latitude, lng = loc.longitude
+  if (!key || typeof lat !== 'number' || typeof lng !== 'number') return null
+  const url = `https://maps.googleapis.com/maps/api/streetview?size=640x640&location=${lat},${lng}&key=${key}`
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+  if (!res.ok) return null
+  const mime = res.headers.get('content-type') ?? 'image/jpeg'
+  if (!mime.startsWith('image/')) return null
+  const buf = new Uint8Array(await res.arrayBuffer())
+  let bin = ''
+  for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192))
+  return { base64: btoa(bin), content_type: mime }
+}
+
 export async function decisionsSubjectObservables(
   env: Env,
   input: {
@@ -311,13 +366,15 @@ export async function decisionsSubjectObservables(
   if (!isDecisionsAvailable(env)) return null
   const started = Date.now()
   const urls = input.photoUrls.length > 0 ? input.photoUrls : (input.coverPhotoUrl ? [input.coverPhotoUrl] : [])
-  const [sat, images] = await Promise.all([
+  const [sat, street, images] = await Promise.all([
     fetchSatelliteTile(env, input.subject).catch(() => null),
+    fetchStreetViewTile(env, { latitude: input.subject.latitude as number | null ?? null, longitude: input.subject.longitude as number | null ?? null }).catch(() => null),
     fetchImagesAsBase64(urls, { concurrency: 10 }),
   ])
   const satImg = sat ?? input.satelliteImage ?? null
   const imgs = [
     ...(satImg ? [{ mimeType: satImg.content_type ?? 'image/png', base64: satImg.base64 }] : []),
+    ...(street ? [{ mimeType: street.content_type ?? 'image/jpeg', base64: street.base64 }] : []),
     ...urls.map((u) => images.get(u)).filter((i): i is NonNullable<typeof i> => !!i),
   ]
   const askPos = input.askPpsf != null && input.benchmark ? positionFor(input.askPpsf, input.benchmark) : null
@@ -330,10 +387,17 @@ export async function decisionsSubjectObservables(
     codePricePosition: askPos,
     matchedMarket: input.benchmark,
     description: input.description ?? null,
+    imageOrder: [
+      ...(satImg ? ['satellite aerial'] : []),
+      ...(street ? ['street view (curb-level)'] : []),
+      'listing photos',
+    ],
+    doctrine: DECISIONS_DOCTRINE,
     rules: [
       'A price tier is not proof of renovation condition.',
       'Missing interior photographs do not prove that a property is dated.',
       'Marketing claims are evidence, not verified facts.',
+      'Street view judges physical similarity only — never condition.',
       'Record confidence for every answer; confidence is not independent verification.',
     ],
   }
@@ -397,6 +461,9 @@ export async function decisionsCompObservables(
     /** Comp coordinates for the satellite tile feeding c9. */
     latitude?: number | null
     longitude?: number | null
+    /** Subject street-view image for the c10 physical-similarity lane —
+     *  fetched once per eval and shared across every comp call. */
+    subjectStreetViewImage?: { base64: string; content_type?: string } | null
     benchmark: PocketBenchmark | null
   },
 ): Promise<CompObservables | null> {
@@ -408,7 +475,10 @@ export async function decisionsCompObservables(
     const fetched = await fetchImageAsBase64(input.coverPhotoUrl).catch(() => null)
     if (fetched) img = { base64: fetched.base64, content_type: fetched.mimeType }
   }
-  const satImg = await fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null)
+  const [satImg, streetImg] = await Promise.all([
+    fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
+    fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null),
+  ])
 
   const state = {
     role: 'COMPARABLE closed sale — evaluate ONLY this property.',
@@ -418,11 +488,19 @@ export async function decisionsCompObservables(
     codePricePosition: pos,
     matchedMarket: input.benchmark,
     description: input.description ?? null,
+    imageOrder: [
+      ...(img ? ['comp listing cover photo'] : []),
+      ...(satImg ? ['comp satellite aerial'] : []),
+      ...(streetImg ? ['comp street view'] : []),
+      ...(input.subjectStreetViewImage ? ['SUBJECT street view'] : []),
+    ],
+    doctrine: DECISIONS_DOCTRINE,
     rules: [
       'A price tier is not proof of renovation condition.',
       'A price outlier must be flagged when its premium cannot be explained.',
       'Do not automatically remove a comp because its price and condition disagree.',
       'Preserve disagreements between price position and condition evidence.',
+      'Street view judges physical similarity only — never condition.',
       'Decisions classifies evidence. The appraiser selects comps and determines ARV.',
     ],
   }
@@ -432,6 +510,8 @@ export async function decisionsCompObservables(
     images: [
       ...(img ? [{ content_type: img.content_type, base64: img.base64 }] : []),
       ...(satImg ? [{ content_type: satImg.content_type, base64: satImg.base64 }] : []),
+      ...(streetImg ? [{ content_type: streetImg.content_type, base64: streetImg.base64 }] : []),
+      ...(input.subjectStreetViewImage ? [{ content_type: input.subjectStreetViewImage.content_type, base64: input.subjectStreetViewImage.base64 }] : []),
     ],
   }).catch(() => null)
   const a = (res?.answers ?? {}) as DecisionsAnswers
@@ -449,6 +529,8 @@ export async function decisionsCompObservables(
     finalTier: choiceOf(a, 'c7_final_tier'),
     premiumAttributes: choiceOf(a, 'c8_premium_attributes'),
     siteExposure: choiceOf(a, 'c9_site_exposure'),
+    physicalMatchP: probOf(a, 'c10_physical_match'),
+    arvFitnessP: probOf(a, 'c11_arv_fitness'),
     confidence: confs(a),
     model: env.DECISIONS_MODEL || 'gpt-6-luna',
     durationMs: Date.now() - started,
