@@ -31,6 +31,7 @@ import {
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
 import { runOpusAppraiser } from '../services/evaluation/appraiser'
+import { runDeterministicSelector } from '../services/evaluation/selector'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
@@ -40,6 +41,7 @@ import { createPropertyApi } from '../services/property-api'
 import { mergeComparablePools } from '../services/property-api/comparable-pool'
 import {
   resolveCandidateLimit,
+  providerMaxComps,
   expansionRefetchRadius,
   isProvablyDeadComp,
   enrichmentRankScore,
@@ -61,6 +63,7 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
+import { createApiLedger } from '../services/api-ledger'
 import { resolveParcelApn } from '../services/geo/parcel-gis'
 import { resolveZoning } from '../services/geo/zoning'
 import { drizzle } from 'drizzle-orm/d1'
@@ -171,7 +174,7 @@ export interface StartStreamingRequest {
   }
   /** 'agent' pauses the run at the evidence-complete boundary and waits for
    *  the Evaluation Agent's comp-selection verdict instead of evaluateB. */
-  harness?: 'agent'
+  harness?: 'agent' | 'corelogic'
 }
 
 export class AnalysisJobDO {
@@ -382,9 +385,14 @@ export class AnalysisJobDO {
     console.log(`[AnalysisJobDO] ── Streaming analysis started ──`)
 
     const propertyApi = createPropertyApi(this.env)
+    const apiLedger = createApiLedger()
     // Explicit reruns bypass every KV cache on this instance — the point
     // of Rerun is fresh comps, fresh property fields, fresh photos.
     propertyApi.setSkipCache(!!config.skipCache)
+    // Corelogic harness: the legacy Cotality provider — same endpoints,
+    // same order (subject details + permits, then comparables), regardless
+    // of the deployment's default provider.
+    if (config.harness === 'corelogic') propertyApi.setProvider('corelogic')
     const filters = [...(config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS)] as AppraisalFilter[]
     // Inject defaults for filter types the preset doesn't define — same
     // merge performAnalysis does, so pruning/params see the identical
@@ -434,30 +442,42 @@ export class AnalysisJobDO {
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
-    let searchResult = await propertyApi.searchProperty({
+    // Corelogic harness resolves the subject on the resilient facade —
+    // a credentialess/entitlement-failed primary falls back to attom-mcp
+    // transparently instead of erroring the whole job.
+    const searchParams = {
       address: config.search.address,
       streetAddress: config.search.streetAddress,
       city: config.search.city,
       state: config.search.state,
       zipCode: config.search.zipCode,
-    })
+    }
+    let searchResult = config.harness === 'corelogic'
+      ? await propertyApi.searchPropertyWithFallback(searchParams)
+      : await propertyApi.searchProperty(searchParams)
 
     // ATTOM address-string miss → parcel-GIS bridge: Census geocode →
     // county parcel lookup → APN → exact fipsApn resolve on ATTOM. 100%
     // ATTOM — a parcel hit resumes the full pipeline; a miss fails the
     // run as PROPERTY_NOT_FOUND below.
-    if (!searchResult.success && propertyApi.providerName === 'attom-mcp') {
+    if (!searchResult.success && (propertyApi.providerName === 'attom-mcp' || config.harness === 'corelogic')) {
       console.log('[AnalysisJobDO] attom-mcp could not resolve subject — trying parcel-GIS bridge')
       await this.pushEvent('property_fetch', { message: 'ATTOM address lookup missed — resolving parcel via county records...' })
       const parcel = await resolveParcelApn(config.search.address ??
         [config.search.streetAddress, config.search.city, config.search.state, config.search.zipCode].filter(Boolean).join(', '))
       if (parcel) {
-        const byParcel = await propertyApi.searchProperty({
-          address: config.search.address,
-          fips: parcel.fips,
-          apn: parcel.apn,
-        })
-        if (byParcel.success) {
+        const byParcel = config.harness === 'corelogic'
+          ? await propertyApi.searchPropertyWithFallback({
+              address: config.search.address,
+              fips: parcel.fips,
+              apn: parcel.apn,
+            }).catch(() => null)
+          : await propertyApi.searchProperty({
+              address: config.search.address,
+              fips: parcel.fips,
+              apn: parcel.apn,
+            })
+        if (byParcel?.success) {
           console.log('[AnalysisJobDO] parcel bridge succeeded — ATTOM pipeline resumes on attomId', byParcel.data?.id)
           await this.pushEvent('property_fetch', { message: 'Parcel resolved — continuing on ATTOM...' })
           searchResult = byParcel
@@ -517,24 +537,46 @@ export class AnalysisJobDO {
     // Candidate pool: request up to the configured/provider-max limit so the
     // appraisal rules see the broadest universe the provider supports in one
     // call (CoreLogic maxComps hard max = 100, no pagination).
-    const candidateLimit = resolveCandidateLimit(this.env, propertyApi.providerName, config.searchOptions.maxComps)
+    // corelogic-alpha: the provider returns comps distance-ordered, so the
+    // fetch cap IS the nearest-N. Working pool is 30; +10 buffer keeps a
+    // pocket comp that ranks 31-40 by distance from being passed on.
+    // monthsBack floors at 12 — the 365-day selector cap makes anything
+    // older dead weight in the response.
+    const candidateLimit = config.harness === 'corelogic'
+      ? Math.min(Number(this.env.CORE_FETCH_CAP) || 40, providerMaxComps(propertyApi.providerName))
+      : resolveCandidateLimit(this.env, propertyApi.providerName, config.searchOptions.maxComps)
     const comparablesParams = {
         propertyId: property.id,
+        // Fallback providers resolve their own ID space from this when
+        // property.id is foreign (CoreLogic CLIP → ATTOM attomId).
+        subjectAddress: {
+          address: property.address ?? undefined,
+          city: property.city ?? undefined,
+          state: property.state ?? undefined,
+          zip: property.zipCode ?? undefined,
+        },
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
         maxComps: candidateLimit,
         // attom-mcp: the sale-age ladder (expansion tiers + param flex) can
         // reach ~18 months — the configured window (often ~6mo, derived
         // from sale_age) truncates the exact comps the rules are built to
         // admit. Floor the fetch at the deepest reachable tier.
-        monthsBack: propertyApi.providerName === 'attom-mcp'
-          ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
-          : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
+        monthsBack: config.harness === 'corelogic'
+          ? (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12)
+          : propertyApi.providerName === 'attom-mcp'
+            ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
+            : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
         // Sub-1,000sf subjects: evaluation replaces the ±diff band with an
         // absolute 1,000sf ceiling — widen the provider-side diff so
-        // qualifying comps aren't culled upstream.
-        sqftDiff: (property.squareFeet != null && property.squareFeet < 1000)
-          ? Math.max(apiFilterParams.sqftDiff ?? 0, 1000)
-          : apiFilterParams.sqftDiff,
+        // qualifying comps aren't culled upstream. CoreLogic applies the
+        // window server-side and starves the pool (±200sf → 0 comps), so
+        // the alpha harness lets the filter ladder do the fit work and
+        // fetches unbounded by size.
+        sqftDiff: config.harness === 'corelogic'
+          ? undefined
+          : (property.squareFeet != null && property.squareFeet < 1000)
+            ? Math.max(apiFilterParams.sqftDiff ?? 0, 1000)
+            : apiFilterParams.sqftDiff,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
@@ -545,7 +587,9 @@ export class AnalysisJobDO {
     }
     if (config.enrichment?.permits !== false) sendProgress(permitsRequested())
 
-    const compsPromise = propertyApi.getComparables(comparablesParams)
+    const compsPromise = config.harness === 'corelogic'
+      ? propertyApi.getComparablesWithFallback(comparablesParams)
+      : propertyApi.getComparables(comparablesParams)
 
     // ── Clef digest passes — the agent-assist layer, three stages ──────
     // A rides the comps-landed tap (sale records only), B fires inside the
@@ -594,13 +638,22 @@ export class AnalysisJobDO {
     const digestAPromiseParts: Promise<Map<string, CompDigest>>[] = []
     const digestBPromiseParts: Promise<Map<string, CompDigest>>[] = []
     const digestCPromiseParts: Promise<Map<string, CompDigest>>[] = []
-    const clefDigestsOn = this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(this.env)
+    // Digest reader: Decisions (proto-parity — the same question/probability
+    // machinery proto uses for comp observables) when CONDITION_READER is
+    // 'decisions' and OpenAI is keyed; Clef otherwise. corelogic-alpha runs
+    // ONE Decisions pass per comp — the observables lane (condition +
+    // satellite exposure); the digest stages duplicated that spend.
+    const digestReaderOn = this.env.CONDITION_READER === 'decisions'
+      ? !!this.env.OPENAI_API_KEY
+      : isClefAvailable(this.env)
+    const clefDigestsOn = this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && digestReaderOn
     // Comp evidence (listing fetch + condition classify) is core input to
     // the agent harness — Opus's per-comp tier/coverage reads come from
     // it. The CLEF flag gates only the legacy shadow lane; an agent run
     // needs any condition reader (Anthropic haiku, OpenRouter, Clef).
     const compEvidenceOn =
       clefDigestsOn ||
+      config.harness === 'corelogic' ||
       (config.harness === 'agent' && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
 
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
@@ -608,7 +661,13 @@ export class AnalysisJobDO {
     const prefetchedCompEvidence = compsPromise.then(async (res) => {
       try {
         if (!res.success || !compEvidenceOn) return null
-        const inputs = res.data.comparables.slice(0, Number(this.env.CLEF_COMP_MAX) || Infinity).map((c) => ({
+        // corelogic caps the working pool at CORE_WORKING_POOL distance-
+        // sorted comps — scraping beyond it spends listing calls on sales
+        // no downstream lane can use.
+        const prefetchCap = config.harness === 'corelogic'
+          ? Math.min(Number(this.env.CLEF_COMP_MAX) || Infinity, Number(this.env.CORE_WORKING_POOL) || 30)
+          : (Number(this.env.CLEF_COMP_MAX) || Infinity)
+        const inputs = res.data.comparables.slice(0, prefetchCap).map((c) => ({
           propertyId: c.id,
           address: c.address,
           city: c.city,
@@ -621,6 +680,7 @@ export class AnalysisJobDO {
           yearBuilt: c.yearBuilt ?? undefined,
           squareFeet: c.squareFeet ?? undefined,
         }))
+        apiLedger.record('scrape:comp-evidence', inputs.length)
         const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
           // Defer classification whenever a post-geo classifier will run —
@@ -633,10 +693,13 @@ export class AnalysisJobDO {
         })
         // Stage-A digest on sale records — no listing data needed, runs
         // beside the listing fetch it precedes in the evidence batch.
-        digestAPromiseParts.push(
-          startCompDigestBatch(this.env, res.data.comparables.map((c) => toDigestComp(c)), digestSubject, 'A')
-            .catch(() => new Map()),
-        )
+        if (clefDigestsOn) {
+          apiLedger.record('decisions:comp-digest', res.data.comparables.length)
+          digestAPromiseParts.push(
+            startCompDigestBatch(this.env, res.data.comparables.map((c) => toDigestComp(c)), digestSubject, 'A')
+              .catch(() => new Map()),
+          )
+        }
         return await evidenceBatch
       } catch { return null }
     }).catch(() => null)
@@ -649,6 +712,9 @@ export class AnalysisJobDO {
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
             .then((result) => { sendProgress(permitsReceived(result)); return result })
+            // Corelogic harness: a credentialess/uncalled permits endpoint
+            // degrades to 'no permits on file', never kills the run.
+            .catch(() => null)
         : Promise.resolve(null),
       // Flood zone: OPT-IN only — the First Street signal is scraped from the
       // Redfin listing during photo fetch instead (free via Firecrawl).
@@ -828,6 +894,9 @@ export class AnalysisJobDO {
     }
 
     let enrichedComps = rawComps
+    // corelogic-alpha working pool — populated inside the geo lane once
+    // census stamps land; the expensive lanes below only touch these ids.
+    let workingCompIds: Set<string> | null = null
     const poolCompIds = new Set(rawComps.map((c) => c.id))
     // Param-flex ladder record — how far numeric tolerances stretched to
     // admit evidence (0 = strict tier admitted it).
@@ -846,10 +915,17 @@ export class AnalysisJobDO {
     // subject's census block group or tract. Non-passers stay in the pool
     // unenriched with sameBlockGroup/crossesMajorRoad/censusTract stamped.
     const isAttomMcp = propertyApi.providerName === 'attom-mcp'
+    // The census geo-gate + gated enrichment is provider-agnostic — the
+    // corelogic-alpha harness needs the same lane (geocode every comp,
+    // stamp tract/BG/subdivision matches, enrich the in-pocket passers).
+    // attom-only calls inside (market-context supplement, deed/bulk id
+    // sets) degrade silently under other providers.
+    const geoGateActive = isAttomMcp || config.harness === 'corelogic'
     const gateAndEnrich = async (
       comps: NormalizedComparable[],
     ): Promise<NormalizedComparable[]> => {
-      if (!isAttomMcp || property.latitude == null || property.longitude == null) return comps
+      if (!geoGateActive || property.latitude == null || property.longitude == null) return comps
+      apiLedger.record('geo:subject-geocode')
       const subjectGeo = await fetchCensusGeography(
         property.latitude,
         property.longitude,
@@ -904,17 +980,38 @@ export class AnalysisJobDO {
       }
       // Geocodio backs the lookups (1,000 lookups/min) — wide concurrency is
       // safe; the Census/Firecrawl fallbacks only fire when Geocodio misses.
+      // Under concurrency the Census endpoint IP-blocks and every lookup
+      // pays the ~15s Firecrawl relay — so the queue is closest-first and
+      // exits early once the working pool can be fully pocket-anchored
+      // (distant comps can't tier-match a ~1-2mi block group anyway).
+      // Early-exit caps are a corelogic budget tool — on other harnesses
+      // every fetched comp gets census verification so none lose pocket
+      // eligibility.
+      const isCore = config.harness === 'corelogic'
+      const GEO_CAP = isCore ? (Number(this.env.CORE_WORKING_POOL) || 30) : comps.length
+      const LOOKUP_CEILING = isCore ? Math.max(GEO_CAP * 2, 40) : comps.length
       const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
       const queue = comps.map((c, i) => ({ c, i }))
+        .sort((a, b) => (a.c.distanceMiles ?? 999) - (b.c.distanceMiles ?? 999))
+      let lookedUp = 0
+      let pocketHits = 0
       await Promise.all(
         Array.from({ length: 15 }, async () => {
           for (let item = queue.shift(); item; item = queue.shift()) {
+            if (lookedUp >= LOOKUP_CEILING || pocketHits >= GEO_CAP) break
             if (item.c.latitude != null && item.c.longitude != null) {
-              geos[item.i] = await lookup(item.c.latitude, item.c.longitude)
+              lookedUp++
+              const g = await lookup(item.c.latitude, item.c.longitude)
+              geos[item.i] = g
+              if (g && (g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract)) pocketHits++
             }
           }
         }),
       )
+      apiLedger.record('geo:comp-geocode', lookedUp)
+      if (lookedUp < comps.length) {
+        console.log(`[AnalysisJobDO] geo lane early-exit: ${lookedUp}/${comps.length} lookups, ${pocketHits} pocket hits`)
+      }
       const geoPassers = comps.filter((c, i) => {
         const g = geos[i]
         if (!g) return false
@@ -924,12 +1021,53 @@ export class AnalysisJobDO {
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
       })
+      // corelogic-alpha working-pool cap — the set every expensive lane
+      // (listing scrape, Decisions observables, paid enrichment queue) may
+      // touch. EVERY geo match (block group or tract) and every
+      // provider-stamped name match (subdivision/neighborhood) always
+      // stays; the remainder fills closest-first to the cap so a pocket
+      // comp is never dropped. Capped-out comps stay in the pool for
+      // groupStats/the benchmark, flagged beyondWorkingPool.
+      if (config.harness === 'corelogic') {
+        // Ranked take-N: pocket evidence ALWAYS outranks off-pocket — the
+        // "never pass on a block/subdivision/neighborhood comp" rule is an
+        // ordering guarantee. When the pocket itself is huge (e.g. one
+        // giant block group), the cap trims its weakest-fit members last,
+        // never before an off-pocket comp.
+        const WORKING_CAP = Number(this.env.CORE_WORKING_POOL) || 30
+        const normN = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+        const subjN = new Set(
+          [property.subdivision, property.neighborhoodName].map(normN).filter((v): v is string => v != null))
+        const subjSqft = property.squareFeet ?? 0
+        const rankKey = (c: NormalizedComparable, i: number): number[] => {
+          const g = geos[i]
+          const tier =
+            g?.blockGroup === subjectGeo.blockGroup ? 0
+            : [c.subdivision, c.neighborhoodName].map(normN).some((v) => v != null && subjN.has(v)) ? 1
+            : g?.tract === subjectGeo.tract ? 2 : 3
+          const sqftDiff = subjSqft && c.squareFeet ? Math.abs(c.squareFeet - subjSqft) / subjSqft : 9
+          // Distance-first inside each tier — the cap keeps the 30 comps
+          // physically closest to the subject; pocket tier still outranks.
+          return [tier, c.distanceMiles ?? 999, sqftDiff]
+        }
+        const keepIdx = new Set(
+          comps.map((c, i) => ({ c, i, k: rankKey(c, i) }))
+            .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.k[2] - b.k[2])
+            .slice(0, WORKING_CAP)
+            .map(({ i }) => i))
+        workingCompIds = new Set(comps.filter((_, i) => keepIdx.has(i)).map((c) => String(c.id)))
+        let cappedN = 0
+        for (const c of comps) {
+          if (!workingCompIds.has(String(c.id))) { (c as { beyondWorkingPool?: boolean }).beyondWorkingPool = true; cappedN++ }
+        }
+        console.log(`[AnalysisJobDO] working pool: ${workingCompIds.size}/${comps.length} comps — ${cappedN} beyond cap (pocket evidence always outranks)`)
+      }
       // Stage-B digest — the moment geography resolves, Clef pre-reads the
       // block-group/neighborhood fit for every comp while the enrichment
       // ladder runs beside it. The batch is ALSO awaited (bounded) below:
       // its geo-fit/twin-fit/sanity reads rank the paid enrich queue.
       const digestBPromise = clefDigestsOn
-        ? startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B')
+        ? (apiLedger.record('decisions:comp-digest', comps.length), startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B'))
             .catch(() => new Map<string, CompDigest>())
         : null
       if (digestBPromise) {
@@ -991,7 +1129,9 @@ export class AnalysisJobDO {
         [property.subdivision, property.neighborhoodName].map(normName).filter((v): v is string => v != null))
       const sameName = (c: NormalizedComparable) =>
         [c.subdivision, c.neighborhoodName].map(normName).some((v) => v != null && subjectNames.has(v))
-      const outside = comps.filter((c, i) => geos[i] != null && !geoPasserIds.has(c.id) && spendable(c))
+      const outside = comps.filter((c, i) => geos[i] != null && !geoPasserIds.has(c.id) && spendable(c)
+        // Paid enrichment never leaves the working pool on corelogic-alpha.
+        && (workingCompIds == null || workingCompIds.has(String(c.id))))
       const scopes: Array<{ name: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent'; comps: NormalizedComparable[] }> = [
         { name: 'tract', comps: geoPassers.filter((c) => c.censusTract != null && c.censusTract === subjectGeo.tract) },
         { name: 'block_group', comps: geoPassers.filter((c) => !(c.censusTract != null && c.censusTract === subjectGeo.tract)) },
@@ -1123,8 +1263,11 @@ export class AnalysisJobDO {
       flagUnverified(merged)
       return merged
     }
-    if (isAttomMcp) {
+    let geoLaneMs = 0
+    if (geoGateActive) {
+      const tGeo = Date.now()
       enrichedComps = await gateAndEnrich(rawComps)
+      geoLaneMs = Date.now() - tGeo
       retrieval.candidatesEnriched = candidatesEnriched
       console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
       // Stage-C digest — enriched block-matched comps get the full read
@@ -1133,6 +1276,7 @@ export class AnalysisJobDO {
       if (clefDigestsOn) {
         const enriched = enrichedComps.filter((c) => c.isEnriched)
         if (enriched.length > 0) {
+          apiLedger.record('decisions:comp-digest', enriched.length)
           digestCPromiseParts.push(
             startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
               .catch(() => new Map()),
@@ -1168,7 +1312,7 @@ export class AnalysisJobDO {
       // attom-mcp census gate has already enriched passers; merging from
       // rawComps would clobber the enriched records.
       const merged = mergeComparablePools(enrichedComps, wider.data.comparables)
-      if (isAttomMcp) {
+      if (geoGateActive) {
         // mergeComparablePools prefers the expanded pool's copy of a duped
         // comp — which is the unenriched variant. Overlay the enrichment
         // fields the gate paid for onto the winner.
@@ -1230,7 +1374,7 @@ export class AnalysisJobDO {
       let newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
       for (const c of newCandidates) poolCompIds.add(c.id)
       candidatesPruned += newCandidates.filter((c) => isDeadComp(c)).length
-      if (isAttomMcp) {
+      if (geoGateActive) {
         newCandidates = await gateAndEnrich(newCandidates)
         retrieval.candidatesEnriched = candidatesEnriched
         // Stage-C digest for expansion-refetch enriched comps — same read
@@ -1238,6 +1382,7 @@ export class AnalysisJobDO {
         if (clefDigestsOn) {
           const enriched = newCandidates.filter((c) => c.isEnriched)
           if (enriched.length > 0) {
+            apiLedger.record('decisions:comp-digest', enriched.length)
             digestCPromiseParts.push(
               startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
                 .catch(() => new Map()),
@@ -1377,6 +1522,7 @@ export class AnalysisJobDO {
     await this.pushEvent('evaluation_started', { message: 'Evaluating comparables...' })
 
     const propertyCallStats = propertyApi.getCallStats()
+    for (const e of propertyCallStats.endpoints) apiLedger.record(`provider:${e.endpoint}`, e.calls)
     const evalParams = {
       ...config.evalParams,
       harness: config.harness,
@@ -1385,7 +1531,7 @@ export class AnalysisJobDO {
       // comps the ladder admitted must stay enabled through evaluation.
       // Agent runs keep the caller's overrides verbatim instead — the
       // ruleset is the doctrine, not the preset ladder.
-      ...(isAttomMcp && config.harness !== 'agent' && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
+      ...(geoGateActive && config.harness !== 'agent' && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
         ? {
             appraisalRules: {
               ...(config.evalParams.appraisalRules ?? {}),
@@ -1402,10 +1548,10 @@ export class AnalysisJobDO {
       expandComparablesPool,
       // B retry attempt 3 — per-comp valuation/tax-history fetch for pool
       // members lacking AVM/land evidence.
-      enrichComparables: (comps: NormalizedComparable[]) => propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
+      enrichComparables: (comps: NormalizedComparable[]) => { apiLedger.record('provider:comp-detail-enrich', comps.length); return propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null) },
       // Sqft-conflict permit verification — ATTOM permits dataset per comp.
       getCompPermits: (compId: string) =>
-        propertyApi.getBuildingPermits(compId)
+        (apiLedger.record('provider:comp-permits'), propertyApi.getBuildingPermits(compId))
           .then((r) => (r.success ? r.data.permits : null))
           .catch(() => null),
       // attom-mcp comp enrichment happens in the census gate above —
@@ -1414,6 +1560,12 @@ export class AnalysisJobDO {
       // Comp evidence started the moment comps landed — a Map promise the
       // pipeline awaits instead of launching its own batch late.
       prefetchedCompEvidence,
+      // corelogic-alpha working pool — every lane below (evidence scrape,
+      // observables, Redfin details) restricts to these ids when set.
+      workingCompIds,
+      // Outbound-call ledger — lanes record spend; stamped into the
+      // response's apiCallStats.apiCalls.
+      apiLedger,
       // Clef agent-assist digests — stage A (comps-landed), B (post-geocode
       // inside the census gate), C (post-enrichment). Merged per comp here;
       // the pipeline stamps each stage's answers as comp.clefDigest.{A,B,C}.
@@ -1449,7 +1601,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      if (config.harness === 'agent') {
+      if (config.harness === 'agent' || config.harness === 'corelogic') {
         // Self-completing harness: phase 1 freezes the evidence bundle,
         // then the Opus appraiser reviews the complete dataset and posts
         // the final selection — verified by the deterministic gate, with
@@ -1458,7 +1610,11 @@ export class AnalysisJobDO {
         // Pocket desirability only needs the subject property — fire it
         // overlapped with phase 1 (comp gather is the long pole) instead
         // of serially after it.
-        const pocketDesirabilityPromise = ratePocketDesirability(this.env, bundle.property).catch(() => null)
+        // Pocket desirability is a haiku read only the model seat consumed —
+        // the deterministic selector doesn't read it; skip the ~15s call.
+        const pocketDesirabilityPromise = config.harness === 'corelogic'
+          ? Promise.resolve(null)
+          : ratePocketDesirability(this.env, bundle.property).catch(() => null)
         const ctx = await performAnalysisPhase1({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
         if (ctx.photoBundlePromise) ctx.photoBundle = await ctx.photoBundlePromise
@@ -1476,14 +1632,20 @@ export class AnalysisJobDO {
           })
         }
         const appraiserStart = Date.now()
-        const appraisal = await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+        // Corelogic harness: code is the selection seat — no model call.
+        // The gate still verifies; a reject completes on the deterministic
+        // engine below. Agent harness keeps the Sonnet appraiser.
+        const appraisal = config.harness === 'corelogic'
+          ? runDeterministicSelector(ctx, evidence)
+          : await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
+        const seat = config.harness === 'corelogic' ? 'Selector' : `Opus (${appraisal?.model ?? 'unavailable'})`
         const appraiserNote = appraisal == null
           ? 'appraiser unavailable — deterministic engine completes'
           : decision
-            ? `Opus (${appraisal.model}) selected ${decision.selectedCompIds.length} comps, ARV $${decision.arv.toLocaleString()} — ${appraisal.attempts.length} attempt(s), ${appraisal.clarifications.length} clarification(s)`
-            : `Opus gate-rejected ${appraisal.attempts.length} attempt(s) — deterministic engine completes`
+            ? `${seat} selected ${decision.selectedCompIds.length} comps, ARV $${decision.arv.toLocaleString()} — ${appraisal.attempts.length} attempt(s), ${appraisal.clarifications.length} clarification(s)`
+            : `${seat} gate-rejected ${appraisal.attempts.length} attempt(s) — deterministic engine completes`
         ctx.steps.push({
           step: 'appraiser', label: 'appraiser',
           status: decision ? 'completed' : 'skipped',
@@ -1581,11 +1743,11 @@ export class AnalysisJobDO {
                   marketBenchmark: ctx.marketBenchmark ?? null,
                 }
               : null,
-            latency: { appraiserMs, phase2Ms },
+            latency: { appraiserMs, phase2Ms, geoLaneMs, workingPoolSize: (workingCompIds as Set<string> | null)?.size ?? null },
           }
           const resp = evalResult.response as unknown as Record<string, unknown>
           resp.harness = {
-            ...((resp.harness as Record<string, unknown> | undefined) ?? { source: 'agent' }),
+            ...((resp.harness as Record<string, unknown> | undefined) ?? { source: config.harness ?? 'agent' }),
             // Haiku owns pocket desirability — its read is authoritative
             // over any score a selection happened to carry.
             ...(pocketDesirability ? { pocketScore: pocketDesirability.score } : {}),
@@ -1633,6 +1795,9 @@ export class AnalysisJobDO {
       return
     }
 
+    // Fold the call ledger into the shared apiCallStats object — the
+    // response, run record and persisted report all hold this reference.
+    ;(evalParams.apiCallStats as { apiCalls?: unknown }).apiCalls = apiLedger.snapshot()
     await this.finishEvaluation(config, evalResult, property, evalStart, startTime, marketContextPromise)
   }
 

@@ -1164,7 +1164,7 @@ export interface AnalysisResponse {
   /** Present when the Evaluation Agent drove comp selection — its verdict
    *  plus the pocket/deal-economics classification it was assigned. */
   harness?: {
-    source: 'agent'
+    source: 'agent' | 'corelogic' | string
     pocketScore?: number | null
     dealEconomics?: string | null
     notes?: string
@@ -1177,6 +1177,9 @@ export interface ApiCallStats {
     endpoints: { endpoint: string; calls: number; cached: number }[]
   }
   totalExternalCalls: number
+  /** Per-eval outbound-call ledger — every call counted by lane
+   *  (provider methods, geocode, decisions, scrape, redfin). */
+  apiCalls?: { lanes: Record<string, number>; total: number }
 }
 
 // ─── Location Risk Detection ─────────────────────────────────────────────────

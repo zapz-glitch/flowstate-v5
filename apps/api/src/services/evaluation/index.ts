@@ -48,8 +48,11 @@ import {
   calculateAllRehabLevelEstimates,
   type AnalysisResponse,
   type ApiCallStats,
-  type ResponseContext,
-  type RehabLevelEstimate,
+} from '../analysis'
+import type { ApiLedger } from '../api-ledger'
+import type {
+  ResponseContext,
+  RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
@@ -137,6 +140,9 @@ export interface EvaluationParams {
   /** Threshold for Group B: comps with salePrice <= X% of ARV (default: 70) */
   asIsThresholdPercent?: number
   apiCallStats?: ApiCallStats
+  /** Per-eval outbound-call ledger — lanes record their spend here; the
+   *  caller folds it into the final apiCallStats.apiCalls. */
+  apiLedger?: ApiLedger
   /**
    * Expansion refetch seam. When the appraisal ladder reaches a tier that
    * searches beyond the fetched radius, the pool provably lacks those
@@ -173,6 +179,11 @@ export interface EvaluationParams {
    * batch inside evaluate.
    */
   prefetchedCompEvidence?: Promise<Map<string, CompConditionEvidence | null> | null> | null
+  /** corelogic-alpha working pool — comp ids the expensive lanes (evidence
+   *  scrape, observables, Redfin details) may touch. Every geo/name match
+   *  is kept by construction; capped-out comps are flagged, not removed,
+   *  so statistics still see the full pool. */
+  workingCompIds?: Set<string> | null
   /**
    * Clef agent-assist digests — stage A (comps-landed), B (post-geocode),
    * C (post-enrichment) advisory reads per comp. Serialized as
@@ -193,7 +204,7 @@ export interface EvaluationParams {
    *  caller's appraisal overrides are verbatim — no DEFAULT_FILTERS /
    *  DEFAULT_ADJUSTMENTS injection — so enablement reflects only the hard
    *  data gates; the agent weighs the doctrine's geo/age/size preferences. */
-  harness?: 'agent'
+  harness?: 'agent' | 'corelogic'
 }
 
 export interface GroupBResult {
@@ -485,7 +496,7 @@ export async function performAnalysisPhase1(
   let filters: AppraisalFilter[]
   let adjustments: AppraisalAdjustment[]
 
-  if (params.harness === 'agent') {
+  if (params.harness === 'agent' || params.harness === 'corelogic') {
     // Ruleset-governed run — the caller's overrides are the whole grid.
     // No default injection: an empty override means "no filters", so comps
     // stay enabled unless a hard data gate fails. The agent weighs geo /
@@ -543,6 +554,7 @@ export async function performAnalysisPhase1(
         }
         // Subject-only scrape — comp cards render map imagery, so no
         // Firecrawl/Zillow calls are spent on comparables.
+        params.apiLedger?.record('scrape:subject-listing')
         photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0, skipCache: params.skipCache })
       }
       if (params.prefetchedPhotoBundle !== undefined || photoService.isAvailable()) {
@@ -756,10 +768,16 @@ export async function performAnalysisPhase1(
   }))
   appraisalResult.selectedCompIds = [...arvIds]
 
+  // Working-pool cap (corelogic-alpha): the scrape/observables/Redfin lanes
+  // only touch comps the geo lane kept — geo+name matches plus closest fill.
+  const inWorkingPool = (c: { id?: string | number | null }) =>
+    params.workingCompIds == null || params.workingCompIds.has(String(c.id))
+
   // Redfin MLS details run in parallel with vision/valuation. Construction
   // evidence covers every geo match; the original top-15 cohort remains a
   // separate set because only those comps may supplement appraisal inputs.
   const legacyRedfinCompTargets = appraisalResult.comparables
+    .filter(inWorkingPool)
     .slice()
     .sort((a, b) =>
       Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
@@ -770,6 +788,7 @@ export async function performAnalysisPhase1(
   // Geo doctrine: block group > neighborhood/subdivision > tract (fallback tier).
   const geoPriority = (comp: AppraisedComparable): number | null => compGeoPriority(bundle.property, comp)
   const geoMatchedRedfinTargets = appraisalResult.comparables
+    .filter(inWorkingPool)
     .map((comp) => ({ comp, priority: geoPriority(comp) }))
     .filter((entry): entry is { comp: AppraisedComparable; priority: number } => entry.priority != null)
     .sort((a, b) => a.priority - b.priority
@@ -777,7 +796,7 @@ export async function performAnalysisPhase1(
     .map(({ comp }) => comp)
   const geoMatchedRedfinIds = new Set(geoMatchedRedfinTargets.map((comp) => comp.id))
   const constructionFillTargets = appraisalResult.comparables
-    .filter((comp) => !geoMatchedRedfinIds.has(comp.id))
+    .filter((comp) => !geoMatchedRedfinIds.has(comp.id) && inWorkingPool(comp))
     .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
     .slice(0, Math.max(0, 15 - geoMatchedRedfinTargets.length))
   const constructionRedfinTargets = [...geoMatchedRedfinTargets, ...constructionFillTargets]
@@ -787,6 +806,7 @@ export async function performAnalysisPhase1(
   const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
 
   const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
+  if (redfinDetailsEnabled) params.apiLedger?.record('redfin:property-details', redfinTargetsById.size + 1)
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
         (): RedfinDetailsResult => ({ details: null, skippedReason: 'fetch_failed' }),
@@ -808,6 +828,7 @@ export async function performAnalysisPhase1(
   // still overlap vision and valuation. Awaited where the comp_curb_appeal
   // step records.
   const clefCompsSorted = appraisalResult.comparables
+    .filter(inWorkingPool)
     .slice()
     .sort((a, b) =>
       Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
@@ -842,7 +863,7 @@ export async function performAnalysisPhase1(
   // (S1-S7 subject / C1-C7 per comp) replace the whole-condition classify.
   // Price boundaries are code-computed; Decisions classifies, Sonnet
   // appraises. Falls back to the classify pool when Decisions is absent.
-  const observablesOn = params.harness === 'agent' && isDecisionsAvailable(env)
+  const observablesOn = (params.harness === 'agent' || params.harness === 'corelogic') && isDecisionsAvailable(env)
   const marketBenchmark = observablesOn
     ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
     : null
@@ -861,6 +882,7 @@ export async function performAnalysisPhase1(
         const entry = pb?.subject
         const photos = entry?.photos ?? []
         const listPrice = (entry?.metadata?.listPrice as number | undefined) ?? (bundle.property.listingDetails?.listPrice as number | undefined) ?? null
+        params.apiLedger?.record('decisions:subject-observables')
         return decisionsSubjectObservables(env, {
           subject: {
             address: bundle.property.address, city: bundle.property.city, state: bundle.property.state,
@@ -887,12 +909,23 @@ export async function performAnalysisPhase1(
     : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
-    (params.harness === 'agent' && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
+    ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
           const early = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
-          const missing = early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs
+          // Scrape budget: cover-photo/description evidence is gathered
+          // only for the best-ranked working comps (where picks actually
+          // come from) — zero-yield markets (no live listings on sold
+          // stock) can't burn the full 150s batch deadline on the tail.
+          // Observables still run on every working comp — data-only when
+          // no scrape evidence exists.
+          const scrapeCap = params.workingCompIds != null
+            ? Math.min(Number(env.CORE_SCRAPE_MAX) || 15, clefInputs.length)
+            : clefInputs.length
+          const missing = (early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs)
+            .slice(0, scrapeCap)
+          params.apiLedger?.record('scrape:comp-evidence', missing.length)
           const filled = missing.length
             ? await startCompEvidenceBatch(env, missing, {
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
@@ -922,6 +955,7 @@ export async function performAnalysisPhase1(
                 const comp = clefInputs[oi++]!
                 const ev = early?.get(comp.propertyId) ?? filled.get(comp.propertyId) ?? null
                 const ppsf = comp.salePrice && comp.squareFeet ? comp.salePrice / comp.squareFeet : null
+                params.apiLedger?.record('decisions:comp-observables')
                 const ob = await decisionsCompObservables(env, {
                   comp: {
                     propertyId: comp.propertyId, address: comp.address,
@@ -1531,7 +1565,7 @@ export async function performAnalysisPhase1(
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
     avmAnchor, assessedAnchor, rehabLevelEstimates, groupBResult,
     groupACompIds, bestMatch, asIsThresholdPercent, photoBundlePromise,
-    apiCallStats: params.apiCallStats,
+    apiCallStats: params.apiCallStats ? { ...params.apiCallStats, apiCalls: params.apiLedger?.snapshot() } : params.apiCallStats,
   })
 }
 
@@ -1894,7 +1928,7 @@ export async function performAnalysisPhase2(
       subjectListPrice: typeof photoBundle?.subject?.metadata?.listPrice === 'number'
         ? photoBundle.subject.metadata.listPrice
         : null,
-      apiCallStats: params.apiCallStats,
+      apiCallStats: params.apiCallStats ? { ...params.apiCallStats, apiCalls: params.apiLedger?.snapshot() } : params.apiCallStats,
       bestMatch,
       groupBResult,
       groupACompIds,
@@ -1955,7 +1989,7 @@ export async function performAnalysisPhase2(
     // The agent's pocket/deal-economics classification rides the report —
     // same persistence path as every other field on the response.
     response.harness = {
-      source: 'agent',
+      source: params.harness ?? 'agent',
       pocketScore: agentSelection.pocketScore ?? null,
       dealEconomics: agentSelection.dealEconomics ?? null,
       ...(pricedReno ? {
@@ -1995,7 +2029,7 @@ export async function performAnalysisPhase2(
       // verdict; a deterministic-fallback run synthesizes the equivalent
       // selection from its own B result so it is graded the same way
       // (spec §4). Never blocks the response.
-      ...(params.harness === 'agent' && pipelineBResult != null
+      ...((params.harness === 'agent' || params.harness === 'corelogic') && pipelineBResult != null
         ? {
             verdictGrade: gradeVerdict(
               buildHarnessEvidence(ctx),

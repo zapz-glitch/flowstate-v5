@@ -144,7 +144,7 @@ interface AnalyzeRequest {
    *  `awaiting_agent` — the Evaluation Agent posts its comp-selection
    *  verdict to /jobs/:jobId/harness/selection and the deterministic tail
    *  finishes the eval. Omitted = today's deterministic Set-B path. */
-  harness?: 'agent';
+  harness?: 'agent' | 'corelogic';
 }
 
 const ALLOWED_MODELS = new Set([
@@ -248,7 +248,7 @@ analyze.post('/', async (c) => {
     // The route returns immediately with jobId + SSE token.
 
     let appraisalRules = userSettings.appraisalRules;
-    if (body.appraisalOverrides || body.harness === 'agent') {
+    if (body.appraisalOverrides || body.harness === 'agent' || body.harness === 'corelogic') {
       const overrideFilters = body.appraisalOverrides?.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
@@ -263,7 +263,7 @@ analyze.post('/', async (c) => {
           percent: a.percent,
         }),
       );
-      appraisalRules = body.harness === 'agent'
+      appraisalRules = (body.harness === 'agent' || body.harness === 'corelogic')
         // Agent runs are governed by EVAL-AGENT-RULESET.md — the caller's
         // overrides are verbatim and the user's preset never merges in.
         // With no filters enabled, comps stay enabled except for the hard
@@ -306,10 +306,19 @@ analyze.post('/', async (c) => {
     // Harness mode gets its own cache keyspace — a deterministic report is
     // never served to an agent run (it needs to park for the verdict), and
     // an agent verdict never leaks into deterministic cached results.
+    // Resolve the effective harness the same way evalParams does — an
+    // env-defaulted harness must key the cache too, or a corelogic-default
+    // deployment serves deterministic-harness reports to ordinary requests
+    // (and vice versa) through the shared KV.
+    const effectiveHarness = (body.harness === 'agent' || body.harness === 'corelogic')
+      ? body.harness
+      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
+          ? c.env.DEFAULT_HARNESS
+          : undefined)
     const resultCacheKey = evalResultKey(
       auth.userId,
       body.address ?? '',
-      evalParamsHash + (body.harness === 'agent' ? ':agent' : ''),
+      evalParamsHash + (effectiveHarness ? `:${effectiveHarness}` : ''),
     );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
@@ -400,7 +409,14 @@ analyze.post('/', async (c) => {
           ),
           marketSearchModel: validateModel(body.llmAnalysis?.marketSearchModel),
         },
-        harness: body.harness === 'agent' ? 'agent' : undefined,
+        // Explicit harness param wins; else the deployment's DEFAULT_HARNESS
+        // env drives it (alpha.flowstate runs the corelogic harness
+        // deployment-wide — same dashboard, different eval seat).
+        harness: (body.harness === 'agent' || body.harness === 'corelogic')
+          ? body.harness
+          : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
+              ? c.env.DEFAULT_HARNESS
+              : undefined),
       }),
     });
     // A live run owns the DO — don't error, hand the caller the same job

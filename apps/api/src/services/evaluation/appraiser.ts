@@ -191,7 +191,7 @@ function appraiserCompRows(evidence: HarnessEvidence) {
 /** Deterministic disqualifiers, stamped per comp row — the disprove-first
  *  half of the evidence sheet. Code owns the verdict; the appraiser's job
  *  is to confirm and move on. */
-function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: HarnessEvidence): string[] {
+export function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: HarnessEvidence): string[] {
   const rules = evidence.rules
   const reasons: string[] = []
   if (c.isEnabled === false) reasons.push('disabled by the filter rules')
@@ -210,6 +210,10 @@ function exclusionReasons(c: HarnessEvidence['comps'][number], evidence: Harness
     }
   }
   const v = c.evidenceVerification as Record<string, unknown> | null | undefined
+  const tx = v?.transactionCheck
+  if (tx === 'package_deed') reasons.push('package deed — split-price transfer, not market evidence')
+  else if (tx === 'bulk_sale') reasons.push('bulk sale — shared-party portfolio transfer, not market evidence')
+  else if (tx === 'nominal_sale') reasons.push('nominal sale — deed transfer price, not market evidence')
   if (v?.priceCheck === 'divergent') reasons.push('price contradicts its own AVM')
   else if (v?.priceCheck === 'unverified') reasons.push('caution: no AVM on record to corroborate price — treat as unverified evidence, not a disqualifier')
   const vsMed = c.priceLadder?.ppsfVsMedian

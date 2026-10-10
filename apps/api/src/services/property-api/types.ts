@@ -40,6 +40,9 @@ export interface ComparablesSearchParams {
   providerDefaults?: boolean
   /** Property ID (CLIP for CoreLogic, ATTOM ID for ATTOM) */
   propertyId: string
+  /** Subject address — lets a provider resolve its own ID when propertyId
+   * belongs to a different provider's ID space (cross-provider fallback). */
+  subjectAddress?: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null }
   /** Search radius in miles (default: 1) */
   radiusMiles?: number
   /** Maximum comparables to return (default: 10) */

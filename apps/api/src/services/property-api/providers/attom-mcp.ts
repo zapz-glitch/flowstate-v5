@@ -831,11 +831,27 @@ class AttomMcpProvider implements PropertyProviderAdapter {
 
   async getComparables(params: ComparablesSearchParams): Promise<ComparablesSearchResponse> {
     try {
+      // propertyId is provider-namespaced — cross-provider fallback hands us
+      // a CLIP, not an attomId. ATTOM ids are numeric; anything else gets
+      // resolved through an address lookup before the comp search.
+      let subjectAttomId = params.propertyId
+      if (!/^\d+$/.test(subjectAttomId) && params.subjectAddress?.address) {
+        const sa = params.subjectAddress
+        const full = [sa.address, [sa.city, sa.state].filter(Boolean).join(', '), sa.zip].filter(Boolean).join(' ')
+        const results = await this.propertyData({ lookupMode: 'address', address: full }, ['summary']).catch(() => [])
+        const resolved = await normalizeMcpProperty(results, this.env)
+        if (resolved.id) {
+          subjectAttomId = resolved.id
+          this.subjectResults.set(resolved.id, results)
+        } else {
+          return { success: false, error: 'Could not resolve subject to an ATTOM id', code: 'NOT_FOUND' }
+        }
+      }
       const saleDateFrom = new Date(Date.now() - (params.monthsBack ?? 12) * 30.44 * 864e5)
         .toISOString()
         .slice(0, 10)
       const result = await callTool(this.env, 'find_comparable_sales', {
-        subjectAttomId: params.propertyId,
+        subjectAttomId,
         limit: Math.min(params.maxComps ?? 25, MCP_COMP_LIMIT_CAP),
         saleDateFrom,
         maxDistanceMiles: params.radiusMiles ?? 1,
@@ -850,7 +866,7 @@ class AttomMcpProvider implements PropertyProviderAdapter {
       return {
         success: true,
         data: {
-          subject: { id: params.propertyId, address: sc?.subject?.address },
+          subject: { id: subjectAttomId, address: sc?.subject?.address },
           comparables,
           count: comparables.length,
           retrieval: buildRetrievalMeta({

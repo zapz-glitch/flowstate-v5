@@ -136,9 +136,10 @@ export function verifyCompEvidence(
     if (priceCheck === 'divergent') {
       flags.push(`Recorded sale $${comp.salePrice.toLocaleString()} diverges ${(avmRatio * 100).toFixed(0)}% from own AVM $${comp.avmValue.toLocaleString()} — verify transaction`)
     }
-  } else if (comp.salePrice != null && comp.salePrice > 0) {
-    flags.push('No comp AVM — sale price uncorroborated')
   }
+  // No comp AVM stays priceCheck 'unverified' — a missing model value is a
+  // corroboration gap (caution via exclusionReasons), never a veto on the
+  // recorded sale itself.
 
   // Sale age — the only source of the `stale` stamp. The preferred window is
   // the base sale_age rule; wider sale_age_expansion tiers can admit a comp,
@@ -151,6 +152,10 @@ export function verifyCompEvidence(
     if (preferredSaleAgeDays == null || preferredSaleAgeDays <= 0) {
       staleness = 'unverified'
     } else if (saleAgeDays > preferredSaleAgeDays) {
+      // Stale is recorded on the comp — the caution reads via
+      // exclusionReasons. It is never a veto: in a stale market the
+      // freshest renovated sale IS the evidence (doctrine). The flag is
+      // the audit trail, not a disqualifier.
       staleness = 'stale'
       flags.push(`Sale is ${saleAgeDays} days old — outside preferred ${preferredSaleAgeDays}-day window`)
     } else {
