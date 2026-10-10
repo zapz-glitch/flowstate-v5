@@ -1028,6 +1028,23 @@ export class AnalysisJobDO {
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
       })
+      // Live pocket reveal — the dashboard colors comp pins by pocket tier
+      // the moment geography resolves, long before the seat answers.
+      {
+        const pocketPpsfs = comps
+          .filter((c, i) => geos[i]?.blockGroup === subjectGeo.blockGroup && c.pricePerSqft)
+          .map((c) => c.pricePerSqft!).sort((a, b) => a - b)
+        void this.pushEvent('geo_done', {
+          subjectGeo: { tract: subjectGeo.tract, blockGroup: subjectGeo.blockGroup },
+          pocketCount: pocketPpsfs.length,
+          pocketMedianPpsf: pocketPpsfs.length ? Math.round(pocketPpsfs[Math.floor((pocketPpsfs.length - 1) / 2)]) : null,
+          comps: comps.map((c, i) => geos[i] ? {
+            id: c.id, censusTract: geos[i]!.tract, censusBlockGroup: geos[i]!.blockGroup,
+            pocketTier: geos[i]!.blockGroup === subjectGeo.blockGroup ? 'block_group'
+              : geos[i]!.tract === subjectGeo.tract ? 'tract' : 'off_pocket',
+          } : null).filter(Boolean),
+        })
+      }
       // corelogic-alpha working-pool cap — the set every expensive lane
       // (listing scrape, Decisions observables, paid enrichment queue) may
       // touch. EVERY geo match (block group or tract) and every
@@ -1704,6 +1721,10 @@ export class AnalysisJobDO {
         void this.pushEvent('appraiser_done', {
           jobId: config.jobId, model: appraisal?.model ?? null, accepted: decision != null,
           attempts: appraisal?.attempts.length ?? 0, clarifications: appraisal?.clarifications.length ?? 0,
+          selectedCompIds: appraisal?.selection?.selectedCompIds ?? [],
+          arv: appraisal?.selection?.arv ?? null,
+          conf: appraisal?.selection?.conf ?? null,
+          note: appraisal?.selection?.notes ?? null,
         })
         const phase2Start = Date.now()
         evalResult = await performAnalysisPhase2(ctx, { jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,

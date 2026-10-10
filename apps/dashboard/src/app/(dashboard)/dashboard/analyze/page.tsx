@@ -294,6 +294,47 @@ export default function AnalyzePage() {
         }
         break
 
+      case 'geo_done': {
+        if (isAiOnly) break
+        // Live pocket reveal — stamp each comp's census geography + pocket
+        // tier so the map colors pins by block-group/tract/off-pocket.
+        const geoComps = (data.comps ?? []) as Array<{ id: string; censusTract: string | null; censusBlockGroup: string | null; pocketTier: string }>
+        if (geoComps.length) {
+          const byId = new Map(geoComps.map((g) => [String(g.id), g]))
+          setAnalysisResult((prev) => prev?.comps?.items ? ({
+            ...prev,
+            comps: {
+              ...prev.comps,
+              items: prev.comps.items.map((c) => {
+                const g = byId.get(String((c as { id?: unknown }).id))
+                return g ? { ...c, censusTract: g.censusTract, censusBlockGroup: g.censusBlockGroup, pocketTier: g.pocketTier } : c
+              }),
+            },
+          } as AnalyzeData) : prev)
+        }
+        const pm = data.pocketMedianPpsf
+        setEvalProgress(`${data.pocketCount ?? 0} comp(s) in your block group${pm ? ` · pocket median $${pm}/sqft` : ''}`)
+        break
+      }
+
+      case 'appraiser_done': {
+        // Seat finished — highlight the picks on the map and surface the ARV
+        // before the full report lands.
+        const pickIds = new Set(((data.selectedCompIds ?? []) as string[]).map(String))
+        if (pickIds.size) {
+          setAnalysisResult((prev) => prev?.comps?.items ? ({
+            ...prev,
+            comps: {
+              ...prev.comps,
+              items: prev.comps.items.map((c) =>
+                pickIds.has(String((c as { id?: unknown }).id)) ? { ...c, picked: true } : c),
+            },
+          } as AnalyzeData) : prev)
+        }
+        if (data.arv) setEvalProgress(`Picked ${pickIds.size || 0} comp(s) · ARV $${Number(data.arv).toLocaleString()}${data.conf ? ` (${data.conf})` : ''}`)
+        break
+      }
+
       case 'evaluation_started':
         if (!isAiOnly) setStreamingStep('evaluating')
         setEvalProgress(null)
