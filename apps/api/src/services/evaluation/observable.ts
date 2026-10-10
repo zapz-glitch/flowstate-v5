@@ -194,7 +194,7 @@ const SUBJECT_QUESTIONS = {
   s9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up frames the parcel itself. Read the aerial itself — multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
+    instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up frames the parcel itself. Scan every edge of the center parcel for exposure cues: a large flat-roof commercial/industrial building, warehouse, big-box store, parking lot, multi-lane arterial or highway, or rail line touching or immediately adjacent to the parcel boundary. Any of those = exposure, NEVER NEUTRAL. Pick the SIDE: fronting = on the street side the home faces, backing = on the rear edge opposite the street, siding = on a side edge. NEUTRAL only when all edges border homes, yards, or woods. Interior residential lots between commercial strips still count when a commercial rooftop or lot touches the boundary.',
   },
 }
 
@@ -238,7 +238,7 @@ const COMP_QUESTIONS = {
   c9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
-    instructions: 'When a satellite image is supplied, does the COMP have adverse site exposure? THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up frames the parcel itself. Read the aerial itself: multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. Interior residential lots are NEUTRAL. UNVERIFIED only when no satellite image is present; do not infer exposure from price or description alone.',
+    instructions: 'When a satellite image is supplied, does the COMP have adverse site exposure? THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up frames the parcel itself. Scan every edge of the center parcel for exposure cues: a large flat-roof commercial/industrial building, warehouse, big-box store, parking lot, multi-lane arterial or highway, or rail line touching or immediately adjacent to the parcel boundary. Any of those = exposure, NEVER NEUTRAL. Pick the SIDE: fronting = on the street side, backing = rear edge opposite the street, siding = side edge. NEUTRAL only when all edges border homes, yards, or woods. UNVERIFIED only when no satellite image is present; do not infer exposure from price or description alone.',
   },
   c10_physical_match: {
     type: 'noul' as const,

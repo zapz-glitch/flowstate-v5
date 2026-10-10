@@ -499,6 +499,25 @@ export function runDeterministicSelector(
   const prices = envSource.slice().sort((a, b) => a - b)
   const arv = Math.round(Math.min(Math.max(rawArv, prices[0] * 0.9), prices[prices.length - 1] * 1.1) / 500) * 500
 
+  // Subject adverse site exposure (s9 satellite read): the subject's own
+  // site discount comes off the ARV — clean-site comps overstate value for
+  // a lot backing/fronting commercial or traffic. Same preset traffic_*
+  // numbers the comp-side adjustments use, applied once to the subject.
+  const EXPOSURE_ADJ: Record<string, 'traffic_siding' | 'traffic_backing' | 'traffic_fronting'> = {
+    SIDING: 'traffic_siding', BACKING: 'traffic_backing', FRONTING: 'traffic_fronting',
+  }
+  const exposure = evidence.subjectObservables?.siteExposure ?? null
+  const exposureAdjType = exposure ? EXPOSURE_ADJ[exposure] : undefined
+  const exposureAdj = exposureAdjType
+    ? evidence.rules.adjustments.find((a) => a.type === exposureAdjType && a.enabled)
+    : undefined
+  const siteDeduction = exposureAdj
+    ? (arv < (exposureAdj.valueThreshold ?? 500000)
+        ? exposureAdj.amount
+        : Math.round(arv * ((exposureAdj.percent ?? 0) / 100)))
+    : 0
+  const arvAdjusted = siteDeduction > 0 ? Math.max(0, arv - siteDeduction) : arv
+
   const bgPicks = picks.filter((p) => p.profile.geoTier === 'BLOCK_GROUP').length
   const medianFitness = picks.map((p) => p.comp.observables?.arvFitnessP ?? 0.5).sort((a, b) => a - b)[Math.floor((picks.length - 1) / 2)]
   const missingInPicks = picks.reduce((n, p) => n + p.audit.missingData.length, 0)
@@ -526,7 +545,7 @@ export function runDeterministicSelector(
   }
 
   const selection: AgentSelection = {
-    arv,
+    arv: arvAdjusted,
     conf,
     selectedCompIds: picks.map((p) => p.id),
     drivers: driverIds,
@@ -535,10 +554,11 @@ export function runDeterministicSelector(
       ...(medianFallback ? ['median_fallback'] : []),
       ...(thinPool ? ['thin_pocket'] : []),
       ...(staleDrivers ? ['stale_drivers'] : []),
+      ...(siteDeduction > 0 ? [`site_exposure:${exposure}(-$${siteDeduction.toLocaleString()} via ${exposureAdjType})`] : []),
       `price_groups:arv_$${Math.round(arvBand?.medianPpsf ?? 0)}/sf,median_$${Math.round(medianBand?.medianPpsf ?? 0)}/sf,asis_$${Math.round(asIsBand?.medianPpsf ?? 0)}/sf`,
       `pocket_base:$${Math.round(qualifiedMedianPpsf)}/sf(${medianScope},n=${medianBase.length})`,
     ],
-    notes: `Deterministic selector (${medianFallback ? 'median-band fallback' : 'ARV band'}): ${picks.length} picks — ${bgPicks} block-group match(es), median $${Math.round(medianPpsf)}/sqft × ${subject.squareFeet}sqft subject. Groups: arv $${Math.round(arvBand?.medianPpsf ?? 0)}/sf · median $${Math.round(medianBand?.medianPpsf ?? 0)}/sf · as-is $${Math.round(asIsBand?.medianPpsf ?? 0)}/sf.`,
+    notes: `Deterministic selector (${medianFallback ? 'median-band fallback' : 'ARV band'}): ${picks.length} picks — ${bgPicks} block-group match(es), median $${Math.round(medianPpsf)}/sqft × ${subject.squareFeet}sqft subject. Groups: arv $${Math.round(arvBand?.medianPpsf ?? 0)}/sf · median $${Math.round(medianBand?.medianPpsf ?? 0)}/sf · as-is $${Math.round(asIsBand?.medianPpsf ?? 0)}/sf.${siteDeduction > 0 ? ` Subject site exposure ${exposure}: -$${siteDeduction.toLocaleString()} (${exposureAdjType} preset).` : ''}`,
     dataQuality: {
       score: Math.min(10, Math.round((clean.length / Math.max(1, ranked.length)) * 10)),
       notes: `${clean.length}/${ranked.length} priced comps survived rule-out; ${arvBand?.n ?? 0} arv-band / ${medianBand?.n ?? 0} median-band / ${asIsBand?.n ?? 0} as-is-band; ${audits.filter((a) => a.verdict === 'excluded').length} excluded / ${audits.filter((a) => a.verdict === 'unpriceable').length} unpriceable / ${audits.filter((a) => a.missingData.length).length} with missing data.`,
