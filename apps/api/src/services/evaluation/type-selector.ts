@@ -37,23 +37,42 @@ interface ModelPick {
 }
 
 /**
- * Match tiers — what every comp ID *is* to the model. Tier 1 is a critical
- * match: in-pocket geography, every physical label exact/close, fresh sale,
- * ARV price evidence. Tier 2 drops one recoverable physical difference OR
- * keeps clean physicals but prices at median instead of ARV. Tier 3 allows
- * two recoverable differences — still inside every hard rule. Anything
- * worse is already excluded by code and never reaches the model.
+ * Match tiers — what every comp ID *is* to the model, on the appraisal-rule
+ * tolerances (docs/B-HARNESS + APPRAISER-RULESET):
+ *   T1 — in-pocket + sqft within ±250 + era year (±10yr) + fresh sale +
+ *        ARV price evidence = the identical data set
+ *   T2 — in-pocket + sqft within 20% + year within ±20 = closest data set
+ *   T3 — in-pocket + era year built (±30) + sqft within 35% = defensible
+ *   Anything worse is already excluded by code and never reaches the model.
  */
-function tierOf(r: RankedComp): 1 | 2 | 3 {
+function tierOf(r: RankedComp, subjectSqft: number | null, subjectYear: number | null): 1 | 2 | 3 {
   const inPocket = r.profile.geoTier !== 'OFF_POCKET'
+  if (!inPocket) return 3
   const l = r.labels
-  const physExact = l ? [l.sqft, l.year, l.lot].filter((d) => d === 'exact' || d === 'close').length : 0
-  const diffs = l?.diffs ?? r.audit.recoverable.length
+  const sqftGap = subjectSqft && r.comp.squareFeet ? Math.abs(r.comp.squareFeet - subjectSqft) : null
+  const sqftPct = sqftGap != null && subjectSqft ? sqftGap / subjectSqft : null
+  const yrGap = subjectYear && r.comp.yearBuilt ? Math.abs(r.comp.yearBuilt - subjectYear) : null
   const fresh = l?.saleAge === 'fresh'
   const arv = l?.priceEvidence === 'arv'
-  if (inPocket && physExact === 3 && diffs === 0 && fresh && arv) return 1
-  if (inPocket && diffs <= 1 && (arv || physExact === 3) && l?.saleAge !== 'aged_out' && l?.sanity === 'clean') return 2
+  const clean = l?.sanity !== 'anomalous'
+  if (sqftGap != null && sqftGap <= 250 && yrGap != null && yrGap <= 10 && fresh && arv && clean) return 1
+  if (sqftPct != null && sqftPct <= 0.20 && (yrGap == null || yrGap <= 20) && clean && l?.saleAge !== 'aged_out') return 2
   return 3
+}
+
+/**
+ * Excess-sqft contributory value — the appraiser rule that a comp too big or
+ * too small only contributes a *percent* of its extra/missing size. Marginal
+ * taper from the B harness: the marginal foot is priced at 50% of the comp's
+ * $/sf for gaps <=10%, 40% <=25%, 30% beyond. Implied = what this comp's sale
+ * is worth at the subject's size — the number the model should price on.
+ */
+function impliedValue(r: RankedComp, subjectSqft: number | null): number | null {
+  if (!subjectSqft || !r.comp.squareFeet || !r.comp.salePrice || r.ppsf <= 0) return null
+  const gap = subjectSqft - r.comp.squareFeet
+  const gapPct = Math.abs(gap) / r.comp.squareFeet
+  const rate = gapPct <= 0.10 ? 0.5 : gapPct <= 0.25 ? 0.4 : 0.3
+  return Math.round(r.comp.salePrice + gap * r.ppsf * rate)
 }
 
 export async function runTypeSelector(
@@ -93,7 +112,7 @@ export async function runTypeSelector(
   const eligible = ranked
     .filter((r) => r.audit.verdict === 'eligible' || r.audit.verdict === 'picked')
     .sort((a, b) =>
-      tierOf(a) - tierOf(b)
+      tierOf(a, subject.squareFeet ?? null, subject.yearBuilt ?? null) - tierOf(b, subject.squareFeet ?? null, subject.yearBuilt ?? null)
       || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
       || (GEO_RANK[a.profile.geoTier] ?? 9) - (GEO_RANK[b.profile.geoTier] ?? 9)
       || String(b.comp.saleDate ?? '').localeCompare(String(a.comp.saleDate ?? '')))
@@ -105,12 +124,14 @@ export async function runTypeSelector(
   base.debugNotes.push(`type-selector: seat call → ${eligible.length} eligible (ranked=${ranked.length})`)
 
   const subject = evidence.subject
+  const subjSqft = subject.squareFeet ?? null
   const rows = eligible.map((r) => {
     const l = r.labels
     return {
       id: r.id,
-      tier: tierOf(r),
+      tier: tierOf(r, subjSqft, subject.yearBuilt ?? null),
       salePrice: r.comp.salePrice,
+      implied: impliedValue(r, subjSqft),
       ppsf: Math.round(r.ppsf),
       sqft: r.comp.squareFeet,
       beds: r.comp.bedrooms,
@@ -136,17 +157,28 @@ export async function runTypeSelector(
       'When no tier-1 exists, pick the closest tier-2; tier-3 is the floor — ' +
       'the tier field tells you exactly how close each data set is. Only pick ' +
       'ids from eligible. ARV = the price your picks justify for the subject, ' +
-      'weighted toward ARV-priced picks in the best geo tier.',
+      'Anchor on the most-similar pick; supporters bound the range. ARV ' +
+      'should be priced on each pick\'s "implied" value — its sale repriced ' +
+      'at the subject\'s size with the appraiser marginal-rate taper (excess ' +
+      'or missing sqft contributes only a percent of value: 50%/40%/30% of ' +
+      '$/sf by gap size). ARV-priced picks weight most; the pocket median ' +
+      'bounds you.',
     tiers: {
-      '1': 'in-pocket geo, all physical labels exact/close, fresh sale, ARV price — identical data set',
-      '2': 'in-pocket geo, at most one recoverable difference, OR clean physicals priced median — closest data set',
-      '3': 'in-pocket geo, up to two recoverable differences — defensible fallback',
+      '1': 'in-pocket geo, sqft within ±250, era year built, fresh sale, ARV price — identical data set',
+      '2': 'in-pocket geo, sqft within 20%, year within ±20 — closest data set',
+      '3': 'in-pocket geo, era year built, sqft within ~35% — defensible fallback',
     },
     subject: {
       address: subject.address, sqft: subject.squareFeet, beds: subject.bedrooms,
       baths: subject.bathrooms, yearBuilt: subject.yearBuilt, lotSqft: subject.lotSizeSquareFeet,
     },
     band: opts?.priceBand ?? null,
+    pocketMedian: (() => {
+      const xs = eligible
+        .filter((r) => r.profile.geoTier === 'BLOCK_GROUP' || r.profile.geoTier === 'SUBDIVISION')
+        .map((r) => r.ppsf).filter((v) => v > 0).sort((a, b) => a - b)
+      return xs.length ? Math.round(xs[Math.floor((xs.length - 1) / 2)]) : null
+    })(),
     eligible: rows,
   })
 
@@ -180,11 +212,12 @@ export async function runTypeSelector(
     // ARV sanity: must sit inside the picks' own ppsf evidence envelope —
     // a model number beyond ±50% of its picks' median $/sf × subject sqft
     // is hallucinated, not reasoned. Deterministic seat keeps its pick.
-    const pickPpsfs = ids.map((id) => eligible.find((r) => r.id === id)!.ppsf).sort((a, b) => a - b)
-    const pickMedian = pickPpsfs[Math.floor((pickPpsfs.length - 1) / 2)]
-    const implied = pickMedian * (subject.squareFeet ?? 0)
-    if (subject.squareFeet != null && subject.squareFeet > 0 &&
-        (arv > implied * 1.5 || arv < implied * 0.6)) {
+    const pickImplied = ids.map((id) => {
+      const r = eligible.find((x) => x.id === id)!
+      return impliedValue(r, subjSqft) ?? (r.ppsf * (subjSqft ?? r.comp.squareFeet ?? 0))
+    }).filter((v) => v > 0).sort((a, b) => a - b)
+    const implied = pickImplied.length ? pickImplied[Math.floor((pickImplied.length - 1) / 2)] : 0
+    if (implied > 0 && (arv > implied * 1.5 || arv < implied * 0.6)) {
       base.debugNotes.push(`type-selector: ARV $${arv} outside picks' envelope ($${Math.round(implied)}) — deterministic seat`)
       return base
     }
