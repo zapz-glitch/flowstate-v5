@@ -124,7 +124,9 @@ export class ScrapflyZillowFetcher {
     if (!this.scrapflyApiKey) return null
     // The key rides in the query string — only ever send it to Scrapfly.
     const host = (() => { try { return new URL(this.scrapflyUrl).hostname } catch { return '' } })()
-    if (!host.endsWith('scrapfly.io')) return null
+    // exact domain or a real subdomain only — 'evil-scrapfly.io' ends the
+    // same way but is not Scrapfly, and the key rides in the query string.
+    if (host !== 'scrapfly.io' && !host.endsWith('.scrapfly.io')) return null
     try {
       const params = new URLSearchParams({ key: this.scrapflyApiKey, url, asp: 'true', country: 'us' })
       const res = await fetch(`${this.scrapflyUrl}?${params}`, { signal: AbortSignal.timeout(60_000) })
@@ -155,14 +157,30 @@ export class ScrapflyZillowFetcher {
       )
       if (!res.ok) return null
       const data = (await res.json()) as {
-        results?: Array<{ resultType?: string; metaData?: { zpid?: number; streetNumber?: string } }>
+        results?: Array<{
+          resultType?: string
+          metaData?: { zpid?: number; streetNumber?: string; streetName?: string; zipCode?: string }
+        }>
       }
-      const wanted = property.address.match(/\d+/)?.[0]
-      const hit = data.results?.find(
-        (r) => r.resultType === 'Address' && r.metaData?.zpid && (!wanted || r.metaData.streetNumber === wanted),
-      )
+      const norm = (s?: string) => (s ?? '').toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, ' ').trim()
+      const wantedNum = property.address.match(/\d+/)?.[0]
+      const wantedAddr = norm(property.address)
+      const hit = data.results?.find((r) => {
+        const m = r.metaData
+        if (r.resultType !== 'Address' || !m?.zpid) return false
+        // Same house number on a different street is a different home —
+        // number alone is not proof.
+        if (wantedNum && m.streetNumber !== wantedNum) return false
+        const mStreet = norm(m.streetName)
+        if (mStreet && !wantedAddr.includes(mStreet)) return false
+        if (property.zipCode && m.zipCode && m.zipCode !== property.zipCode) return false
+        return true
+      })
       if (!hit?.metaData?.zpid) return null
-      return `${generateZillowUrl(property).replace(/\/$/, '')}/${hit.metaData.zpid}_zpid/`
+      // /homes/<slug>_rb/ is a SEARCH URL — the canonical listing lives on
+      // /homedetails/<slug>/<zpid>_zpid/.
+      const slug = norm(property.address).replace(/\s+/g, '-')
+      return `https://www.zillow.com/homedetails/${slug}/${hit.metaData.zpid}_zpid/`
     } catch {
       return null
     }

@@ -355,20 +355,33 @@ export async function gatherCompConditionEvidence(
 
   // Owner-specified chain: Zillow via Scrapfly (autocomplete zpid → ASP
   // scrape, ~2s) is primary; Redfin stingray is the fallback — it breaks
-  // under concurrency at scale, so it only runs when Zillow misses.
-  let photos: PropertyPhotos | null = null
-  try {
-    const photoService = createPhotoService(env, { provider: 'zillow' })
-    if (photoService.isAvailable()) {
+  // under concurrency at scale, so it only starts when Zillow misses or
+  // stalls. When Zillow stalls past 5s, stingray launches in parallel so a
+  // slow scrape can't starve the comp past the 30s batch deadline —
+  // Zillow's result still wins if it lands first.
+  const zillowPromise = (async (): Promise<PropertyPhotos | null> => {
+    try {
+      const photoService = createPhotoService(env, { provider: 'zillow' })
+      if (!photoService.isAvailable()) return null
       const result = await photoService.fetchPhotos(comp, {
         maxPhotos: 8,
         includeDescription: true,
         includePriceHistory: false,
       })
-      photos = result.success && result.data.photos.length > 0 ? result.data : null
-    }
-  } catch { photos = null }
-  if (!photos) photos = await fetchRedfinListing(env, comp).catch(() => null)
+      return result.success && result.data.photos.length > 0 ? result.data : null
+    } catch { return null }
+  })()
+  let photos: PropertyPhotos | null = null
+  const first = await Promise.race([
+    zillowPromise.then(() => 'zillow' as const),
+    new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 5000)),
+  ])
+  if (first === 'zillow') {
+    photos = (await zillowPromise) ?? (await fetchRedfinListing(env, comp).catch(() => null))
+  } else {
+    const redfinPromise = fetchRedfinListing(env, comp).catch(() => null)
+    photos = (await zillowPromise) ?? (await redfinPromise)
+  }
 
   if (!photos) {
     evidence.skippedReason = 'no_listing'
