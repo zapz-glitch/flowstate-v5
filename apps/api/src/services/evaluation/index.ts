@@ -48,8 +48,11 @@ import {
   calculateAllRehabLevelEstimates,
   type AnalysisResponse,
   type ApiCallStats,
-  type ResponseContext,
-  type RehabLevelEstimate,
+} from '../analysis'
+import type { ApiLedger } from '../api-ledger'
+import type {
+  ResponseContext,
+  RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
@@ -137,6 +140,9 @@ export interface EvaluationParams {
   /** Threshold for Group B: comps with salePrice <= X% of ARV (default: 70) */
   asIsThresholdPercent?: number
   apiCallStats?: ApiCallStats
+  /** Per-eval outbound-call ledger — lanes record their spend here; the
+   *  caller folds it into the final apiCallStats.apiCalls. */
+  apiLedger?: ApiLedger
   /**
    * Expansion refetch seam. When the appraisal ladder reaches a tier that
    * searches beyond the fetched radius, the pool provably lacks those
@@ -548,6 +554,7 @@ export async function performAnalysisPhase1(
         }
         // Subject-only scrape — comp cards render map imagery, so no
         // Firecrawl/Zillow calls are spent on comparables.
+        params.apiLedger?.record('scrape:subject-listing')
         photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0, skipCache: params.skipCache })
       }
       if (params.prefetchedPhotoBundle !== undefined || photoService.isAvailable()) {
@@ -799,6 +806,7 @@ export async function performAnalysisPhase1(
   const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
 
   const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
+  if (redfinDetailsEnabled) params.apiLedger?.record('redfin:property-details', redfinTargetsById.size + 1)
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
         (): RedfinDetailsResult => ({ details: null, skippedReason: 'fetch_failed' }),
@@ -874,6 +882,7 @@ export async function performAnalysisPhase1(
         const entry = pb?.subject
         const photos = entry?.photos ?? []
         const listPrice = (entry?.metadata?.listPrice as number | undefined) ?? (bundle.property.listingDetails?.listPrice as number | undefined) ?? null
+        params.apiLedger?.record('decisions:subject-observables')
         return decisionsSubjectObservables(env, {
           subject: {
             address: bundle.property.address, city: bundle.property.city, state: bundle.property.state,
@@ -916,6 +925,7 @@ export async function performAnalysisPhase1(
             : clefInputs.length
           const missing = (early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs)
             .slice(0, scrapeCap)
+          params.apiLedger?.record('scrape:comp-evidence', missing.length)
           const filled = missing.length
             ? await startCompEvidenceBatch(env, missing, {
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
@@ -945,6 +955,7 @@ export async function performAnalysisPhase1(
                 const comp = clefInputs[oi++]!
                 const ev = early?.get(comp.propertyId) ?? filled.get(comp.propertyId) ?? null
                 const ppsf = comp.salePrice && comp.squareFeet ? comp.salePrice / comp.squareFeet : null
+                params.apiLedger?.record('decisions:comp-observables')
                 const ob = await decisionsCompObservables(env, {
                   comp: {
                     propertyId: comp.propertyId, address: comp.address,
@@ -1554,7 +1565,7 @@ export async function performAnalysisPhase1(
     subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
     avmAnchor, assessedAnchor, rehabLevelEstimates, groupBResult,
     groupACompIds, bestMatch, asIsThresholdPercent, photoBundlePromise,
-    apiCallStats: params.apiCallStats,
+    apiCallStats: params.apiCallStats ? { ...params.apiCallStats, apiCalls: params.apiLedger?.snapshot() } : params.apiCallStats,
   })
 }
 
@@ -1917,7 +1928,7 @@ export async function performAnalysisPhase2(
       subjectListPrice: typeof photoBundle?.subject?.metadata?.listPrice === 'number'
         ? photoBundle.subject.metadata.listPrice
         : null,
-      apiCallStats: params.apiCallStats,
+      apiCallStats: params.apiCallStats ? { ...params.apiCallStats, apiCalls: params.apiLedger?.snapshot() } : params.apiCallStats,
       bestMatch,
       groupBResult,
       groupACompIds,

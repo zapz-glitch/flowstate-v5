@@ -194,7 +194,7 @@ const SUBJECT_QUESTIONS = {
   s9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image (roads and business labels are overlaid), does the SUBJECT have adverse site exposure? Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
+    instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? Read the aerial itself — multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
   },
 }
 
@@ -233,12 +233,12 @@ const COMP_QUESTIONS = {
   c8_premium_attributes: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
-    instructions: "Does the description, cover photo, or supplied property data indicate a premium lot attribute that could explain a price premium — waterfront, oversized/corner lot, cul-de-sac, view, or pool? Pick the strongest single attribute; NONE if none is evident. This explains non-condition price premiums.",
+    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium — waterfront, oversized/corner lot, cul-de-sac, view, or pool? The aerial counts as evidence: water adjacent to the lot is WATERFRONT, a visible pool is POOL, a lot clearly larger than neighbors is LARGE_LOT. Pick the strongest single attribute; NONE if none is evident. This explains non-condition price premiums.",
   },
   c9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
-    instructions: 'When a satellite image is supplied (roads/business labels overlaid), does the COMP have adverse site exposure? Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. UNVERIFIED when no satellite image is present; do not infer exposure from price or description alone.',
+    instructions: 'When a satellite image is supplied (aerial view; road and place labels may be overlaid), does the COMP have adverse site exposure? Read the aerial itself: multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. Interior residential lots are NEUTRAL. UNVERIFIED only when no satellite image is present; do not infer exposure from price or description alone.',
   },
   c10_physical_match: {
     type: 'noul' as const,
@@ -358,6 +358,8 @@ export interface SubjectObservables {
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
+  /** Which tiles/photos actually made it into the call (audit trail). */
+  imagesRead: string[]
   model: string
   durationMs: number
 }
@@ -385,6 +387,8 @@ export interface CompObservables {
    *  fixer/investor lowest. */
   arvFitnessP: number | null
   confidence: Record<string, number>
+  /** Which tiles/photos actually made it into the call (audit trail). */
+  imagesRead: string[]
   model: string
   durationMs: number
 }
@@ -402,13 +406,8 @@ const confs = (a: DecisionsAnswers): Record<string, number> =>
 
 const DECISIONS_IMG_CAP = 128
 
-/** Satellite tile for the subject — Google Maps Static API, aerial view
- *  feeds the s8 lot-premium question. Null when the key/coords/fetch miss. */
-async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
-  const key = env.GOOGLE_MAPS_KEY
-  const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
-  if (!key || typeof lat !== 'number' || typeof lng !== 'number') return null
-  const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&maptype=hybrid&key=${key}`
+/** Fetch a 640x640 image tile as base64; null on non-image/error. */
+async function fetchTile(url: string) {
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
   if (!res.ok) return null
   const mime = res.headers.get('content-type') ?? 'image/png'
@@ -417,6 +416,31 @@ async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
   let bin = ''
   for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192))
   return { base64: btoa(bin), content_type: mime }
+}
+
+/** Satellite tile for the subject — feeds s8 lot-premium and s9 site-
+ *  exposure. Provider chain: Google staticmap hybrid (needs the Maps
+ *  Static API enabled on the key — it is NOT enabled on the current
+ *  project, so this 403s today) → USGS imagery+topo hybrid (aerial photo
+ *  with road/place labels, US-only, no key) → Esri World Imagery
+ *  (aerial only, no labels, worldwide). Null when coords/fetch miss. */
+async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
+  const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null
+  const key = env.GOOGLE_MAPS_KEY
+  if (key) {
+    const g = await fetchTile(`https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&maptype=hybrid&key=${key}`).catch(() => null)
+    if (g) return g
+  }
+  // Web-Mercator bbox ≈ zoom 18 (~0.6m/px → ~380m across at 640px).
+  const R = 20037508.34
+  const x = (lng as number) * R / 180
+  const y = Math.log(Math.tan((90 + (lat as number)) * Math.PI / 360)) / (Math.PI / 180) * R
+  const half = 190
+  const bbox = `${Math.round(x - half)},${Math.round(y - half)},${Math.round(x + half)},${Math.round(y + half)}`
+  const usgs = await fetchTile(`https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
+  if (usgs) return usgs
+  return fetchTile(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
 }
 
 /** Curb-level Street View image for the physical-similarity lane — subject
@@ -529,6 +553,7 @@ export async function decisionsSubjectObservables(
     confidence: confs(merged),
     photosRead: imgs.length,
     photosTotal: urls.length,
+    imagesRead: state.imageOrder,
     model: env.DECISIONS_MODEL || 'gpt-6-luna',
     durationMs: Date.now() - started,
   }
@@ -623,6 +648,7 @@ export async function decisionsCompObservables(
     physicalMatchP: probOf(a, 'c10_physical_match'),
     arvFitnessP: probOf(a, 'c11_arv_fitness'),
     confidence: confs(a),
+    imagesRead: state.imageOrder,
     model: env.DECISIONS_MODEL || 'gpt-6-luna',
     durationMs: Date.now() - started,
   }

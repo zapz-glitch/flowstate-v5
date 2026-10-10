@@ -43,8 +43,17 @@ const GEO_TIER_RANK: Record<CompMatchProfile['geoTier'], number> = {
 type PriceGroup = 'top' | 'middle' | 'bottom'
 type Verdict = 'picked' | 'eligible' | 'excluded' | 'unpriceable'
 
-const MAX_PICKS = 6
-const MIN_PICKS = 3
+/** Pick doctrine — one true comp is enough, 2-3 is the working set,
+ *  never pad. A pick has to BE a true comp: physically matched
+ *  (sqft twin/close) with few exceptions (<=2 recoverable diffs).
+ *  Selection stops when the bar runs out; a single verified comp
+ *  outranks three filled-out picks. */
+const MAX_PICKS = 3
+const MIN_PICKS = 1
+/** The true-comp bar — the strongest physical dim (sqft) must be
+ *  twin-or-close AND the comp can carry at most 2 recoverable
+ *  exceptions. Below the bar the evidence is context, not a pick. */
+const TRUE_COMP_MAX_DIFFS = 2
 /** Extreme-variance anomaly threshold — a comp this likely to carry an
  *  unexplained premium never makes the ARV pool. */
 const ANOMALY_P = 0.7
@@ -127,14 +136,21 @@ function anomaliesOf(comp: HarnessEvidence['comps'][number]): string[] {
 
 /** R2 physical eligibility — gross mismatches exclude; everything inside
  *  the recoverable band is an ADJUSTMENT, not a rejection. A block-group
- *  comp with stucco-over-frame is a price-tweak, not a lost comp. */
-function physicalEligibility(p: CompMatchProfile): { excludes: string[]; recoverable: string[] } {
+ *  comp with stucco-over-frame is a price-tweak, not a lost comp.
+ *  Block-group members get the T2 band — every bound widened 25% — a
+ *  geo-verified neighbor keeps its physical diffs recoverable longer
+ *  (first-principles preference, not a hard barrier). */
+const BG_LENIENCY = 1.25
+function physicalEligibility(p: CompMatchProfile, bg = false): { excludes: string[]; recoverable: string[] } {
   const excludes: string[] = []
   const recoverable: string[] = []
-  const band = (v: number | null, name: string, b: { recoverable: number; disqualifying: number }, unit: string) => {
+  const widen = (b: { recoverable: number; disqualifying: number }) =>
+    bg ? { recoverable: b.recoverable * BG_LENIENCY, disqualifying: b.disqualifying * BG_LENIENCY } : b
+  const band = (v: number | null, name: string, b0: { recoverable: number; disqualifying: number }, unit: string) => {
     if (v == null) return
+    const b = widen(b0)
     const a = Math.abs(v)
-    if (a > b.disqualifying) excludes.push(`R2 ${name} ${v > 0 ? '+' : ''}${Math.round(v)}${unit} beyond ±${b.disqualifying}${unit}`)
+    if (a > b.disqualifying) excludes.push(`R2 ${name} ${v > 0 ? '+' : ''}${Math.round(v)}${unit} beyond ±${Math.round(b.disqualifying)}${unit}`)
     else if (a > b.recoverable) recoverable.push(`${name} ${v > 0 ? '+' : ''}${Math.round(v)}${unit}`)
   }
   band(p.sqftDeltaPct, 'size', PHYS.sqftDeltaPct, '%')
@@ -197,7 +213,7 @@ export function runDeterministicSelector(
 
     // R2 physical eligibility — gross mismatch excludes; recoverable
     // differences are adjustments that ride the pick, not rejections.
-    const phys = physicalEligibility(profile)
+    const phys = physicalEligibility(profile, profile.geoTier === 'BLOCK_GROUP')
     if (phys.excludes.length) {
       audit.verdict = 'excluded'
       audit.rules.push('R2')
@@ -342,14 +358,19 @@ export function runDeterministicSelector(
       : Math.abs(delta) <= close ? 'close'
       : Math.abs(delta) <= mod ? 'moderate' : 'poor'
   for (const r of ranked) {
+    const bg = r.profile.geoTier === 'BLOCK_GROUP'
+    const mod = (b: number) => bg ? b * BG_LENIENCY : b
+    // Style is a preference, never a veto (doctrine): a matching style
+    // ranks higher via diffs/twins, a mismatch is one recoverable
+    // difference — it can never exclude on its own.
     const styleDiffs = r.audit.recoverable.filter((x) =>
-      /stories|foundation|construction|exterior|roof|beds|baths/.test(x)).length
+      /style|stories|foundation|construction|exterior|roof|beds|baths/i.test(x)).length
     r.labels = {
       geo: r.profile.geoTier,
-      sqft: physDim(r.profile.sqftDeltaPct, 10, 15, PHYS.sqftDeltaPct.recoverable),
-      year: physDim(r.profile.yearBuiltDelta, 5, 10, PHYS.yearBuiltDelta.recoverable),
-      lot: physDim(r.profile.lotDeltaPct, 25, 50, PHYS.lotDeltaPct.recoverable),
-      style: r.audit.recoverable.length === 0 ? 'match' : styleDiffs > 0 ? 'differs' : 'match',
+      sqft: physDim(r.profile.sqftDeltaPct, 10, 15, mod(PHYS.sqftDeltaPct.recoverable)),
+      year: physDim(r.profile.yearBuiltDelta, 5, 10, mod(PHYS.yearBuiltDelta.recoverable)),
+      lot: physDim(r.profile.lotDeltaPct, 25, 50, mod(PHYS.lotDeltaPct.recoverable)),
+      style: styleDiffs > 0 ? 'differs' : 'match',
       saleAge: r.audit.reasons.some((x) => x.includes('365d cap')) ? 'aged_out'
         : r.audit.recoverable.some((x) => x.startsWith('stale')) ? 'stale'
         : r.comp.saleDate ? 'fresh' : 'unknown',
@@ -363,7 +384,7 @@ export function runDeterministicSelector(
   }
   const arvPool = clean.filter((r) => !asIsPriced(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !asIsPriced(r) && !isRenovated(r)).sort(rank)
-  const medianFallback = arvPool.length < MIN_PICKS
+  const medianFallback = arvPool.length === 0
 
   // d1 pocket anchoring — pricing weight stays in the block group (or the
   // tract when the pool has no BG comps at all). Mirrors verdict-grade:
@@ -420,24 +441,35 @@ export function runDeterministicSelector(
     ...pickable.filter(inPocketPick).sort(bgFirst),
     ...pickable.filter((r) => !inPocketPick(r)).sort(arvFirst),
   ]
-  const picks = ordered.slice(0, MAX_PICKS)
-  // Drivers carry the pricing weight — in-pocket only. When the pool has
-  // zero clean in-pocket comps we fall back to the raw ranking and let
+  // True-comp bar: sqft twin/close + fewest exceptions — the lexicographic
+  // order already surfaces the least-acceptance matches first, the bar
+  // decides where the set ENDS. Nothing below the bar picks; when no comp
+  // clears it, take the single best-ranked comp and flag the run thin.
+  const isTrueComp = (r: RankedComp) =>
+    (r.labels?.sqft === 'twin' || r.labels?.sqft === 'close') &&
+    (r.labels?.diffs ?? 9) <= TRUE_COMP_MAX_DIFFS
+  const truePicks = ordered.filter(isTrueComp)
+  const picks = truePicks.length > 0
+    ? truePicks.slice(0, MAX_PICKS)
+    : ordered.slice(0, MIN_PICKS)
+  // Drivers carry the pricing weight — in-pocket picks only (the set is
+  // already <=3 true comps, so every in-pocket pick drives). When the pool
+  // has zero clean in-pocket comps we fall back to the raw ranking and let
   // the gate grade the pocket risk honestly.
   const driverIds = [...picks.filter(inBg), ...picks.filter((p) => !inBg(p) && inPocketPick(p))]
-    .slice(0, MIN_PICKS).map((p) => p.id)
+    .slice(0, MAX_PICKS).map((p) => p.id)
   if (driverIds.length === 0) driverIds.push(...picks.slice(0, MIN_PICKS).map((p) => p.id))
   for (const p of picks) p.audit.verdict = 'picked'
 
   const attempts: SelectionAttempt[] = []
-  if (picks.length < 2 || !subject.squareFeet) {
+  if (picks.length < 1 || !subject.squareFeet) {
     return {
       selection: null,
       model: 'deterministic-selector',
       attempts,
       clarifications: [],
       debugNotes: [
-        `selector: ${picks.length} qualified comps in ${medianFallback ? 'median' : 'arv'} band — needs 2+`,
+        `selector: 0 qualified comps in ${medianFallback ? 'median' : 'arv'} band — nothing clears the true-comp bar`,
         `groups: arv=${arvBand?.n ?? 0} median=${medianBand?.n ?? 0} as-is=${asIsBand?.n ?? 0} of ${ranked.length} priced`,
         ...audits.filter((a) => a.verdict === 'excluded').slice(0, 8).map((a) => `${a.id}: ${a.reasons.join('; ')}`),
         ...(subject.squareFeet ? [] : ['subject squareFeet missing — cannot price $/sqft']),
@@ -456,7 +488,7 @@ export function runDeterministicSelector(
   // "ARV comps that match our rules, if none then median." Median-of-all-
   // picks only anchors when the ARV band genuinely came up empty.
   const arvPicks = picks.filter((p) => arvPool.includes(p))
-  const pricedPpsfs = (arvPicks.length >= 2 ? arvPicks : picks)
+  const pricedPpsfs = (arvPicks.length >= 1 ? arvPicks : picks)
     .map((p) => p.ppsf).sort((a, b) => a - b)
   const pricingMedian = pricedPpsfs.length % 2
     ? pricedPpsfs[(pricedPpsfs.length - 1) / 2]
@@ -470,15 +502,15 @@ export function runDeterministicSelector(
   const bgPicks = picks.filter((p) => p.profile.geoTier === 'BLOCK_GROUP').length
   const medianFitness = picks.map((p) => p.comp.observables?.arvFitnessP ?? 0.5).sort((a, b) => a - b)[Math.floor((picks.length - 1) / 2)]
   const missingInPicks = picks.reduce((n, p) => n + p.audit.missingData.length, 0)
-  const thinPool = picks.length < MIN_PICKS
+  const thinPool = picks.length < 2
   const staleDrivers = picks.some((p) =>
     driverIds.includes(p.id)
     && p.comp.saleDate != null
     && (Date.now() - new Date(p.comp.saleDate).getTime()) / 864e5 > evidence.rules.preferredSaleAgeDays * 2)
   const conf: AgentSelection['conf'] =
     thinPool || medianFallback || staleDrivers || missingInPicks > 0 ? 'low'
-    : picks.length >= 4 && bgPicks >= 2 && medianFitness >= 0.6 ? 'high'
-    : picks.length >= 3 ? 'medium'
+    : picks.length >= 3 && bgPicks >= 2 && medianFitness >= 0.6 ? 'high'
+    : picks.length >= 2 ? 'medium'
     : 'low'
 
   // Per-pick recoverable differences ride as zero-dollar adjustment

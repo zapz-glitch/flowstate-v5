@@ -1177,6 +1177,9 @@ export interface ApiCallStats {
     endpoints: { endpoint: string; calls: number; cached: number }[]
   }
   totalExternalCalls: number
+  /** Per-eval outbound-call ledger — every call counted by lane
+   *  (provider methods, geocode, decisions, scrape, redfin). */
+  apiCalls?: { lanes: Record<string, number>; total: number }
 }
 
 // ─── Location Risk Detection ─────────────────────────────────────────────────

@@ -63,6 +63,7 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
+import { createApiLedger } from '../services/api-ledger'
 import { resolveParcelApn } from '../services/geo/parcel-gis'
 import { resolveZoning } from '../services/geo/zoning'
 import { drizzle } from 'drizzle-orm/d1'
@@ -384,6 +385,7 @@ export class AnalysisJobDO {
     console.log(`[AnalysisJobDO] ── Streaming analysis started ──`)
 
     const propertyApi = createPropertyApi(this.env)
+    const apiLedger = createApiLedger()
     // Explicit reruns bypass every KV cache on this instance — the point
     // of Rerun is fresh comps, fresh property fields, fresh photos.
     propertyApi.setSkipCache(!!config.skipCache)
@@ -631,19 +633,19 @@ export class AnalysisJobDO {
     // Digest reader: Decisions (proto-parity — the same question/probability
     // machinery proto uses for comp observables) when CONDITION_READER is
     // 'decisions' and OpenAI is keyed; Clef otherwise. corelogic-alpha runs
-    // comp digests unconditionally — they're the labeled data the
-    // deterministic selector reads.
+    // ONE Decisions pass per comp — the observables lane (condition +
+    // satellite exposure); the digest stages duplicated that spend.
     const digestReaderOn = this.env.CONDITION_READER === 'decisions'
       ? !!this.env.OPENAI_API_KEY
       : isClefAvailable(this.env)
-    const clefDigestsOn = (this.env.CLEF_COMP_CONDITION_ENABLED === 'true' || config.harness === 'corelogic')
-      && digestReaderOn
+    const clefDigestsOn = this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && digestReaderOn
     // Comp evidence (listing fetch + condition classify) is core input to
     // the agent harness — Opus's per-comp tier/coverage reads come from
     // it. The CLEF flag gates only the legacy shadow lane; an agent run
     // needs any condition reader (Anthropic haiku, OpenRouter, Clef).
     const compEvidenceOn =
       clefDigestsOn ||
+      config.harness === 'corelogic' ||
       (config.harness === 'agent' && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
 
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
@@ -664,6 +666,7 @@ export class AnalysisJobDO {
           yearBuilt: c.yearBuilt ?? undefined,
           squareFeet: c.squareFeet ?? undefined,
         }))
+        apiLedger.record('scrape:comp-evidence', inputs.length)
         const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
           // Defer classification whenever a post-geo classifier will run —
@@ -676,10 +679,13 @@ export class AnalysisJobDO {
         })
         // Stage-A digest on sale records — no listing data needed, runs
         // beside the listing fetch it precedes in the evidence batch.
-        digestAPromiseParts.push(
-          startCompDigestBatch(this.env, res.data.comparables.map((c) => toDigestComp(c)), digestSubject, 'A')
-            .catch(() => new Map()),
-        )
+        if (clefDigestsOn) {
+          apiLedger.record('decisions:comp-digest', res.data.comparables.length)
+          digestAPromiseParts.push(
+            startCompDigestBatch(this.env, res.data.comparables.map((c) => toDigestComp(c)), digestSubject, 'A')
+              .catch(() => new Map()),
+          )
+        }
         return await evidenceBatch
       } catch { return null }
     }).catch(() => null)
@@ -905,6 +911,7 @@ export class AnalysisJobDO {
       comps: NormalizedComparable[],
     ): Promise<NormalizedComparable[]> => {
       if (!geoGateActive || property.latitude == null || property.longitude == null) return comps
+      apiLedger.record('geo:subject-geocode')
       const subjectGeo = await fetchCensusGeography(
         property.latitude,
         property.longitude,
@@ -983,6 +990,7 @@ export class AnalysisJobDO {
           }
         }),
       )
+      apiLedger.record('geo:comp-geocode', lookedUp)
       if (lookedUp < comps.length) {
         console.log(`[AnalysisJobDO] geo lane early-exit: ${lookedUp}/${comps.length} lookups, ${pocketHits} pocket hits`)
       }
@@ -1041,7 +1049,7 @@ export class AnalysisJobDO {
       // ladder runs beside it. The batch is ALSO awaited (bounded) below:
       // its geo-fit/twin-fit/sanity reads rank the paid enrich queue.
       const digestBPromise = clefDigestsOn
-        ? startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B')
+        ? (apiLedger.record('decisions:comp-digest', comps.length), startCompDigestBatch(this.env, comps.map((c, i) => toDigestComp(c, geos[i])), digestSubject, 'B'))
             .catch(() => new Map<string, CompDigest>())
         : null
       if (digestBPromise) {
@@ -1250,6 +1258,7 @@ export class AnalysisJobDO {
       if (clefDigestsOn) {
         const enriched = enrichedComps.filter((c) => c.isEnriched)
         if (enriched.length > 0) {
+          apiLedger.record('decisions:comp-digest', enriched.length)
           digestCPromiseParts.push(
             startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
               .catch(() => new Map()),
@@ -1355,6 +1364,7 @@ export class AnalysisJobDO {
         if (clefDigestsOn) {
           const enriched = newCandidates.filter((c) => c.isEnriched)
           if (enriched.length > 0) {
+            apiLedger.record('decisions:comp-digest', enriched.length)
             digestCPromiseParts.push(
               startCompDigestBatch(this.env, enriched.map((c) => toDigestComp(c)), digestSubject, 'C')
                 .catch(() => new Map()),
@@ -1494,6 +1504,7 @@ export class AnalysisJobDO {
     await this.pushEvent('evaluation_started', { message: 'Evaluating comparables...' })
 
     const propertyCallStats = propertyApi.getCallStats()
+    for (const e of propertyCallStats.endpoints) apiLedger.record(`provider:${e.endpoint}`, e.calls)
     const evalParams = {
       ...config.evalParams,
       harness: config.harness,
@@ -1519,10 +1530,10 @@ export class AnalysisJobDO {
       expandComparablesPool,
       // B retry attempt 3 — per-comp valuation/tax-history fetch for pool
       // members lacking AVM/land evidence.
-      enrichComparables: (comps: NormalizedComparable[]) => propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
+      enrichComparables: (comps: NormalizedComparable[]) => { apiLedger.record('provider:comp-detail-enrich', comps.length); return propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null) },
       // Sqft-conflict permit verification — ATTOM permits dataset per comp.
       getCompPermits: (compId: string) =>
-        propertyApi.getBuildingPermits(compId)
+        (apiLedger.record('provider:comp-permits'), propertyApi.getBuildingPermits(compId))
           .then((r) => (r.success ? r.data.permits : null))
           .catch(() => null),
       // attom-mcp comp enrichment happens in the census gate above —
@@ -1534,6 +1545,9 @@ export class AnalysisJobDO {
       // corelogic-alpha working pool — every lane below (evidence scrape,
       // observables, Redfin details) restricts to these ids when set.
       workingCompIds,
+      // Outbound-call ledger — lanes record spend; stamped into the
+      // response's apiCallStats.apiCalls.
+      apiLedger,
       // Clef agent-assist digests — stage A (comps-landed), B (post-geocode
       // inside the census gate), C (post-enrichment). Merged per comp here;
       // the pipeline stamps each stage's answers as comp.clefDigest.{A,B,C}.
@@ -1763,6 +1777,9 @@ export class AnalysisJobDO {
       return
     }
 
+    // Fold the call ledger into the shared apiCallStats object — the
+    // response, run record and persisted report all hold this reference.
+    ;(evalParams.apiCallStats as { apiCalls?: unknown }).apiCalls = apiLedger.snapshot()
     await this.finishEvaluation(config, evalResult, property, evalStart, startTime, marketContextPromise)
   }
 
