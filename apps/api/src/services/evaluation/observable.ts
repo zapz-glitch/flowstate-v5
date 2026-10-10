@@ -196,6 +196,14 @@ const SUBJECT_QUESTIONS = {
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
     instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up frames the parcel itself. Scan every edge of the center parcel for exposure cues: a large flat-roof commercial/industrial building, warehouse, big-box store, parking lot, multi-lane arterial or highway, or rail line touching or immediately adjacent to the parcel boundary. Any of those = exposure, NEVER NEUTRAL. Pick the SIDE: fronting = on the street side the home faces, backing = on the rear edge opposite the street, siding = on a side edge. NEUTRAL only when all edges border homes, yards, or woods. Interior residential lots between commercial strips still count when a commercial rooftop or lot touches the boundary.',
   },
+  // Edge-wise decomposition — the model answers the easy question (what is
+  // ON each frame edge) and code maps edges to front/back/side using the
+  // computed street orientation. One choice question cannot decompose the
+  // two judgments reliably.
+  s9e_north: { type: 'noul' as const, instructions: 'On the NORTH edge of the aerial frames (top of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel north boundary; 0 when the north edge borders only homes, yards, woods, or a quiet residential street.' },
+  s9e_east: { type: 'noul' as const, instructions: 'On the EAST edge of the aerial frames (right of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel east boundary; 0 when the east edge borders only homes, yards, woods, or a quiet residential street.' },
+  s9e_south: { type: 'noul' as const, instructions: 'On the SOUTH edge of the aerial frames (bottom of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel south boundary; 0 when the south edge borders only homes, yards, woods, or a quiet residential street.' },
+  s9e_west: { type: 'noul' as const, instructions: 'On the WEST edge of the aerial frames (left of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel west boundary; 0 when the west edge borders only homes, yards, woods, or a quiet residential street.' },
 }
 
 const COMP_QUESTIONS = {
@@ -355,6 +363,16 @@ export interface SubjectObservables {
   lotPremium: string | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
+  /** Edge-wise exposure probabilities + computed street orientation —
+   *  the audit trail behind siteExposure when the edge lane fires. */
+  siteEdges?: {
+    north: number | null
+    east: number | null
+    south: number | null
+    west: number | null
+    streetEdge: string | null
+    streetBearingDeg: number | null
+  }
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
@@ -421,9 +439,9 @@ async function fetchTile(url: string) {
 /** Satellite tile for the subject — feeds s8 lot-premium and s9 site-
  *  exposure. Provider chain: Google staticmap hybrid (needs the Maps
  *  Static API enabled on the key — it is NOT enabled on the current
- *  project, so this 403s today) → USGS imagery+topo hybrid (aerial photo
- *  with road/place labels, US-only, no key) → Esri World Imagery
- *  (aerial only, no labels, worldwide). Null when coords/fetch miss. */
+ *  project, so this 403s today) → Esri World Imagery (sharpest fallback
+ *  aerial) → USGS imagery+topo hybrid (aerial + road/place labels,
+ *  US-only, no key). Null when coords/fetch miss. */
 async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>, half = 300) {
   const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
@@ -443,9 +461,71 @@ async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>, ha
   // just the street block. The close-up pass uses ~90m so the subject
   // parcel itself fills the frame.
   const bbox = `${Math.round(x - half)},${Math.round(y - half)},${Math.round(x + half)},${Math.round(y + half)}`
-  const usgs = await fetchTile(`https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
-  if (usgs) return usgs
-  return fetchTile(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
+  const esri = await fetchTile(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
+  if (esri) return esri
+  return fetchTile(`https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
+}
+
+/** Which frame edge the subject's fronting street sits on — deterministic
+ *  orientation for the exposure questions. Nominatim resolves the street's
+ *  geometry near the parcel; the bearing of its nearest point maps to a
+ *  frame edge (top=N … left=W). The model then only judges WHAT is on each
+ *  edge, never which edge is the street. */
+export type FrameEdge = 'north' | 'east' | 'south' | 'west'
+export interface StreetOrientation { streetEdge: FrameEdge; bearingDeg: number; streetName: string | null }
+
+export async function fetchStreetOrientation(subject: Record<string, unknown>): Promise<StreetOrientation | null> {
+  const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null
+  const addr = String(subject.address ?? '')
+  const m = /^\d+\s+(.+?)(?:,|$)/.exec(addr)
+  if (!m) return null
+  const street = m[1]!.replace(/\s+(NW|NE|SW|SE|N|S|E|W)$/i, ' $1').trim()
+  const city = /,\s*([^,]+?),\s*[A-Z]{2}/.exec(addr)?.[1]
+  const u = new URL('https://nominatim.openstreetmap.org/search')
+  u.searchParams.set('street', street)
+  if (city) u.searchParams.set('city', city.trim())
+  u.searchParams.set('format', 'json')
+  u.searchParams.set('polygon_geojson', '1')
+  const res = await fetch(u, { headers: { 'User-Agent': 'flowstate-eval/1.0' }, signal: AbortSignal.timeout(10000) }).catch(() => null)
+  if (!res?.ok) return null
+  const hits = await res.json().catch(() => null) as Array<{ geojson?: { type: string; coordinates: unknown } }> | null
+  const coords: Array<[number, number]> = []
+  for (const h of hits ?? []) {
+    const g = h.geojson
+    if (g?.type === 'LineString') for (const c of g.coordinates as [number, number][]) coords.push(c)
+    else if (g?.type === 'MultiLineString') for (const l of g.coordinates as [number, number][][]) for (const c of l) coords.push(c)
+  }
+  if (!coords.length) return null
+  let best = { d: Infinity, b: 0 }
+  for (const [lon, la] of coords) {
+    const dx = (lon - (lng as number)) * Math.cos((lat as number) * Math.PI / 180) * 111320
+    const dy = (la - (lat as number)) * 110540
+    const d = Math.hypot(dx, dy)
+    if (d < best.d) best = { d, b: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360 }
+  }
+  const edge: FrameEdge = best.b >= 315 || best.b < 45 ? 'north' : best.b < 135 ? 'east' : best.b < 225 ? 'south' : 'west'
+  return { streetEdge: edge, bearingDeg: Math.round(best.b), streetName: street }
+}
+
+/** Edge exposure answers + street orientation → FRONTING/SIDING/BACKING.
+ *  The exposure edge opposite the street = backing; on the street edge =
+ *  fronting; the two adjacent edges = siding. Returns null when no edge
+ *  fires hard enough or orientation is unknown — the choice answer is
+ *  then the fallback. */
+export function deriveExposure(
+  edges: Record<FrameEdge, number>,
+  orientation: StreetOrientation | null,
+): { exposure: 'FRONTING' | 'SIDING' | 'BACKING'; edge: FrameEdge; prob: number } | null {
+  if (!orientation) return null
+  const entries = Object.entries(edges) as Array<[FrameEdge, number]>
+  const [topEdge, topP] = entries.sort((a, b) => b[1] - a[1])[0]!
+  const second = entries[1]![1]
+  if (topP < 0.15 || topP < second * 1.5) return null
+  const order: FrameEdge[] = ['north', 'east', 'south', 'west']
+  const dist = Math.abs(order.indexOf(topEdge) - order.indexOf(orientation.streetEdge))
+  const side = dist === 0 ? 'FRONTING' : dist === 2 ? 'BACKING' : 'SIDING'
+  return { exposure: side, edge: topEdge, prob: topP }
 }
 
 /** Curb-level Street View image for the physical-similarity lane — subject
@@ -483,11 +563,12 @@ export async function decisionsSubjectObservables(
   if (!isDecisionsAvailable(env)) return null
   const started = Date.now()
   const urls = input.photoUrls.length > 0 ? input.photoUrls : (input.coverPhotoUrl ? [input.coverPhotoUrl] : [])
-  const [sat, satClose, street, images] = await Promise.all([
+  const [sat, satClose, street, images, orientation] = await Promise.all([
     fetchSatelliteTile(env, input.subject).catch(() => null),
     fetchSatelliteTile(env, input.subject, 90).catch(() => null),
     fetchStreetViewTile(env, { latitude: input.subject.latitude as number | null ?? null, longitude: input.subject.longitude as number | null ?? null }).catch(() => null),
     fetchImagesAsBase64(urls, { concurrency: 10 }),
+    fetchStreetOrientation(input.subject).catch(() => null),
   ])
   const satImg = sat ?? input.satelliteImage ?? null
   const imgs = [
@@ -557,7 +638,30 @@ export async function decisionsSubjectObservables(
     askPriceSupport: choiceOf(merged, 's6_ask_price_support'),
     priceConditionAgreement: choiceOf(merged, 's7_price_condition'),
     lotPremium: choiceOf(merged, 's8_lot_premium'),
-    siteExposure: choiceOf(merged, 's9_site_exposure'),
+    siteExposure: (() => {
+      // Edge predicates + code-computed street orientation resolve the side
+      // when they fire — the choice answer stays the fallback for the frames
+      // where the edges don't commit.
+      const derived = deriveExposure(
+        {
+          north: probOf(merged, 's9e_north') ?? 0,
+          east: probOf(merged, 's9e_east') ?? 0,
+          south: probOf(merged, 's9e_south') ?? 0,
+          west: probOf(merged, 's9e_west') ?? 0,
+        },
+        orientation,
+      )
+      return derived?.exposure ?? choiceOf(merged, 's9_site_exposure')
+    })(),
+    /** Edge-exposure probabilities + street orientation (audit trail). */
+    siteEdges: {
+      north: probOf(merged, 's9e_north'),
+      east: probOf(merged, 's9e_east'),
+      south: probOf(merged, 's9e_south'),
+      west: probOf(merged, 's9e_west'),
+      streetEdge: orientation?.streetEdge ?? null,
+      streetBearingDeg: orientation?.bearingDeg ?? null,
+    },
     confidence: confs(merged),
     photosRead: imgs.length,
     photosTotal: urls.length,
