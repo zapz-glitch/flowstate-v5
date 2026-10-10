@@ -32,6 +32,7 @@ import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
 import { runOpusAppraiser } from '../services/evaluation/appraiser'
 import { runDeterministicSelector } from '../services/evaluation/selector'
+import { runTypeSelector } from '../services/evaluation/type-selector'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
@@ -1643,14 +1644,17 @@ export class AnalysisJobDO {
         // engine below. Agent harness keeps the Sonnet appraiser.
         const appraisal = config.harness === 'agent'
           ? await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
-          : runDeterministicSelector(ctx, evidence, {
-              // typescript lane: supervised price segmentation — both tails
-              // of the pocket-relative band are outliers (owner spec).
-              priceBand: config.harness === 'typescript' ? { upper: 2.0, lower: 0.5 } : undefined,
-            })
+          : config.harness === 'typescript'
+            // typescript lane: code labels every data set, the reasoning
+            // model picks identical-or-closest (falls back to the
+            // deterministic seat on any failure). Supervised price
+            // segmentation — both band tails are outliers (owner spec).
+            ? await runTypeSelector(this.env, ctx, evidence, { priceBand: { upper: 2.0, lower: 0.5 } }).catch(() => null)
+            : runDeterministicSelector(ctx, evidence)
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
-        const seat = config.harness === 'agent' ? `Opus (${appraisal?.model ?? 'unavailable'})` : 'Selector'
+        const seat = config.harness === 'agent' ? `Opus (${appraisal?.model ?? 'unavailable'})`
+          : config.harness === 'typescript' ? `Type (${appraisal?.model ?? 'selector'})` : 'Selector'
         const appraiserNote = appraisal == null
           ? 'appraiser unavailable — deterministic engine completes'
           : decision
