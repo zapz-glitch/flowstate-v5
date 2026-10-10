@@ -28,6 +28,7 @@ import { compMatchProfile } from './observable'
 import { exclusionReasons } from './appraiser'
 import { validateAgentSelection } from './index'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
+import { DEFAULT_ADJUSTMENTS } from '../appraisal/types'
 import type { AppraisedComparable } from '../appraisal/types'
 import type { AppraiserResult } from './appraiser'
 import type { CompMatchProfile } from './observable'
@@ -508,8 +509,18 @@ export function runDeterministicSelector(
   }
   const exposure = evidence.subjectObservables?.siteExposure ?? null
   const exposureAdjType = exposure ? EXPOSURE_ADJ[exposure] : undefined
+  // Preset wins when it defines the rule (enabled); when the preset has no
+  // such rule at all the methodology defaults apply — the label itself is a
+  // fact and surfaces either way.
+  const presetAdj = exposureAdjType
+    ? evidence.rules.adjustments.find((a) => a.type === exposureAdjType)
+    : undefined
   const exposureAdj = exposureAdjType
-    ? evidence.rules.adjustments.find((a) => a.type === exposureAdjType && a.enabled)
+    ? (presetAdj?.enabled
+        ? presetAdj
+        : presetAdj == null
+          ? DEFAULT_ADJUSTMENTS.find((a) => a.type === exposureAdjType)
+          : undefined)
     : undefined
   const siteDeduction = exposureAdj
     ? (arv < (exposureAdj.valueThreshold ?? 500000)
@@ -554,11 +565,11 @@ export function runDeterministicSelector(
       ...(medianFallback ? ['median_fallback'] : []),
       ...(thinPool ? ['thin_pocket'] : []),
       ...(staleDrivers ? ['stale_drivers'] : []),
-      ...(siteDeduction > 0 ? [`site_exposure:${exposure}(-$${siteDeduction.toLocaleString()} via ${exposureAdjType})`] : []),
+      ...(exposureAdjType ? [`site_exposure:${exposure}${siteDeduction > 0 ? `(-$${siteDeduction.toLocaleString()} via ${exposureAdjType})` : ''}`] : []),
       `price_groups:arv_$${Math.round(arvBand?.medianPpsf ?? 0)}/sf,median_$${Math.round(medianBand?.medianPpsf ?? 0)}/sf,asis_$${Math.round(asIsBand?.medianPpsf ?? 0)}/sf`,
       `pocket_base:$${Math.round(qualifiedMedianPpsf)}/sf(${medianScope},n=${medianBase.length})`,
     ],
-    notes: `Deterministic selector (${medianFallback ? 'median-band fallback' : 'ARV band'}): ${picks.length} picks — ${bgPicks} block-group match(es), median $${Math.round(medianPpsf)}/sqft × ${subject.squareFeet}sqft subject. Groups: arv $${Math.round(arvBand?.medianPpsf ?? 0)}/sf · median $${Math.round(medianBand?.medianPpsf ?? 0)}/sf · as-is $${Math.round(asIsBand?.medianPpsf ?? 0)}/sf.${siteDeduction > 0 ? ` Subject site exposure ${exposure}: -$${siteDeduction.toLocaleString()} (${exposureAdjType} preset).` : ''}`,
+    notes: `Deterministic selector (${medianFallback ? 'median-band fallback' : 'ARV band'}): ${picks.length} picks — ${bgPicks} block-group match(es), median $${Math.round(medianPpsf)}/sqft × ${subject.squareFeet}sqft subject. Groups: arv $${Math.round(arvBand?.medianPpsf ?? 0)}/sf · median $${Math.round(medianBand?.medianPpsf ?? 0)}/sf · as-is $${Math.round(asIsBand?.medianPpsf ?? 0)}/sf.${exposureAdjType ? ` Subject site exposure ${exposure}${siteDeduction > 0 ? `: -$${siteDeduction.toLocaleString()} (${exposureAdjType}${presetAdj == null ? ' default' : ' preset'})` : ' (no deduction rule enabled)'}.` : ''}`,
     dataQuality: {
       score: Math.min(10, Math.round((clean.length / Math.max(1, ranked.length)) * 10)),
       notes: `${clean.length}/${ranked.length} priced comps survived rule-out; ${arvBand?.n ?? 0} arv-band / ${medianBand?.n ?? 0} median-band / ${asIsBand?.n ?? 0} as-is-band; ${audits.filter((a) => a.verdict === 'excluded').length} excluded / ${audits.filter((a) => a.verdict === 'unpriceable').length} unpriceable / ${audits.filter((a) => a.missingData.length).length} with missing data.`,
