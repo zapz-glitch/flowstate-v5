@@ -195,7 +195,7 @@ export async function runTypeSelector(
       ...(model.includes('deepseek') ? { reasoning: { enabled: true, effort: 'low' as const } } : {}),
     }
     let res = await provider.execute(req)
-    if ((!res.success || !res.data?.content)) {
+    for (let attempt = 0; (!res.success || !res.data?.content) && attempt < 2; attempt++) {
       res = await provider.execute(req)
     }
     if (!res.success) throw new Error(res.error?.message ?? 'provider error')
