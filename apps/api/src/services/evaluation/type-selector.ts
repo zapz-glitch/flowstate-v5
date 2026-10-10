@@ -237,6 +237,25 @@ export async function runTypeSelector(
       base.debugNotes.push(`type-selector: ARV $${arv} outside picks' envelope ($${Math.round(implied)}) — deterministic seat`)
       return base
     }
+    // The downstream evidence gate tests ARV against the picks' raw sale
+    // prices (0.75×min – 1.25×max). The model anchors on implied values,
+    // which legitimately drift above that when the subject is larger —
+    // clamp into the envelope instead of burning a retry/failing closed.
+    const salePrices = ids
+      .map((id) => eligible.find((x) => x.id === id)!.comp.salePrice)
+      .filter((p): p is number => p != null && p > 0)
+    let finalArv = arv
+    if (salePrices.length) {
+      const lo = Math.round(Math.min(...salePrices) * 0.75)
+      const hi = Math.round(Math.max(...salePrices) * 1.25)
+      if (finalArv > hi) {
+        base.debugNotes.push(`type-selector: ARV $${arv} above evidence ceiling — clamped to $${hi}`)
+        finalArv = hi
+      } else if (finalArv < lo) {
+        base.debugNotes.push(`type-selector: ARV $${arv} below evidence floor — clamped to $${lo}`)
+        finalArv = lo
+      }
+    }
     const conf = pick.conf === 'high' || pick.conf === 'medium' || pick.conf === 'low' ? pick.conf : 'low'
     return {
       ...base,
@@ -245,8 +264,8 @@ export async function runTypeSelector(
         ...(base.selection ?? {}),
         selectedCompIds: ids,
         drivers: ids,
-        arv,
-        arvEvidence: arv,
+        arv: finalArv,
+        arvEvidence: finalArv,
         conf,
         notes: `Type-selector (${model}): ${pick.note ?? 'picked ' + ids.length + ' comps'}`,
         flags: [...(base.selection?.flags ?? []), `type_seat:${model}`],
