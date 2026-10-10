@@ -1036,6 +1036,7 @@ export class AnalysisJobDO {
           .filter((c, i) => geos[i]?.blockGroup === subjectGeo.blockGroup && c.pricePerSqft)
           .map((c) => c.pricePerSqft!).sort((a, b) => a - b)
         void this.pushEvent('geo_done', {
+          harness: config.harness,
           subjectGeo: { tract: subjectGeo.tract, blockGroup: subjectGeo.blockGroup },
           pocketCount: pocketPpsfs.length,
           pocketMedianPpsf: pocketPpsfs.length ? Math.round(pocketPpsfs[Math.floor((pocketPpsfs.length - 1) / 2)]) : null,

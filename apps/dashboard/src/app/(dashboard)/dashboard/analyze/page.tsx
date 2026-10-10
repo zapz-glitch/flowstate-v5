@@ -181,6 +181,7 @@ export default function AnalyzePage() {
   // Atom, not useState — eval_progress SSE ticks re-render only the label leaf.
   const setEvalProgress = useSetAtom(evalProgressAtom)
   const picksShownRef = useRef(false)
+  const pocketShownRef = useRef(false)
   const setPermitProgress = useSetAtom(permitProgressAtom)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
@@ -315,6 +316,9 @@ export default function AnalyzePage() {
         }
         const pm = data.pocketMedianPpsf
         setEvalProgress(`${data.pocketCount ?? 0} comp(s) in your block group${pm ? ` · pocket median $${pm}/sqft` : ''}`)
+        // The pocket line holds until the picks land on the typescript lane —
+        // bookkeeping ticks would otherwise erase it inside a second.
+        if (data.harness === 'typescript') pocketShownRef.current = true
         break
       }
 
@@ -350,8 +354,10 @@ export default function AnalyzePage() {
         const permitStage = permitProgressFromEvent(data)
         if (permitStage) setPermitProgress(permitStage)
         // The picks/ARV line holds until completion — phase-2 bookkeeping
-        // ticks would otherwise replace it within milliseconds.
-        else if (typeof data.message === 'string' && !picksShownRef.current) setEvalProgress(data.message)
+        // ticks would otherwise replace it within milliseconds. The pocket
+        // line gets the same hold on the typescript lane (no per-comp reads
+        // follow it there; other lanes keep their live ticks).
+        else if (typeof data.message === 'string' && !picksShownRef.current && !pocketShownRef.current) setEvalProgress(data.message)
         break
       }
 
@@ -650,6 +656,9 @@ export default function AnalyzePage() {
     setStreamingStep('idle')
     setEvalProgress(null)
     picksShownRef.current = false
+    pocketShownRef.current = false
+    // Last run's comp grid doesn't linger under the new run's status line.
+    setAnalysisResult((prev) => prev?.comps ? ({ ...prev, comps: { ...prev.comps, items: [] } } as AnalyzeData) : prev)
     setPermitProgress(null)
     setPhase('fetching')
     lastEventAtRef.current = Date.now()
