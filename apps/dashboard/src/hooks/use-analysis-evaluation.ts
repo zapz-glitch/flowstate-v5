@@ -101,7 +101,30 @@ export function useAnalysisEvaluation({
   currentInputRef.current = inputData
   const activeSelection = serverSelection?.source === inputData ? serverSelection : null
   const data = activeSelection?.analysis ?? inputData
-  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
+  const pythonAuthoritative = data?.evaluationEngine === 'python-v4' || data?.evaluationEngine === 'ts-v5'
+
+  // Optimistic comp selection — the click flips the box (and the map pin)
+  // the same frame; the server recalculation settles the authoritative
+  // result behind it. A second click while one is in flight queues —
+  // the latest selection wins, nothing is dropped.
+  const [optimisticSel, setOptimisticSel] = useState<{ source: AnalyzeData; ids: Set<string>; isManual: boolean } | null>(null)
+  // Ref mirror — click handlers can run before the state re-render; the
+  // next click must chain on what the user just did, not on a stale read.
+  const optimisticSelRef = useRef<{ source: AnalyzeData; ids: Set<string>; isManual: boolean } | null>(null)
+  const applyOptimistic = useCallback((sel: { source: AnalyzeData; ids: Set<string>; isManual: boolean } | null) => {
+    optimisticSelRef.current = sel
+    setOptimisticSel(sel)
+  }, [])
+  const queuedSelRef = useRef<{ ids: string[] | null; source: AnalyzeData } | undefined>(undefined)
+  const [settleTick, setSettleTick] = useState(0)
+  // Revision/jobId reads must reflect the newest settled data — a queued
+  // call fires after the previous response landed, so the expected
+  // revision has already moved.
+  const dataRef = useRef(data)
+  dataRef.current = data
+  // Optimistic overlay only applies to the report it was made on — a new
+  // input (navigation, SSE swap) makes the queued/optimistic state stale.
+  const activeOptimistic = optimisticSel?.source === inputData ? optimisticSel : null
   // Settings panel open/close
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -115,16 +138,20 @@ export function useAnalysisEvaluation({
   const { recalcData, settingsChanged } = settingsHook
 
   const applyServerSelection = useCallback(async (selectedCompIds: string[] | null) => {
-    if (selectionRequestRef.current || !inputData || !data) return
-    const jobId = data.meta?.analysisId
+    if (selectionRequestRef.current || !inputData) return
+    const base = dataRef.current
+    if (!base) return
+    const jobId = base.meta?.analysisId
     if (!jobId) {
+      applyOptimistic(null)
       toast.error('This report cannot be recalculated. Run a new analysis first.')
       return
     }
+    const expectedRevision = base.evaluationRevision ?? 0
     selectionRequestRef.current = true
     setSelectionPending(true)
     try {
-      const analysis = await recalculateReportComps(jobId, selectedCompIds, data.evaluationRevision ?? 0)
+      const analysis = await recalculateReportComps(jobId, selectedCompIds, expectedRevision)
       const validComps = Array.isArray(analysis?.comps?.items)
         && analysis.comps.items.every(comp => comp != null && typeof comp.id === 'string' && typeof comp.isEnabled === 'boolean')
       const insufficient = (analysis?.valuation?.resultGrade === 'withheld' || analysis?.valuation == null)
@@ -133,9 +160,12 @@ export function useAnalysisEvaluation({
         && typeof analysis.valuation.arv === 'number' && Number.isFinite(analysis.valuation.arv) && analysis.valuation.arv > 0
         && Number.isFinite(analysis.valuation.buyPrice)
       if (!['python-v4', 'ts-v5'].includes(analysis?.evaluationEngine ?? '') || !validComps || (!insufficient && !valued)
-        || analysis.meta?.analysisId !== jobId || analysis.evaluationRevision !== (data.evaluationRevision ?? 0) + 1) {
+        || analysis.meta?.analysisId !== jobId || analysis.evaluationRevision !== expectedRevision + 1) {
         throw new Error('The server returned an incomplete evaluation. Your previous result is unchanged.')
       }
+      // Settled — drop the overlay unless a newer selection is already
+      // queued behind this response.
+      if (queuedSelRef.current === undefined) applyOptimistic(null)
       if (currentInputRef.current === inputData) {
         setServerSelection({ source: inputData, analysis, isManual: selectedCompIds !== null })
         toast.info(selectedCompIds === null
@@ -143,12 +173,29 @@ export function useAnalysisEvaluation({
           : 'Operator-selected comparables. The server recalculated this evaluation.')
       }
     } catch (error) {
+      // Failed while nothing newer is queued → drop the optimistic overlay,
+      // the UI reverts to the last settled server state.
+      if (queuedSelRef.current === undefined) applyOptimistic(null)
       if (currentInputRef.current === inputData) toast.error(error instanceof Error ? error.message : 'Comp selection could not be saved. Your previous result is unchanged.')
     } finally {
       selectionRequestRef.current = false
       setSelectionPending(false)
+      setSettleTick((t) => t + 1)
     }
-  }, [data, inputData])
+  }, [inputData, applyOptimistic])
+
+  // Drain the queued selection after the in-flight call settles — by the
+  // time this runs the response's data has committed, so the queued call
+  // sends the fresh expectedRevision (a stale one earns a 409).
+  useEffect(() => {
+    if (selectionRequestRef.current) return
+    const next = queuedSelRef.current
+    queuedSelRef.current = undefined
+    // Navigated to a different report while in flight — drop the queued
+    // selection; it names comps that don't exist here.
+    if (next === undefined || next.source !== inputData) return
+    void applyServerSelection(next.ids)
+  }, [settleTick, inputData, applyServerSelection])
 
   // Default selection = ARV evidence only — transitional/floor comps stay
   // listed but unselected (they never feed the ARV number).
@@ -163,6 +210,10 @@ export function useAnalysisEvaluation({
   useEffect(() => {
     if (data?.comps?.items) {
       isManualRef.current = false
+      // Keep the optimistic overlay while a newer selection is still in
+      // flight or queued — clearing here would flicker the user's latest
+      // click back to an older server state before the final one lands.
+      if (!selectionRequestRef.current && queuedSelRef.current === undefined) applyOptimistic(null)
       setCompOverride({ selectedCompKeys: arvDefaultKeys(data.comps.items), isManual: false })
     }
   }, [data?.comps?.items])
@@ -192,7 +243,6 @@ export function useAnalysisEvaluation({
   // Toggle a single comp
   const handleToggleComp = useCallback((key: string) => {
     if (pythonAuthoritative) {
-      if (selectionRequestRef.current) return
       const items = data?.comps?.items ?? []
       const target = items.find((comp, index) => getCompKey(comp, index) === key)
       if (!target?.id || items.some(comp => comp.isEnabled && !comp.id)) {
@@ -200,15 +250,21 @@ export function useAnalysisEvaluation({
         return
       }
       // Start from the boxes that are checked now — the comps in the ARV —
-      // then add or remove the one the user clicked.
-      const selected = new Set(items.filter(comp => isCheckedForArv(comp, items, data?.manualCompSelection != null)).map(comp => comp.id!))
+      // then add or remove the one the user clicked. The optimistic set is
+      // the base so a fast second click builds on the first, not on stale
+      // server state.
+      const opt = optimisticSelRef.current && optimisticSelRef.current.source === inputData ? optimisticSelRef.current : null
+      const selected = new Set(opt?.ids ?? items.filter(comp => isCheckedForArv(comp, items, data?.manualCompSelection != null)).map(comp => comp.id!))
       if (selected.has(target.id)) selected.delete(target.id)
       else selected.add(target.id)
       if (!selected.size) {
         toast.error('Keep at least one comparable selected for ARV.')
         return
       }
-      void applyServerSelection([...selected])
+      const ids = [...selected]
+      applyOptimistic({ source: inputData!, ids: selected, isManual: true })
+      if (selectionRequestRef.current) queuedSelRef.current = { ids, source: inputData! }
+      else void applyServerSelection(ids)
       return
     }
     isManualRef.current = true
@@ -219,19 +275,28 @@ export function useAnalysisEvaluation({
       else next.add(key)
       return { selectedCompKeys: next, isManual: true }
     })
-  }, [pythonAuthoritative, data, applyServerSelection])
+  }, [pythonAuthoritative, data, inputData, applyServerSelection, applyOptimistic])
 
   // Reset to original enabled comps
   const handleResetComps = useCallback(() => {
     if (pythonAuthoritative) {
-      void applyServerSelection(null)
+      // Optimistic reset mirrors the server's auto rule (anchor/driver —
+      // all enabled when no roles) so the boxes move now, not on settle.
+      const items = data?.comps?.items ?? []
+      const hasRoles = items.some((c) => c.bRole === 'anchor' || c.bRole === 'driver')
+      const auto = new Set(
+        items.filter((c) => c.isEnabled === true && (!hasRoles || c.bRole === 'anchor' || c.bRole === 'driver')).map((c) => c.id!)
+      )
+      applyOptimistic({ source: inputData!, ids: auto, isManual: false })
+      if (selectionRequestRef.current) queuedSelRef.current = { ids: null, source: inputData! }
+      else void applyServerSelection(null)
       return
     }
     isManualRef.current = false
     if (data?.comps?.items) {
       setCompOverride({ selectedCompKeys: arvDefaultKeys(data.comps.items), isManual: false })
     }
-  }, [data?.comps?.items, pythonAuthoritative, applyServerSelection])
+  }, [data?.comps?.items, inputData, pythonAuthoritative, applyServerSelection])
 
   // Reviewer tier pin — 'arv' admits the comp into the ARV pool (and selects
   // it), 'as_is' excludes it from ARV evidence, null clears. Persistence to
@@ -471,10 +536,15 @@ export function useAnalysisEvaluation({
   const isRecalculated = !pythonAuthoritative && (settingsChanged || (compOverride?.isManual ?? false))
   const effectiveComps = displayComps ?? data?.comps
   const authoritativeOverride = useMemo(() => pythonAuthoritative && data?.comps?.items ? {
+    // The optimistic selection (set the instant the user clicks) wins over
+    // the server-derived set until the recalc settles.
     selectedCompKeys: new Set(data.comps.items.flatMap((comp, index) =>
-      isCheckedForArv(comp, data.comps!.items!, data.manualCompSelection != null) ? [getCompKey(comp, index)] : [])),
-    isManual: activeSelection?.isManual ?? data.manualCompSelection != null,
-  } : null, [pythonAuthoritative, data?.comps?.items, data?.manualCompSelection, activeSelection?.isManual])
+      (activeOptimistic
+        ? comp.id != null && activeOptimistic.ids.has(comp.id)
+        : isCheckedForArv(comp, data.comps!.items!, data.manualCompSelection != null))
+        ? [getCompKey(comp, index)] : [])),
+    isManual: activeOptimistic?.isManual ?? activeSelection?.isManual ?? data.manualCompSelection != null,
+  } : null, [pythonAuthoritative, data?.comps?.items, data?.manualCompSelection, activeSelection?.isManual, activeOptimistic])
 
   // Sticky bar IntersectionObserver
   const valuationCardRef = useRef<HTMLDivElement>(null)
