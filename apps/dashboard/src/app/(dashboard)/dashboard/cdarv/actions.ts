@@ -74,7 +74,14 @@ export interface CdarvReportStatus {
  * shadow model predicted (observational only; never feeds evaluation).
  * Returns null when CDARV is unavailable.
  */
+
+/** Outages cluster — after one failure, skip the probe for a minute
+ *  instead of eating the service timeout (~15s) on every report view. */
+let cdarvDownUntil = 0
+const CDARV_DOWN_MS = 60_000
+
 export async function getCdarvReportStatus(jobId: string): Promise<CdarvReportStatus | null> {
+  if (Date.now() < cdarvDownUntil) return null
   try {
     await requireUserId()
     const { getQueue, getPredictions } = await import('@/lib/cdarv-api')
@@ -93,6 +100,7 @@ export async function getCdarvReportStatus(jobId: string): Promise<CdarvReportSt
         : null,
     }
   } catch {
+    cdarvDownUntil = Date.now() + CDARV_DOWN_MS
     return null
   }
 }

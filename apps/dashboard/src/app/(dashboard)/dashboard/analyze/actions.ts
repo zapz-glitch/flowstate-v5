@@ -1,6 +1,6 @@
 'use server'
 
-import { getSession } from '@/lib/api'
+import { getSession, getSessionStrict, type Session } from '@/lib/api'
 import { getCloudflareEnv } from '@/lib/cloudflare'
 import type { DealContext } from '@/lib/deal-context'
 
@@ -1126,7 +1126,19 @@ export interface QueueAnalysisResult {
 export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnalysisResult> {
   log('queueAnalysis called', { address: request.address, skipCache: request.skipCache })
 
-  const session = await getSession()
+  let session: Session | null
+  try {
+    // getSessionStrict throws when the API is down — a transient outage is
+    // not an auth failure, and telling a signed-in user to log in sends
+    // them chasing the wrong fix.
+    session = await getSessionStrict()
+  } catch (e) {
+    logError('Session check failed — API unreachable or erroring', e)
+    return {
+      success: false,
+      error: 'The analysis service is unreachable right now — it may still be starting up. Try again in a few seconds.',
+    }
+  }
   if (!session?.user) {
     logError('User not authenticated')
     return {

@@ -13,6 +13,10 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '2mb',
     },
+    // Client router cache for dynamic pages — repeat visits within 30s reuse
+    // the streamed payload instead of a server roundtrip per click. Mutations
+    // already revalidatePath/router.refresh, so writes clear it.
+    staleTimes: { dynamic: 30 },
   },
   // Inline env vars at build time
   // NODE_ENV=production in deploy script will use .env.production values

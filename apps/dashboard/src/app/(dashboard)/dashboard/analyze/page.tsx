@@ -44,7 +44,6 @@ import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import type { CompItem } from './actions'
 import { ReportToolbar, REPORT_TOOLBAR_TILE } from '@/components/analysis/ReportToolbar'
-import { formatAddressCasing } from '@/components/analysis/format-helpers'
 
 // Keep the initial search route light; load report UI only when it is needed.
 const AnalysisPageLayout = dynamic(
@@ -173,8 +172,6 @@ export default function AnalyzePage() {
   // UI state
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
-  const searchHoverOpened = useRef(false)
-  const searchHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [durationMs, setDurationMs] = useState<number | null>(null)
 
   // Phase-based state machine
@@ -580,8 +577,11 @@ export default function AnalyzePage() {
 
   // Core analysis runner. `forceFresh` bypasses the 21-day eval-result cache —
   // used when the user explicitly picks "New Analysis" on a known address.
-  const runAnalysis = useCallback(async (forceFresh = false) => {
+  const runAnalysis = useCallback(async (forceFresh = false, targetAddress?: string) => {
     cancelRestore()
+    // Autocomplete select fires in the same tick as onChange — the state
+    // read would be a beat stale, so the picked address threads through.
+    const target = (targetAddress ?? address).trim()
     // Explicit rerun with results on screen: keep them mounted so the page
     // doesn't blank for the whole pipeline — SSE events overwrite them
     // progressively as fresh data arrives.
@@ -613,7 +613,7 @@ export default function AnalyzePage() {
       } : undefined
 
       const response = await queueAnalysis({
-        address: address.trim(),
+        address: target,
         // maxComps omitted — pool size is system config on the API
         // (COMPARABLE_CANDIDATE_LIMIT, provider max 100), not a client choice.
         searchOptions: { radiusMiles: 1, monthsBack: 12 },
@@ -629,10 +629,10 @@ export default function AnalyzePage() {
         if (response.alreadyRunning) {
           toast.info('Analysis already running — joining the live evaluation')
         }
-        setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
+        setActiveAnalysis({ jobId: response.jobId ?? '', address: target })
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'processing' })
         try {
-          localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId: response.jobId ?? '', address: address.trim(), savedAt: Date.now() }))
+          localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId: response.jobId ?? '', address: target, savedAt: Date.now() }))
         } catch { /* ignore */ }
 
         // Result streams via SSE — connect immediately
@@ -692,12 +692,13 @@ export default function AnalyzePage() {
   }, [analysisResult, address, displayValuation, compOverride])
 
   // Entry point — checks for existing reports first
-  const handleAnalyze = useCallback(async () => {
-    if (!address.trim()) return
+  const handleAnalyze = useCallback(async (targetAddress?: string) => {
+    const target = (targetAddress ?? address).trim()
+    if (!target) return
     cancelRestore()
 
     try {
-      const { reports } = await getReportsByProperty({ address: address.trim() })
+      const { reports } = await getReportsByProperty({ address: target })
       if (reports.length > 0) {
         setExistingReports(reports)
         setShowExistingDialog(true)
@@ -707,7 +708,7 @@ export default function AnalyzePage() {
       // Lookup failed — proceed with analysis
     }
 
-    runAnalysis()
+    runAnalysis(false, target)
   }, [address, runAnalysis, cancelRestore])
 
   // Auto-retry after "Apply & Retry"
@@ -751,21 +752,6 @@ export default function AnalyzePage() {
   // ─── Layout Flags ────────────────────────────────────────────────────────
 
   const isSearchCollapsed = isActive && !searchExpanded
-  // Hover-open · resting on the address opens the search form; leaving closes it again,
-  // unless the user clicked or typed in it (then it stays until they close it).
-  const openSearchOnHover = () => {
-    if (searchHoverTimer.current) clearTimeout(searchHoverTimer.current)
-    searchHoverTimer.current = setTimeout(() => { searchHoverOpened.current = true; setSearchExpanded(true) }, 200)
-  }
-  const cancelSearchHover = () => {
-    if (searchHoverTimer.current) { clearTimeout(searchHoverTimer.current); searchHoverTimer.current = null }
-  }
-  const closeSearchOnLeave = () => {
-    if (!searchHoverOpened.current) return
-    cancelSearchHover()
-    searchHoverTimer.current = setTimeout(() => { searchHoverOpened.current = false; setSearchExpanded(false) }, 350)
-  }
-  const pinSearch = () => { searchHoverOpened.current = false; cancelSearchHover() }
   const hasMapData = isValidCoordinate({ lat: renderData?.subject?.latitude, lng: renderData?.subject?.longitude })
   const showTwoColumn = isActive && hasMapData
 
@@ -786,19 +772,28 @@ export default function AnalyzePage() {
       )}>
       {phase === 'idle' && !error && <PageHeader title="Property Search" />}
 
-      {/* Input Form — collapses to compact bar once active */}
+      {/* Input Form — collapses to compact bar once active. The bar's input
+          stays editable: type or pick a suggestion and the run starts on
+          its own — Enter also runs. The chevron still opens the full card
+          for Advanced options. */}
       {isSearchCollapsed ? (
         <ReportToolbar
-          onClick={() => { pinSearch(); setSearchExpanded(true) }}
-          onAddressEnter={openSearchOnHover}
-          onAddressLeave={cancelSearchHover}
+          allowOverflow
           lead={
             <div className={REPORT_TOOLBAR_TILE}>
               <Search className="w-3.5 h-3.5 text-primary" />
             </div>
           }
-          tooltip={activeAnalysis?.address || address || undefined}
-          title={formatAddressCasing(activeAnalysis?.address || address) || 'Search an address...'}
+          title={
+            <AddressAutocomplete
+              value={address}
+              onChange={(value) => { cancelRestore(); setAddress(value) }}
+              onSelect={(result) => { if (!isFetching) handleAnalyze(result.address) }}
+              onSubmit={() => { if (!isFetching && address.trim()) handleAnalyze() }}
+              className="flex-1"
+              disabled={isFetching}
+            />
+          }
           subline={
             <>
               {error && (
@@ -846,10 +841,6 @@ export default function AnalyzePage() {
         <div
           data-surface="card"
           className="relative z-20 border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom"
-          onMouseEnter={cancelSearchHover}
-          onMouseLeave={closeSearchOnLeave}
-          onMouseDownCapture={pinSearch}
-          onKeyDownCapture={pinSearch}
         >
           {/* Title and the collapse arrow · only while a property is loaded. With nothing
               loaded the page header above is the title. */}
@@ -871,6 +862,12 @@ export default function AnalyzePage() {
               <AddressAutocomplete
                 value={address}
                 onChange={(value) => { cancelRestore(); setAddress(value) }}
+                onSelect={(result) => {
+                  if (!isFetching) {
+                    handleAnalyze(result.address)
+                    setSearchExpanded(false)
+                  }
+                }}
                 onSubmit={() => {
                   if (!isFetching && address.trim()) {
                     handleAnalyze()

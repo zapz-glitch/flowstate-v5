@@ -42,17 +42,18 @@ const analysis = (revision = 0, selected = ['a'], arv = 600000) => ({
 })
 const settle = () => new Promise(resolve => setImmediate(resolve))
 
-test('Python comp changes are atomic, revisioned, locked during requests and reset through the server', async () => {
+test('Python comp changes apply optimistically, stay revisioned, and reset through the server', async () => {
   const h = harness(), original = analysis()
   let view = h.render(original)
-  view.handleToggleComp('b')
   view.handleToggleComp('b')
   assert.equal(h.requests.length, 1)
   assert.equal(JSON.stringify(h.requests[0].args), JSON.stringify(['job-test', ['a', 'b'], 0]))
   view = h.render(original)
+  // The click applies instantly — the box flips before the server answers;
+  // the valuation still waits for the authoritative response.
   assert.equal(view.displayValuation, original.valuation)
   assert.ok(view.displayComps.items.every(comp => comp.selectionPending))
-  assert.equal(view.compOverride.selectedCompKeys.size, 1)
+  assert.equal(view.compOverride.selectedCompKeys.size, 2)
   const added = analysis(1, ['a', 'b'], 650000)
   h.requests[0].resolve(added)
   await settle()

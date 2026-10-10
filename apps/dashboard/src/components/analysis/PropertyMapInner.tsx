@@ -37,6 +37,16 @@ const markerIcon = (marker: MapMarker, active: boolean, index: number): google.m
   if (marker.type === 'subject') {
     return { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: fill, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
   }
+  // Excluded comps get the bare numbered dot — no tag. In a tight cluster the
+  // wide price tags bury each other (and the picks); the dot stays clickable
+  // and its hover card still carries price/match/condition.
+  if (marker.type === 'comp-disabled') {
+    const dot = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">`
+      + `<circle cx="12" cy="12" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
+      + `<text x="12" y="12" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="${active ? '#fff' : markerNumberColor(marker.type)}">${index}</text>`
+      + '</svg>'
+    return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(dot)}`, anchor: new google.maps.Point(12, 12), size: new google.maps.Size(24, 24) }
+  }
   // Dot with the card number inside; beside it a white tag in the studio's manner: hairline edge,
   // ink text set left. Sale price, then how the comp sits against the subject (green when it matches),
   // then the property condition.
@@ -74,6 +84,12 @@ const markerIcon = (marker: MapMarker, active: boolean, index: number): google.m
 // Where the pointer is · module scope, because the map layer remounts (for example when a dialog
 // opens) and the position is needed at the first hover after that.
 const lastPointer: { current: Point | null } = { current: null }
+
+// Stacking order: picks sit above excluded dots so a cluster can never bury
+// the green; the hovered/active marker wins over everything.
+const baseZIndex = (marker: MapMarker) =>
+  marker.type === 'subject' ? 100 : marker.type === 'comp-disabled' ? 10 : 50
+const ACTIVE_ZINDEX = 110
 
 function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
   markers: MapMarker[]; activeMarkerKey?: string | null; onMarkerClick: (marker: MapMarker) => void
@@ -141,7 +157,7 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
         map, position: marker, title: marker.type === 'subject' ? marker.label : undefined,
         icon: iconFor(marker, markerKey(marker) === activeKey.current, index),
         label: marker.type === 'subject' ? { text: 'S', color: '#fff', fontSize: '10px' } : undefined,
-        zIndex: marker.type === 'subject' ? 100 : 10,
+        zIndex: baseZIndex(marker),
       })
       if (marker.type === 'subject' || !marker.compKey) {
         instance.addListener('click', () => onMarkerClick(marker))
@@ -179,7 +195,11 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
     previousActive.current = activeMarkerKey
     instances.current.forEach(({ marker, instance }, index) => {
       const key = markerKey(marker)
-      if (key === activeMarkerKey || key === previous) instance.setIcon(iconFor(marker, key === activeMarkerKey, index))
+      if (key === activeMarkerKey || key === previous) {
+        const active = key === activeMarkerKey
+        instance.setIcon(iconFor(marker, active, index))
+        instance.setZIndex(active ? ACTIVE_ZINDEX : baseZIndex(marker))
+      }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMarkerKey, markers, map])
@@ -192,6 +212,24 @@ function NativeMapCamera({ mapRef }: { mapRef: MutableRefObject<google.maps.Map 
     mapRef.current = map
     return () => { if (mapRef.current === map) mapRef.current = null }
   }, [map, mapRef])
+  return null
+}
+
+// Card hover pulls the comp into frame — the marker is already highlighted
+// by activeMarkerKey, this just recenters when it sits outside the view.
+// A short dwell keeps a pointer sweep down the list from flying the camera.
+function CompAutoPan({ markers, activeMarkerKey }: { markers: MapMarker[]; activeMarkerKey?: string | null }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!map || !activeMarkerKey) return
+    const timer = setTimeout(() => {
+      const marker = markers.find((m) => markerKey(m) === activeMarkerKey)
+      if (!marker || marker.type === 'subject') return
+      const bounds = map.getBounds()
+      if (bounds && !bounds.contains(marker)) map.panTo(marker)
+    }, 180)
+    return () => clearTimeout(timer)
+  }, [map, activeMarkerKey, markers])
   return null
 }
 
@@ -391,6 +429,7 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
             zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
             <NativeMapCamera mapRef={nativeMap} />
             <FullscreenRightClickExit />
+            <CompAutoPan markers={correctedMarkers} activeMarkerKey={activeMarkerKey} />
             <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} />
           </Map> : <div role="status" className="p-4 text-sm">Loading 3D map…</div>)}
         {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}

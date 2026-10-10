@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
+import { EvalTimer } from './eval-timer'
 import { ComparablesSection, type CompSelectionStats } from './ComparablesSection'
 import { DecisionTrail } from './DecisionTrail'
 import { DealSummaryHero } from './DealSummaryHero'
@@ -200,6 +201,7 @@ export function AnalysisResultLayout({
         <div className="flex items-center gap-2 px-1">
           <Loader2 className="w-3 h-3 text-primary animate-spin" />
           <span className="text-caption text-foreground-tertiary">{statusLabel}</span>
+          <EvalTimer />
         </div>
       )}
 
@@ -211,6 +213,7 @@ export function AnalysisResultLayout({
           <div role="status" className="absolute left-1/2 top-12 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sm border border-border bg-background px-3 py-1.5 shadow-sm animate-in fade-in duration-300">
             <Loader2 className="w-3 h-3 text-primary animate-spin" />
             <span className="text-caption text-foreground-secondary whitespace-nowrap">{statusLabel}</span>
+            <EvalTimer />
           </div>
         )}
         <div
