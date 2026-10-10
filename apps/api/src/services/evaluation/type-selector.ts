@@ -69,27 +69,42 @@ export async function runTypeSelector(
     return base
   }
 
-  const eligible = ranked.filter((r) => r.audit.verdict === 'eligible')
+  // The reasoning model burns its whole budget thinking per-row — 30 rows
+  // starved an 8k answer to zero content (finish_reason length, all
+  // reasoning tokens). The top-12 by tier/diffs/geo is the candidate set
+  // that answers in seconds.
+  const MODEL_CAP = 12
+  const GEO_RANK: Record<string, number> = { BLOCK_GROUP: 0, NEIGHBORHOOD: 1, SUBDIVISION: 2, TRACT: 3, OFF_POCKET: 4 }
+  const eligible = ranked
+    .filter((r) => r.audit.verdict === 'eligible')
+    .sort((a, b) =>
+      tierOf(a) - tierOf(b)
+      || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
+      || (GEO_RANK[a.profile.geoTier] ?? 9) - (GEO_RANK[b.profile.geoTier] ?? 9)
+      || String(b.comp.saleDate ?? '').localeCompare(String(a.comp.saleDate ?? '')))
+    .slice(0, MODEL_CAP)
   if (eligible.length === 0) return base
 
   const subject = evidence.subject
-  const rows = eligible.map((r) => ({
-    id: r.id,
-    tier: tierOf(r),
-    address: r.comp.address,
-    salePrice: r.comp.salePrice,
-    ppsf: Math.round(r.ppsf),
-    sqft: r.comp.squareFeet,
-    beds: r.comp.bedrooms,
-    baths: r.comp.bathrooms,
-    yearBuilt: r.comp.yearBuilt,
-    lotSqft: r.comp.lotSizeSquareFeet,
-    saleDate: r.comp.saleDate,
-    distanceMi: r.comp.distanceMiles != null ? Math.round(r.comp.distanceMiles * 10) / 10 : null,
-    geo: r.labels?.geo ?? r.profile.geoTier,
-    labels: r.labels ?? {},
-    priceGroup: r.group,
-  }))
+  const rows = eligible.map((r) => {
+    const l = r.labels
+    return {
+      id: r.id,
+      tier: tierOf(r),
+      salePrice: r.comp.salePrice,
+      ppsf: Math.round(r.ppsf),
+      sqft: r.comp.squareFeet,
+      beds: r.comp.bedrooms,
+      baths: r.comp.bathrooms,
+      yearBuilt: r.comp.yearBuilt,
+      lotSqft: r.comp.lotSizeSquareFeet,
+      saleDate: r.comp.saleDate,
+      distMi: r.comp.distanceMiles != null ? Math.round(r.comp.distanceMiles * 10) / 10 : null,
+      geo: l?.geo ?? r.profile.geoTier,
+      lbl: l ? `sqft:${l.sqft}|yr:${l.year}|lot:${l.lot}|style:${l.style}|sale:${l.saleAge}|${l.pricePosition}→${l.priceEvidence}|${l.sanity}|diffs:${l.diffs}` : '',
+      group: r.group,
+    }
+  })
 
   const sys =
     'You are the comp-selection seat of a supervised appraisal lane. ' +
