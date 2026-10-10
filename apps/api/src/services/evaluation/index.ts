@@ -56,7 +56,7 @@ import type {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
-import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
+import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
@@ -907,6 +907,12 @@ export async function performAnalysisPhase1(
   const subjectStreetViewPromise = observablesOn
     ? fetchStreetViewTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
+  // Subject wide aerial — fetched once, shared by every comp call's c12
+  // development-vintage read (the comp's aerial vs the subject's, one
+  // comparative judgment).
+  const subjectSatellitePromise = observablesOn
+    ? fetchSatelliteTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
+    : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
     ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
@@ -974,6 +980,7 @@ export async function performAnalysisPhase1(
                   latitude: comp.latitude ?? null,
                   longitude: comp.longitude ?? null,
                   subjectStreetViewImage: await subjectStreetViewPromise,
+                  subjectSatelliteImage: await subjectSatellitePromise,
                   subjectRef: {
                     squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
                     lotSizeAcres: bundle.property.lotSizeAcres,

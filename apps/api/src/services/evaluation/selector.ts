@@ -218,6 +218,18 @@ export function runDeterministicSelector(
     // R2 physical eligibility — gross mismatch excludes; recoverable
     // differences are adjustments that ride the pick, not rejections.
     const phys = physicalEligibility(profile, profile.geoTier === 'BLOCK_GROUP')
+    // R2 development-era — the satellite read says the comp sits in a
+    // visibly newer subdivision than the subject AND the year band
+    // confirms it (≥10y newer): different housing stock, not an
+    // apples-to-apples sale. The visual read alone stays a recoverable
+    // caution — aerials can misjudge infill.
+    const vintage = (comp.observables as { developmentVintage?: string | null } | null | undefined)?.developmentVintage
+    const yDelta = comp.yearBuilt != null && subject.yearBuilt != null ? comp.yearBuilt - subject.yearBuilt : null
+    if (vintage === 'NEWER' && yDelta != null && yDelta >= 10) {
+      phys.excludes.push(`R2 development-era mismatch — aerial reads a newer subdivision (+${yDelta}y built)`)
+    } else if (vintage === 'NEWER' || vintage === 'OLDER') {
+      audit.recoverable.push(`aerial reads ${vintage === 'NEWER' ? 'a newer' : 'an older'} development era`)
+    }
     if (phys.excludes.length) {
       audit.verdict = 'excluded'
       audit.rules.push('R2')

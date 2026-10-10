@@ -17,6 +17,7 @@
  */
 
 import { decisionsRun, isDecisionsAvailable } from '../decisions'
+import { RENOVATION_LEVEL_DEFINITIONS } from '../vision/renovation'
 import { fetchImagesAsBase64, fetchImageAsBase64 } from '../llm/image-utils'
 import type { Env } from '../../types'
 
@@ -134,6 +135,14 @@ const COND_CHOICES = {
   DISTRESSED: 'visible damage, deferred maintenance, or heavy wear',
   UNVERIFIED: 'evidence does not support a condition call',
 }
+// Condition answered in the product's own renovation-tier vocabulary —
+// the same REHAB_LEVELS criteria the Evaluation Settings expose, so the
+// model picks a tier against the user's reference text, not adjectives.
+const TIER_COND_CHOICES = {
+  ...Object.fromEntries(
+    RENOVATION_LEVEL_DEFINITIONS.map((d) => [d.name.toUpperCase().replace(/ /g, '_'), d.criteria])),
+  UNVERIFIED: 'evidence does not support a tier call',
+}
 const TIER_CHOICES = {
   ABOVE_MEDIAN: 'priced above the supplied pocket median band',
   MEDIAN: 'priced at or near the supplied pocket median band',
@@ -204,6 +213,11 @@ const SUBJECT_QUESTIONS = {
   s9e_east: { type: 'noul' as const, instructions: 'On the EAST edge of the aerial frames (right of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel east boundary; 0 when the east edge borders only homes, yards, woods, or a quiet residential street.' },
   s9e_south: { type: 'noul' as const, instructions: 'On the SOUTH edge of the aerial frames (bottom of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel south boundary; 0 when the south edge borders only homes, yards, woods, or a quiet residential street.' },
   s9e_west: { type: 'noul' as const, instructions: 'On the WEST edge of the aerial frames (left of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel west boundary; 0 when the west edge borders only homes, yards, woods, or a quiet residential street.' },
+  s10_renovation_tier: {
+    type: 'choice' as const,
+    criteria: TIER_COND_CHOICES,
+    instructions: 'Which approved renovation tier best fits the scope of work the SUBJECT needs to reach finished retail condition, based on the photos and description? Judge the work required, not curb appeal alone — LIPSTICK is paint-level only, FULL_GUT is studs-out reconstruction; partial demo or a dated kitchen alone stays at Heavy Rehab or below. UNVERIFIED when the photos cannot support a tier.',
+  },
 }
 
 const COMP_QUESTIONS = {
@@ -250,11 +264,26 @@ const COMP_QUESTIONS = {
   },
   c10_physical_match: {
     type: 'noul' as const,
-    instructions: 'When street-view images are supplied (the SUBJECT street view comes LAST), score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when images are absent or the styles clearly differ.',
+    instructions: 'When street-view images are supplied (the SUBJECT street view comes second-to-last, before the SUBJECT aerial), score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when images are absent or the styles clearly differ.',
   },
   c11_arv_fitness: {
     type: 'noul' as const,
     instructions: 'Score the probability that this COMP represents a finished, renovated, or move-in-ready version of the subject property — an ARV-grade sale. Highest scores: newly renovated or flipper-complete listings (description emphasizes new this, new that). Around 70-80: move-in ready, lived-in condition with updated big-ticket items. Lowest scores: investor sales or listings needing full renovation — fixer upper, TLC, sweat equity, bring your vision, as-is keywords.',
+  },
+  c12_development_vintage: {
+    type: 'choice' as const,
+    criteria: {
+      NEWER: "the development around the COMP clearly reads as a newer, more modern subdivision than the one around the SUBJECT",
+      SIMILAR: 'the developments around both read as the same era of housing stock',
+      OLDER: "the development around the COMP clearly reads as an older, more dated subdivision than the one around the SUBJECT",
+      UNVERIFIED: 'aerials missing or the neighborhoods cannot be compared',
+    },
+    instructions: 'Compare the two satellite aerials: the COMP aerial is earlier in the image set, the SUBJECT aerial is the LAST image. Judge the NEIGHBORHOOD around each centered parcel — housing-stock era, lot and street pattern, tract development vs infill — not the individual houses. A comp sitting in a visibly newer subdivision is different housing stock than the subject even when the houses look alike. Answer NEWER only when the surrounding development is clearly a different (newer) era; SIMILAR when the neighborhoods read as the same vintage; UNVERIFIED when either aerial is missing or unreadable.',
+  },
+  c13_condition_tier: {
+    type: 'choice' as const,
+    criteria: TIER_COND_CHOICES,
+    instructions: 'Using the cover photo and listing description, which approved renovation tier best describes the scope of work this COMP represents or needs? Judge condition evidence only — a top-tier price does not prove renovation. A comp that shows fully updated kitchen/baths/flooring reads FULL_COSMETIC or better; obvious deferred maintenance or damage reads HEAVY_REHAB/FULL_GUT. UNVERIFIED when no photo or description exists.',
   },
 }
 
@@ -373,6 +402,10 @@ export interface SubjectObservables {
     streetEdge: string | null
     streetBearingDeg: number | null
   }
+  /** Scope of work the subject needs, in the product's rehab-tier
+   *  vocabulary (LIPSTICK … FULL_GUT) — the model picked against the
+   *  Evaluation Settings criteria. */
+  renovationTier: string | null
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
@@ -398,6 +431,13 @@ export interface CompObservables {
   premiumAttributes: string | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
+  /** Development-era comparison from both aerials — NEWER means the comp
+   *  sits in a visibly newer subdivision than the subject (different
+   *  housing stock, not apples-to-apples). */
+  developmentVintage: string | null
+  /** Comp condition in the product's rehab-tier vocabulary — the model
+   *  picked against the Evaluation Settings criteria (photo+description). */
+  conditionTier: string | null
   /** P(comp is a physical match to the subject) — street view lane. */
   physicalMatchP: number | null
   /** P(comp is a finished/renovated/move-in-ready version of the subject) —
@@ -441,8 +481,9 @@ async function fetchTile(url: string) {
  *  Static API enabled on the key — it is NOT enabled on the current
  *  project, so this 403s today) → Esri World Imagery (sharpest fallback
  *  aerial) → USGS imagery+topo hybrid (aerial + road/place labels,
- *  US-only, no key). Null when coords/fetch miss. */
-async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>, half = 300) {
+ *  US-only, no key). Null when coords/fetch miss. Exported — evaluation
+ *  shares one subject wide-aerial fetch across every comp c12 call. */
+export async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>, half = 300) {
   const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
   const key = env.GOOGLE_MAPS_KEY
@@ -683,6 +724,7 @@ export async function decisionsSubjectObservables(
       streetEdge: orientation?.streetEdge ?? null,
       streetBearingDeg: orientation?.bearingDeg ?? null,
     },
+    renovationTier: choiceOf(merged, 's10_renovation_tier'),
     confidence: confs(merged),
     photosRead: imgs.length,
     photosTotal: urls.length,
@@ -710,6 +752,9 @@ export async function decisionsCompObservables(
     /** Subject street-view image for the c10 physical-similarity lane —
      *  fetched once per eval and shared across every comp call. */
     subjectStreetViewImage?: { base64: string; content_type?: string } | null
+    /** Subject wide satellite aerial for the c12 development-vintage lane —
+     *  fetched once per eval and shared across every comp call. */
+    subjectSatelliteImage?: { base64: string; content_type?: string } | null
     /** Subject's geo/physical fields — feeds the code-computed matchProfile. */
     subjectRef?: MatchLike
     benchmark: PocketBenchmark | null
@@ -744,6 +789,7 @@ export async function decisionsCompObservables(
       ...(satCloseImg ? ['comp satellite close-up (~180m — comp parcel centered)'] : []),
       ...(streetImg ? ['comp street view'] : []),
       ...(input.subjectStreetViewImage ? ['SUBJECT street view'] : []),
+      ...(input.subjectSatelliteImage ? ['SUBJECT satellite aerial (wide ~600m — subject parcel centered)'] : []),
     ],
     doctrine: DECISIONS_DOCTRINE,
     rules: [
@@ -764,6 +810,7 @@ export async function decisionsCompObservables(
       ...(satCloseImg ? [{ content_type: satCloseImg.content_type, base64: satCloseImg.base64 }] : []),
       ...(streetImg ? [{ content_type: streetImg.content_type, base64: streetImg.base64 }] : []),
       ...(input.subjectStreetViewImage ? [{ content_type: input.subjectStreetViewImage.content_type, base64: input.subjectStreetViewImage.base64 }] : []),
+      ...(input.subjectSatelliteImage ? [{ content_type: input.subjectSatelliteImage.content_type, base64: input.subjectSatelliteImage.base64 }] : []),
     ],
   }).catch(() => null)
   const a = (res?.answers ?? {}) as DecisionsAnswers
@@ -781,6 +828,8 @@ export async function decisionsCompObservables(
     finalTier: choiceOf(a, 'c7_final_tier'),
     premiumAttributes: choiceOf(a, 'c8_premium_attributes'),
     siteExposure: choiceOf(a, 'c9_site_exposure'),
+    developmentVintage: choiceOf(a, 'c12_development_vintage'),
+    conditionTier: choiceOf(a, 'c13_condition_tier'),
     physicalMatchP: probOf(a, 'c10_physical_match'),
     arvFitnessP: probOf(a, 'c11_arv_fitness'),
     confidence: confs(a),
