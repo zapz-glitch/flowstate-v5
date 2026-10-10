@@ -84,9 +84,9 @@ function getStatusLabel(step: AnalysisStep | null): string {
 }
 
 /** Reads evalProgressAtom — SSE ticks re-render this leaf, not the whole page. */
-function EvalProgressLabel() {
+function EvalProgressLabel({ fallback = 'Evaluating comparables...' }: { fallback?: string }) {
   const evalProgress = useAtomValue(evalProgressAtom)
-  return <>{evalProgress ?? 'Evaluating comparables...'}</>
+  return <>{evalProgress ?? fallback}</>
 }
 
 function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: number }) {
@@ -180,6 +180,7 @@ export default function AnalyzePage() {
   const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
   // Atom, not useState — eval_progress SSE ticks re-render only the label leaf.
   const setEvalProgress = useSetAtom(evalProgressAtom)
+  const picksShownRef = useRef(false)
   const setPermitProgress = useSetAtom(permitProgressAtom)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
@@ -331,20 +332,26 @@ export default function AnalyzePage() {
             },
           } as AnalyzeData) : prev)
         }
-        if (data.arv) setEvalProgress(`Picked ${pickIds.size || 0} comp(s) · ARV $${Number(data.arv).toLocaleString()}${data.conf ? ` (${data.conf})` : ''}`)
+        if (data.arv) {
+          setEvalProgress(`Picked ${pickIds.size || 0} comp(s) · ARV $${Number(data.arv).toLocaleString()}${data.conf ? ` (${data.conf})` : ''}`)
+          picksShownRef.current = true
+        }
         break
       }
 
+      // Progress is reset at run start; clearing here would wipe the
+      // geo_done pocket line that lands before evaluation starts.
       case 'evaluation_started':
         if (!isAiOnly) setStreamingStep('evaluating')
-        setEvalProgress(null)
         break
 
       case 'eval_progress': {
         // Permit stages go to the Permits row; every other message is the evaluation's own label
         const permitStage = permitProgressFromEvent(data)
         if (permitStage) setPermitProgress(permitStage)
-        else if (typeof data.message === 'string') setEvalProgress(data.message)
+        // The picks/ARV line holds until completion — phase-2 bookkeeping
+        // ticks would otherwise replace it within milliseconds.
+        else if (typeof data.message === 'string' && !picksShownRef.current) setEvalProgress(data.message)
         break
       }
 
@@ -642,6 +649,7 @@ export default function AnalyzePage() {
     aiOnlyModeRef.current = false
     setStreamingStep('idle')
     setEvalProgress(null)
+    picksShownRef.current = false
     setPermitProgress(null)
     setPhase('fetching')
     lastEventAtRef.current = Date.now()
@@ -1051,7 +1059,7 @@ export default function AnalyzePage() {
             streamingStep === 'idle' && isFetching ? 'Starting analysis...'
             : streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
-            : streamingStep === 'comps' ? 'Enriching comp details...'
+            : streamingStep === 'comps' ? <EvalProgressLabel fallback="Enriching comp details..." />
             : streamingStep === 'evaluating' ? <EvalProgressLabel />
             : null
           }

@@ -650,7 +650,8 @@ export class AnalysisJobDO {
     const digestReaderOn = this.env.CONDITION_READER === 'decisions'
       ? !!this.env.OPENAI_API_KEY
       : isClefAvailable(this.env)
-    const clefDigestsOn = this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && digestReaderOn
+    // typescript lane: provider math only — no listing scrape or digest reads.
+    const clefDigestsOn = config.harness !== 'typescript' && this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && digestReaderOn
     // Comp evidence (listing fetch + condition classify) is core input to
     // the agent harness — Opus's per-comp tier/coverage reads come from
     // it. The CLEF flag gates only the legacy shadow lane; an agent run
