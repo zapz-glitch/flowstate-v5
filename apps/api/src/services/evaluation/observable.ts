@@ -250,11 +250,21 @@ const COMP_QUESTIONS = {
   },
   c10_physical_match: {
     type: 'noul' as const,
-    instructions: 'When street-view images are supplied (the SUBJECT street view comes LAST), score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when images are absent or the styles clearly differ.',
+    instructions: 'When street-view images are supplied (the SUBJECT street view comes second-to-last, before the SUBJECT aerial), score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when images are absent or the styles clearly differ.',
   },
   c11_arv_fitness: {
     type: 'noul' as const,
     instructions: 'Score the probability that this COMP represents a finished, renovated, or move-in-ready version of the subject property — an ARV-grade sale. Highest scores: newly renovated or flipper-complete listings (description emphasizes new this, new that). Around 70-80: move-in ready, lived-in condition with updated big-ticket items. Lowest scores: investor sales or listings needing full renovation — fixer upper, TLC, sweat equity, bring your vision, as-is keywords.',
+  },
+  c12_development_vintage: {
+    type: 'choice' as const,
+    criteria: {
+      NEWER: "the development around the COMP clearly reads as a newer, more modern subdivision than the one around the SUBJECT",
+      SIMILAR: 'the developments around both read as the same era of housing stock',
+      OLDER: "the development around the COMP clearly reads as an older, more dated subdivision than the one around the SUBJECT",
+      UNVERIFIED: 'aerials missing or the neighborhoods cannot be compared',
+    },
+    instructions: 'Compare the two satellite aerials: the COMP aerial is earlier in the image set, the SUBJECT aerial is the LAST image. Judge the NEIGHBORHOOD around each centered parcel — housing-stock era, lot and street pattern, tract development vs infill — not the individual houses. A comp sitting in a visibly newer subdivision is different housing stock than the subject even when the houses look alike. Answer NEWER only when the surrounding development is clearly a different (newer) era; SIMILAR when the neighborhoods read as the same vintage; UNVERIFIED when either aerial is missing or unreadable.',
   },
 }
 
@@ -398,6 +408,10 @@ export interface CompObservables {
   premiumAttributes: string | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
+  /** Development-era comparison from both aerials — NEWER means the comp
+   *  sits in a visibly newer subdivision than the subject (different
+   *  housing stock, not apples-to-apples). */
+  developmentVintage: string | null
   /** P(comp is a physical match to the subject) — street view lane. */
   physicalMatchP: number | null
   /** P(comp is a finished/renovated/move-in-ready version of the subject) —
@@ -441,8 +455,9 @@ async function fetchTile(url: string) {
  *  Static API enabled on the key — it is NOT enabled on the current
  *  project, so this 403s today) → Esri World Imagery (sharpest fallback
  *  aerial) → USGS imagery+topo hybrid (aerial + road/place labels,
- *  US-only, no key). Null when coords/fetch miss. */
-async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>, half = 300) {
+ *  US-only, no key). Null when coords/fetch miss. Exported — evaluation
+ *  shares one subject wide-aerial fetch across every comp c12 call. */
+export async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>, half = 300) {
   const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
   const key = env.GOOGLE_MAPS_KEY
@@ -710,6 +725,9 @@ export async function decisionsCompObservables(
     /** Subject street-view image for the c10 physical-similarity lane —
      *  fetched once per eval and shared across every comp call. */
     subjectStreetViewImage?: { base64: string; content_type?: string } | null
+    /** Subject wide satellite aerial for the c12 development-vintage lane —
+     *  fetched once per eval and shared across every comp call. */
+    subjectSatelliteImage?: { base64: string; content_type?: string } | null
     /** Subject's geo/physical fields — feeds the code-computed matchProfile. */
     subjectRef?: MatchLike
     benchmark: PocketBenchmark | null
@@ -744,6 +762,7 @@ export async function decisionsCompObservables(
       ...(satCloseImg ? ['comp satellite close-up (~180m — comp parcel centered)'] : []),
       ...(streetImg ? ['comp street view'] : []),
       ...(input.subjectStreetViewImage ? ['SUBJECT street view'] : []),
+      ...(input.subjectSatelliteImage ? ['SUBJECT satellite aerial (wide ~600m — subject parcel centered)'] : []),
     ],
     doctrine: DECISIONS_DOCTRINE,
     rules: [
@@ -764,6 +783,7 @@ export async function decisionsCompObservables(
       ...(satCloseImg ? [{ content_type: satCloseImg.content_type, base64: satCloseImg.base64 }] : []),
       ...(streetImg ? [{ content_type: streetImg.content_type, base64: streetImg.base64 }] : []),
       ...(input.subjectStreetViewImage ? [{ content_type: input.subjectStreetViewImage.content_type, base64: input.subjectStreetViewImage.base64 }] : []),
+      ...(input.subjectSatelliteImage ? [{ content_type: input.subjectSatelliteImage.content_type, base64: input.subjectSatelliteImage.base64 }] : []),
     ],
   }).catch(() => null)
   const a = (res?.answers ?? {}) as DecisionsAnswers
@@ -781,6 +801,7 @@ export async function decisionsCompObservables(
     finalTier: choiceOf(a, 'c7_final_tier'),
     premiumAttributes: choiceOf(a, 'c8_premium_attributes'),
     siteExposure: choiceOf(a, 'c9_site_exposure'),
+    developmentVintage: choiceOf(a, 'c12_development_vintage'),
     physicalMatchP: probOf(a, 'c10_physical_match'),
     arvFitnessP: probOf(a, 'c11_arv_fitness'),
     confidence: confs(a),
