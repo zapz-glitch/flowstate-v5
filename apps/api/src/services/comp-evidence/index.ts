@@ -353,71 +353,35 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
-  // Redfin stingray is the fast path (~2-5s structured JSON); the Zillow
-  // scrape chain is the fallback (~15-45s rendered). Zillow gets a short
-  // head start the moment Redfin misses or stalls past 3s — a straggler
-  // comp must not serialize behind a failed first source — while Redfin
-  // still wins whenever it returns real evidence.
-  let photos: PropertyPhotos | null = null
-  const redfinPromise = fetchRedfinListing(env, comp).catch(() => null)
-  const zillowFetch = async (): Promise<PropertyPhotos | null> => {
+  // Owner-specified chain: the Redfin listing provider (Scrapfly scrape of
+  // the redfin.com listing page) is primary; the stingray fast-fetch is the
+  // fallback — its direct calls break under concurrency, so it only starts
+  // when the scrape misses or stalls. When the scrape stalls past 5s,
+  // stingray launches in parallel so a slow scrape can't starve the comp
+  // past the 30s batch deadline — the scrape's result still wins if it
+  // lands first. No Zillow in the lookup chain.
+  const scrapePromise = (async (): Promise<PropertyPhotos | null> => {
     try {
-      const photoService = createPhotoService(env, { provider: 'zillow' })
+      const photoService = createPhotoService(env, { provider: 'redfin', fallbacks: ['realtor'] })
       if (!photoService.isAvailable()) return null
       const result = await photoService.fetchPhotos(comp, {
         maxPhotos: 8,
         includeDescription: true,
         includePriceHistory: false,
       })
-      return result.success ? result.data : null
+      return result.success && result.data.photos.length > 0 ? result.data : null
     } catch { return null }
-  }
-  const zillowPromise = (async (): Promise<PropertyPhotos | null> => {
-    const first = await Promise.race([
-      redfinPromise,
-      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 3000)),
-    ])
-    if (first) return null // redfin already delivered — no scrape needed
-    return zillowFetch() // redfin missed or is still in flight at 3s
   })()
-  try {
-    photos = await redfinPromise
-  } catch { photos = null }
-  if (!photos) {
-    try {
-      photos = await zillowPromise
-    } catch (error) {
-      evidence.skippedReason = error instanceof Error ? error.message : 'listing fetch failed'
-      return evidence
-    }
-  }
-
-  // No listing found — Google the property for photos via Firecrawl
-  // image search before the comp goes unclassified. Photos should
-  // never be missing: listing chain first, web image lookup second.
-  if (!photos && env.FIRECRAWL_API_KEY) {
-    try {
-      const res = await fetch('https://api.firecrawl.dev/v2/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.FIRECRAWL_API_KEY}` },
-        body: JSON.stringify({
-          query: `${comp.address}, ${comp.city}, ${comp.state} ${comp.zipCode ?? ''} home exterior`,
-          limit: 10,
-          sources: [{ type: 'images' }],
-        }),
-        signal: AbortSignal.timeout(30000),
-      })
-      if (res.ok) {
-        const data = (await res.json()) as { data?: { images?: Array<{ imageUrl?: string }> } }
-        const urls = (data.data?.images ?? [])
-          .map((i) => i.imageUrl)
-          .filter((u): u is string => !!u && /^https?:\/\//.test(u))
-          .slice(0, MAX_IMAGES)
-        if (urls.length) {
-          photos = { propertyId: comp.propertyId, photos: urls, source: 'google-images', fetchedAt: new Date().toISOString() }
-        }
-      }
-    } catch { /* fall through to no_listing */ }
+  let photos: PropertyPhotos | null = null
+  const first = await Promise.race([
+    scrapePromise.then(() => 'scrape' as const),
+    new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 5000)),
+  ])
+  if (first === 'scrape') {
+    photos = (await scrapePromise) ?? (await fetchRedfinListing(env, comp).catch(() => null))
+  } else {
+    const stingrayPromise = fetchRedfinListing(env, comp).catch(() => null)
+    photos = (await scrapePromise) ?? (await stingrayPromise)
   }
 
   if (!photos) {

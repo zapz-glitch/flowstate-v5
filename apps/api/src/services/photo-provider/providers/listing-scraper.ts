@@ -202,9 +202,15 @@ export class ListingPhotoScraper {
     return `listing-photos-v2:${adapter.name}:${slug}`
   }
 
-  /** Scrape a listing page — Firecrawl when keyed, Scrapfly otherwise */
-  private async scrape(url: string): Promise<{ html: string; markdown: string }> {
-    if (!this.apiKey && this.scrapflyApiKey) return this.scrapeViaScrapfly(url)
+  /** Scrape a listing page — Scrapfly primary, Firecrawl fallback */
+  private async scrape(url: string, allowScrapfly = true): Promise<{ html: string; markdown: string }> {
+    if (this.scrapflyApiKey && allowScrapfly) {
+      try {
+        return await this.scrapeViaScrapfly(url)
+      } catch (err) {
+        if (!this.apiKey) throw err
+      }
+    }
     const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
       headers: {
@@ -450,9 +456,11 @@ export class ListingPhotoScraper {
     } catch { /* fall through */ }
 
     // 3. Legacy: scrape the adapter's search page (usually Google) — mostly
-    //    walled now, kept as a last resort.
+    //    walled now, kept as a last resort. Firecrawl only: an ASP+render
+    //    Scrapfly scrape of a SERP per comp would burn the credit pool.
+    if (!this.apiKey) return null
     try {
-      const content = await this.scrape(adapter.searchUrl(property))
+      const content = await this.scrape(adapter.searchUrl(property), false)
       return valid(adapter.parseListingUrl(content.html + '\n' + content.markdown, property))
     } catch {
       return null
