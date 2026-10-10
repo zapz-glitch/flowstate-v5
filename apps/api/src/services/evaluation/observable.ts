@@ -189,7 +189,7 @@ const SUBJECT_QUESTIONS = {
   s8_lot_premium: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent lot', OVERSIZED_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac premium lot', POOL: 'pool visible on property', NONE: 'no premium lot features evident', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? Satellite imagery counts as evidence — look for waterfront, oversized or corner lots, cul-de-sac position, or a visible pool.',
+    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? Check each label explicitly against the aerial: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the lot boundary — the tile is zoomed wide enough to show the water edge; (2) CORNER/CUL-DE-SAC — the lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — clearly larger parcel than its neighbors; (4) POOL visible. Answer WATERFRONT whenever water borders the property — do not answer NONE while a water body touches the lot.',
   },
   s9_site_exposure: {
     type: 'choice' as const,
@@ -233,7 +233,7 @@ const COMP_QUESTIONS = {
   c8_premium_attributes: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
-    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium — waterfront, oversized/corner lot, cul-de-sac, view, or pool? The aerial counts as evidence: water adjacent to the lot is WATERFRONT, a visible pool is POOL, a lot clearly larger than neighbors is LARGE_LOT. Pick the strongest single attribute; NONE if none is evident. This explains non-condition price premiums.",
+    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium? Check each label against the aerial: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the lot boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the lot.",
   },
   c9_site_exposure: {
     type: 'choice' as const,
@@ -436,7 +436,11 @@ async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
   const R = 20037508.34
   const x = (lng as number) * R / 180
   const y = Math.log(Math.tan((90 + (lat as number)) * Math.PI / 360)) / (Math.PI / 180) * R
-  const half = 190
+  // half-width ~300m (~600m across) — wide enough that a waterfront
+  // boundary (bay/canal/lake edge) is visible in frame, not just the
+  // street block. Waterfront reads failed at 380m when the water sat
+  // just outside the crop.
+  const half = 300
   const bbox = `${Math.round(x - half)},${Math.round(y - half)},${Math.round(x + half)},${Math.round(y + half)}`
   const usgs = await fetchTile(`https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
   if (usgs) return usgs

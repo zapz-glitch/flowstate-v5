@@ -547,6 +547,14 @@ export class AnalysisJobDO {
       : resolveCandidateLimit(this.env, propertyApi.providerName, config.searchOptions.maxComps)
     const comparablesParams = {
         propertyId: property.id,
+        // Fallback providers resolve their own ID space from this when
+        // property.id is foreign (CoreLogic CLIP → ATTOM attomId).
+        subjectAddress: {
+          address: property.address ?? undefined,
+          city: property.city ?? undefined,
+          state: property.state ?? undefined,
+          zip: property.zipCode ?? undefined,
+        },
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
         maxComps: candidateLimit,
         // attom-mcp: the sale-age ladder (expansion tiers + param flex) can
@@ -653,7 +661,13 @@ export class AnalysisJobDO {
     const prefetchedCompEvidence = compsPromise.then(async (res) => {
       try {
         if (!res.success || !compEvidenceOn) return null
-        const inputs = res.data.comparables.slice(0, Number(this.env.CLEF_COMP_MAX) || Infinity).map((c) => ({
+        // corelogic caps the working pool at CORE_WORKING_POOL distance-
+        // sorted comps — scraping beyond it spends listing calls on sales
+        // no downstream lane can use.
+        const prefetchCap = config.harness === 'corelogic'
+          ? Math.min(Number(this.env.CLEF_COMP_MAX) || Infinity, Number(this.env.CORE_WORKING_POOL) || 30)
+          : (Number(this.env.CLEF_COMP_MAX) || Infinity)
+        const inputs = res.data.comparables.slice(0, prefetchCap).map((c) => ({
           propertyId: c.id,
           address: c.address,
           city: c.city,
@@ -970,8 +984,12 @@ export class AnalysisJobDO {
       // pays the ~15s Firecrawl relay — so the queue is closest-first and
       // exits early once the working pool can be fully pocket-anchored
       // (distant comps can't tier-match a ~1-2mi block group anyway).
-      const GEO_CAP = Number(this.env.CORE_WORKING_POOL) || 30
-      const LOOKUP_CEILING = Math.max(GEO_CAP * 2, 40)
+      // Early-exit caps are a corelogic budget tool — on other harnesses
+      // every fetched comp gets census verification so none lose pocket
+      // eligibility.
+      const isCore = config.harness === 'corelogic'
+      const GEO_CAP = isCore ? (Number(this.env.CORE_WORKING_POOL) || 30) : comps.length
+      const LOOKUP_CEILING = isCore ? Math.max(GEO_CAP * 2, 40) : comps.length
       const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
       const queue = comps.map((c, i) => ({ c, i }))
         .sort((a, b) => (a.c.distanceMiles ?? 999) - (b.c.distanceMiles ?? 999))

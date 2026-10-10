@@ -306,10 +306,19 @@ analyze.post('/', async (c) => {
     // Harness mode gets its own cache keyspace — a deterministic report is
     // never served to an agent run (it needs to park for the verdict), and
     // an agent verdict never leaks into deterministic cached results.
+    // Resolve the effective harness the same way evalParams does — an
+    // env-defaulted harness must key the cache too, or a corelogic-default
+    // deployment serves deterministic-harness reports to ordinary requests
+    // (and vice versa) through the shared KV.
+    const effectiveHarness = (body.harness === 'agent' || body.harness === 'corelogic')
+      ? body.harness
+      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
+          ? c.env.DEFAULT_HARNESS
+          : undefined)
     const resultCacheKey = evalResultKey(
       auth.userId,
       body.address ?? '',
-      evalParamsHash + (body.harness ? `:${body.harness}` : ''),
+      evalParamsHash + (effectiveHarness ? `:${effectiveHarness}` : ''),
     );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
