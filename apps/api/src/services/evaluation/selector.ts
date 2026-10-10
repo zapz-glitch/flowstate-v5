@@ -17,6 +17,9 @@
  *      transitional = median fallback, as_is never picks.
  *   R6 price envelope — the posted ARV anchors inside the picks'
  *      sale-price envelope ±10% (d7).
+ *   R7 foreign-pocket validation — a comp outside the subject's
+ *      subdivision/neighborhood picks only when its own pocket's median
+ *      sits inside the subject pocket's envelope (extension, not import).
  *
  * The same d1–d8 gate that grades a model verdict verifies the pick;
  * a reject completes on the deterministic engine — Sonnet never engages.
@@ -448,7 +451,71 @@ export function runDeterministicSelector(
   const isTrueComp = (r: RankedComp) =>
     (r.labels?.sqft === 'exact' || r.labels?.sqft === 'close') &&
     (r.labels?.diffs ?? 9) <= TRUE_COMP_MAX_DIFFS
-  const truePicks = ordered.filter(isTrueComp)
+
+  // R7 foreign-pocket validation — a comp OUTSIDE the subject's own
+  // subdivision/neighborhood only picks when its pocket proves consistent:
+  // the same median check the subject pocket gets, run on the foreign
+  // subdivision. ≥2 pool members in that subdivision → their median $/sf
+  // must sit within ±25% of the subject pocket's qualified median (an
+  // extension of the neighborhood, not a pricier or cheaper pocket — the
+  // 3757-Oakman-class miss). A foreign singleton has no pocket to validate;
+  // it picks only when its own $/sf already sits inside the subject
+  // pocket's envelope. Failing both, the comp stays context — labeled, not
+  // deleted.
+  const normGeo = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+  const subjectSubKey =
+    normGeo(subject.subdivision as string | null | undefined) ??
+    normGeo(subject.neighborhoodName as string | null | undefined)
+  const foreignKey = (r: RankedComp): string | null => {
+    if (r.profile.geoTier !== 'TRACT') return null
+    const k = normGeo(r.comp.subdivision) ?? normGeo(r.comp.neighborhoodName)
+    return k && k !== subjectSubKey ? k : null
+  }
+  const foreignGroups = new Map<string, RankedComp[]>()
+  for (const r of clean) {
+    const k = foreignKey(r)
+    if (k) {
+      const g = foreignGroups.get(k) ?? []
+      g.push(r)
+      foreignGroups.set(k, g)
+    }
+  }
+  const FOREIGN_BAND_LO = 0.75
+  const FOREIGN_BAND_HI = 1.33
+  const inBand = (ppsf: number) =>
+    qualifiedMedianPpsf > 0 && ppsf >= qualifiedMedianPpsf * FOREIGN_BAND_LO && ppsf <= qualifiedMedianPpsf * FOREIGN_BAND_HI
+  const medianOf = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b)
+    return s.length ? s[Math.floor((s.length - 1) / 2)] : 0
+  }
+  const foreignOk = (r: RankedComp): boolean => {
+    const k = foreignKey(r)
+    if (!k) return true
+    const members = foreignGroups.get(k) ?? []
+    if (members.length >= 2) {
+      const fm = medianOf(members.map((m) => m.ppsf))
+      if (qualifiedMedianPpsf > 0) {
+        if (!inBand(fm)) {
+          r.audit.reasons.push(
+            `R7 foreign-pocket — ${k} median $${Math.round(fm)}/sf vs subject pocket $${Math.round(qualifiedMedianPpsf)}/sf (outside ±25%)`
+          )
+          return false
+        }
+        return true
+      }
+      // No subject-pocket baseline — the set's own presence is the evidence.
+      return true
+    }
+    if (!inBand(r.ppsf)) {
+      r.audit.reasons.push(
+        `R7 foreign-singleton — $${Math.round(r.ppsf)}/sf outside subject pocket envelope ($${Math.round(qualifiedMedianPpsf * FOREIGN_BAND_LO)}–${Math.round(qualifiedMedianPpsf * FOREIGN_BAND_HI)}/sf)`
+      )
+      return false
+    }
+    return true
+  }
+
+  const truePicks = ordered.filter((r) => isTrueComp(r) && foreignOk(r))
   const picks = truePicks.length > 0
     ? truePicks.slice(0, MAX_PICKS)
     : ordered.slice(0, MIN_PICKS)
