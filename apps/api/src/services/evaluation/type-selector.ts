@@ -109,6 +109,8 @@ export async function runTypeSelector(
   // 'picked' verdicts are stamped inside the same call before it returns —
   // the ranked array we captured is post-mutation, so eligible membership is
   // "not ruled out", not "still stamped eligible".
+  const subject = evidence.subject
+  const subjSqft = subject.squareFeet ?? null
   const eligible = ranked
     .filter((r) => r.audit.verdict === 'eligible' || r.audit.verdict === 'picked')
     .sort((a, b) =>
@@ -123,8 +125,6 @@ export async function runTypeSelector(
   }
   base.debugNotes.push(`type-selector: seat call → ${eligible.length} eligible (ranked=${ranked.length})`)
 
-  const subject = evidence.subject
-  const subjSqft = subject.squareFeet ?? null
   const rows = eligible.map((r) => {
     const l = r.labels
     return {
