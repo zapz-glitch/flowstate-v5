@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import Script from 'next/script'
 import localFont from 'next/font/local'
 
 // Self-hosted variable fonts (same Inter + Source Serif 4 faces previously
@@ -69,7 +70,9 @@ export default function RootLayout({
       <head>
         {/* Apply stored theme pre-paint — prevents light→dark flash on load.
             Default is led (bright indoor); dark only when explicitly stored. */}
-        <script
+        <Script
+          id="theme-prepaint"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem('fs-theme');if(t==='dark')t='night';if(t==='light')t='led';var dark=t==='night'||t==='dawn';var r=document.documentElement;r.classList.toggle('dark',dark);r.classList.toggle('light',!dark);r.dataset.preset=t||'led';}catch(e){}})()`,
           }}
