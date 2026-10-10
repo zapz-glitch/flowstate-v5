@@ -9,7 +9,7 @@ export const REPORT_TOOLBAR_TILE = 'w-7 h-7 rounded-lg bg-primary/10 flex items-
  * report page and Property Search, so the two headers cannot drift apart.
  * Each page passes its own controls · no behaviour lives here.
  */
-export function ReportToolbar({ lead, title, tooltip, subline, children, onClick, onAddressEnter, onAddressLeave }: {
+export function ReportToolbar({ lead, title, tooltip, subline, children, onClick, onAddressEnter, onAddressLeave, allowOverflow }: {
   /** Leading tile (use REPORT_TOOLBAR_TILE for its classes) */
   lead: ReactNode
   /** The address line */
@@ -24,12 +24,15 @@ export function ReportToolbar({ lead, title, tooltip, subline, children, onClick
   /** Pointer over the address side of the bar, never the right-hand controls */
   onAddressEnter?: () => void
   onAddressLeave?: () => void
+  /** Live input in the bar — autocomplete menus must escape the card's clip */
+  allowOverflow?: boolean
 }) {
   return (
     <div
       data-surface="card"
       className={cn(
-        'w-full border border-border/60 overflow-hidden bg-background shadow-sm corner-accents corner-accents-bottom',
+        'w-full border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom',
+        allowOverflow ? 'overflow-visible' : 'overflow-hidden',
         onClick && 'cursor-pointer hover:border-primary/30 transition-all',
       )}
       onClick={onClick}
