@@ -13,6 +13,10 @@ import { runDeterministicSelector, type RankedComp } from './selector'
 
 const TYPE_SELECTOR_MODEL = 'deepseek/deepseek-v4.1-flash'
 const TYPE_SELECTOR_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions'
+// The seat sends its bearer key to whatever TYPE_SELECTOR_BASE_URL says —
+// an endpoint override pointed outside a trusted provider would leak the
+// credential (and the prompt's property data). Allowlist the hosts.
+const SEAT_ALLOWED_HOSTS = new Set(['openrouter.ai', 'api.inceptionlabs.ai'])
 
 interface TypeSelectorEnv {
   OPENROUTER_API_KEY?: string
@@ -89,14 +93,17 @@ export async function runTypeSelector(
 
   const model = env.TYPE_SELECTOR_MODEL ?? TYPE_SELECTOR_MODEL
   const apiKey = env.TYPE_SELECTOR_API_KEY ?? env.OPENROUTER_API_KEY
+  const baseUrl = env.TYPE_SELECTOR_BASE_URL ?? TYPE_SELECTOR_BASE_URL
+  let seatHost: string | null = null
+  try { seatHost = new URL(baseUrl).hostname } catch { /* malformed */ }
   // Reasoning models burn the whole token budget in the reasoning trace
   // before writing content — the budget must cover both or content comes
   // back empty (observed: 2000 tokens → 2000 reasoning → no answer).
-  const provider = apiKey
-    ? new SeatProvider({ apiKey, model, baseUrl: env.TYPE_SELECTOR_BASE_URL ?? TYPE_SELECTOR_BASE_URL, maxTokens: 8000 })
+  const provider = apiKey && seatHost && SEAT_ALLOWED_HOSTS.has(seatHost)
+    ? new SeatProvider({ apiKey, model, baseUrl, maxTokens: 8000 })
     : null
   if (!provider) {
-    base.debugNotes.push('type-selector: no seat API key — deterministic seat')
+    base.debugNotes.push(`type-selector: ${apiKey ? `seat host ${seatHost ?? baseUrl} not allowlisted` : 'no seat API key'} — deterministic seat`)
     return base
   }
 
@@ -111,6 +118,15 @@ export async function runTypeSelector(
   // "not ruled out", not "still stamped eligible".
   const subject = evidence.subject
   const subjSqft = subject.squareFeet ?? null
+  // Band exclusions must survive a seat fallback: when the band rejected a
+  // comp and the seat still leaves selection null, the engine completes
+  // through Set-B — which reads the enabled pool. Disable excluded comps so
+  // an outlier can never drive the fallback ARV.
+  if (opts?.priceBand) {
+    for (const r of ranked) {
+      if (r.audit.verdict === 'excluded' && r.comp.isEnabled !== false) r.comp.isEnabled = false
+    }
+  }
   const eligible = ranked
     .filter((r) => r.audit.verdict === 'eligible' || r.audit.verdict === 'picked')
     .sort((a, b) =>

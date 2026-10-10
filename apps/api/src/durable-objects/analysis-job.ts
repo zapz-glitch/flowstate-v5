@@ -1179,7 +1179,18 @@ export class AnalysisJobDO {
         const enriched = await propertyApi.enrichComparables(shortlist, { concurrency: FAST_ENRICH })
         const enrichedByIdFast = new Map(enriched.map((e) => [e.id, e]))
         candidatesEnriched += enriched.filter((c) => c.isEnriched).length
-        const merged = comps.map((c) => enrichedByIdFast.get(c.id) ?? c)
+        // Geocodio-stamped geography must survive the merge — a CoreLogic
+        // detail response that lacks census fields returns nulls and would
+        // turn a verified pocket comp into off-pocket.
+        const merged = comps.map((c) => {
+          const e = enrichedByIdFast.get(c.id)
+          if (!e) return c
+          e.censusTract ??= c.censusTract
+          e.censusBlockGroup ??= c.censusBlockGroup
+          e.sameBlockGroup ??= c.sameBlockGroup
+          e.crossesMajorRoad ??= c.crossesMajorRoad
+          return e
+        })
         flagUnverified(merged)
         ladderSettled = true
         console.log(`[AnalysisJobDO] typescript lane: enriched ${shortlist.length}-comp shortlist in one batch`)
