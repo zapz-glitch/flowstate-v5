@@ -1139,6 +1139,35 @@ export class AnalysisJobDO {
       const outside = comps.filter((c, i) => geos[i] != null && !geoPasserIds.has(c.id) && spendable(c)
         // Paid enrichment never leaves the working pool on corelogic-alpha.
         && (workingCompIds == null || workingCompIds.has(String(c.id))))
+      // TypeScript fast lane — the comparables payload already carries the
+      // fields the label/tier math needs, so there is no ladder search:
+      // enrich only the top-12 math shortlist in ONE parallel batch for the
+      // fields enrichment uniquely provides (subdivision for the pocket,
+      // latestSale flip-leg correction, assessor condition/style). The
+      // ladder's per-wave property-detail spend is what made evals ~60s.
+      if (config.harness === 'typescript') {
+        const FAST_ENRICH = 12
+        const subjSqftFast = property.squareFeet ?? 0
+        const geoTierOf = (c: NormalizedComparable) =>
+          c.censusBlockGroup === subjectGeo.blockGroup ? 0
+          : c.censusTract === subjectGeo.tract ? 1
+          : [c.subdivision, c.neighborhoodName].map(normName).some((v) => v != null && subjectNames.has(v)) ? 1
+          : 2
+        const shortlist = comps.filter(spendable)
+          .sort((a, b) =>
+            geoTierOf(a) - geoTierOf(b)
+            || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+            || Math.abs((a.squareFeet ?? 0) - subjSqftFast) - Math.abs((b.squareFeet ?? 0) - subjSqftFast))
+          .slice(0, FAST_ENRICH)
+        const enriched = await propertyApi.enrichComparables(shortlist, { concurrency: FAST_ENRICH })
+        const enrichedByIdFast = new Map(enriched.map((e) => [e.id, e]))
+        candidatesEnriched += enriched.filter((c) => c.isEnriched).length
+        const merged = comps.map((c) => enrichedByIdFast.get(c.id) ?? c)
+        flagUnverified(merged)
+        ladderSettled = true
+        console.log(`[AnalysisJobDO] typescript lane: enriched ${shortlist.length}-comp shortlist in one batch`)
+        return merged
+      }
       const scopes: Array<{ name: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent'; comps: NormalizedComparable[] }> = [
         { name: 'tract', comps: geoPassers.filter((c) => c.censusTract != null && c.censusTract === subjectGeo.tract) },
         { name: 'block_group', comps: geoPassers.filter((c) => !(c.censusTract != null && c.censusTract === subjectGeo.tract)) },
