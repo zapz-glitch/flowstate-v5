@@ -23,7 +23,7 @@ COMPARABLE_CANDIDATE_LIMIT = "25"
 COMPARABLE_EXPANSION_RADIUS_MILES = "2"
 JEV_COMP_CLASSIFIER_V2_ENABLED = "false"
 JEV_ATTRIBUTE_SCREEN_ENABLED = "false"
-TYPE_SELECTOR_MODEL = "deepseek/deepseek-v4.1-flash:fast"
+TYPE_SELECTOR_MODEL = "deepseek/deepseek-v4.1-flash"
 CONDITION_READER = "decisions"
 
 [[d1_databases]]
