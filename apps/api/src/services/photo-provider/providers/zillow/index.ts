@@ -60,11 +60,12 @@ export function isZillowFetcherAvailable(env: Env): boolean {
  * Uses Firecrawl v2 JSON extraction (primary) + OpenRouter LLM (fallback)
  */
 export function createZillowFetcher(env: Env): ZillowFetcher | null {
-  // Owner-specified chain — Firecrawl only:
-  //   Address → /v1/search → URL → /v1/scrape → photos+text → Clef.
-  // No Scrapfly, no Serper, no Stingray in the fetch path.
-  if (env.FIRECRAWL_API_KEY) {
+  // Scrapfly primary → Firecrawl fallback — one exhausted provider can't
+  // take the photo lane down (Firecrawl ran dry Oct 2026: zero photos).
+  if (env.SCRAPFLY_API_KEY || env.FIRECRAWL_API_KEY) {
     return createScrapflyZillowFetcher({
+      scrapflyApiKey: env.SCRAPFLY_API_KEY,
+      scrapflyUrl: env.SCRAPFLY_URL,
       firecrawlApiKey: env.FIRECRAWL_API_KEY,
       cache: env.API_CACHE,
       cacheTtl: 30 * 24 * 60 * 60,
@@ -81,6 +82,7 @@ export const createZillowFetcherFromEnv = createZillowFetcher
  * Get the provider name being used
  */
 export function getZillowFetcherProvider(env: Env): string | null {
+  if (env.SCRAPFLY_API_KEY) return env.FIRECRAWL_API_KEY ? 'scrapfly+firecrawl-fallback' : 'scrapfly'
   if (env.FIRECRAWL_API_KEY) return 'firecrawl-search+scrape'
   return null
 }
@@ -126,7 +128,7 @@ export class ZillowPhotoProvider implements PhotoProvider {
       return {
         success: false,
         propertyId: property.propertyId,
-        error: 'Zillow fetcher not available - FIRECRAWL_API_KEY required',
+        error: 'Zillow fetcher not available - SCRAPFLY_API_KEY or FIRECRAWL_API_KEY required',
         code: 'PROVIDER_UNAVAILABLE',
       }
     }
