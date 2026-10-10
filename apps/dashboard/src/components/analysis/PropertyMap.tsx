@@ -57,6 +57,10 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
 
     // Comps
     if (comps?.items) {
+      // Live reveal (SSE geo_done / appraiser_done stamps, mid-run only):
+      // in-pocket comps light up once geocoded, then narrow to the picks.
+      type LiveStamp = { pocketTier?: string; picked?: boolean }
+      const anyPicked = comps.items.some((c) => (c as LiveStamp).picked)
       for (let i = 0; i < comps.items.length; i++) {
         const comp = comps.items[i]
         if (isValidCoordinate({ lat: comp.latitude, lng: comp.longitude })) {
@@ -65,13 +69,19 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
           // Marker color = evidence class, not enabled state — green = ARV
           // evidence, orange = market/median, red = investor floor.
           const cls = comp.classification?.type
+          const live = comp as LiveStamp
+          const liveType = !enabled && live.pocketTier
+            ? (anyPicked
+                ? (live.picked ? 'comp-arv' : 'comp-disabled')
+                : (live.pocketTier !== 'off_pocket' ? 'comp-market' : 'comp-disabled'))
+            : null
           m.push({
             lat: comp.latitude!,
             lng: comp.longitude!,
-            type: !enabled ? 'comp-disabled'
+            type: liveType ?? (!enabled ? 'comp-disabled'
               : cls === 'after_renovation' ? 'comp-arv'
               : cls === 'as_is' ? 'comp-floor'
-              : 'comp-market',
+              : 'comp-market'),
             label: comp.address ?? 'Comparable',
             compKey,
             price: comp.salePrice ?? null,
