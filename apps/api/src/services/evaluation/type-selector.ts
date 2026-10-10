@@ -29,9 +29,20 @@ interface TypeSelectorEnv {
 class SeatProvider extends OpenAICompatibleProvider {
   readonly name = 'openrouter' as const
   constructor(config: { apiKey: string; model: string; baseUrl: string; maxTokens?: number }) {
-    // 30s seat cap — a stalled reasoning response otherwise burns the
-    // 60s default per attempt; the deterministic seat is the fallback.
-    super({ apiKey: config.apiKey, model: config.model, maxTokens: config.maxTokens, baseUrl: config.baseUrl, timeout: 30_000 })
+    super({
+      apiKey: config.apiKey,
+      model: config.model,
+      maxTokens: config.maxTokens,
+      baseUrl: config.baseUrl,
+      // 30s seat cap — a stalled reasoning response otherwise burns the
+      // 60s default per attempt; the deterministic seat is the fallback.
+      timeout: 30_000,
+      // Pin to baseten/fp8 — free routing lands on slow/flaky upstreams
+      // (4s–90s swings). OpenRouter-only field; other hosts ignore it.
+      ...(config.baseUrl.includes('openrouter.ai')
+        ? { providerPrefs: { only: ['baseten/fp8'], allow_fallbacks: false } }
+        : {}),
+    })
   }
 }
 
