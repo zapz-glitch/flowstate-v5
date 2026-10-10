@@ -144,7 +144,7 @@ interface AnalyzeRequest {
    *  `awaiting_agent` — the Evaluation Agent posts its comp-selection
    *  verdict to /jobs/:jobId/harness/selection and the deterministic tail
    *  finishes the eval. Omitted = today's deterministic Set-B path. */
-  harness?: 'agent' | 'corelogic';
+  harness?: 'agent' | 'corelogic' | 'typescript';
 }
 
 const ALLOWED_MODELS = new Set([
@@ -248,7 +248,7 @@ analyze.post('/', async (c) => {
     // The route returns immediately with jobId + SSE token.
 
     let appraisalRules = userSettings.appraisalRules;
-    if (body.appraisalOverrides || body.harness === 'agent' || body.harness === 'corelogic') {
+    if (body.appraisalOverrides || body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript') {
       const overrideFilters = body.appraisalOverrides?.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
@@ -263,7 +263,7 @@ analyze.post('/', async (c) => {
           percent: a.percent,
         }),
       );
-      appraisalRules = (body.harness === 'agent' || body.harness === 'corelogic')
+      appraisalRules = (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript')
         // Agent runs are governed by EVAL-AGENT-RULESET.md — the caller's
         // overrides are verbatim and the user's preset never merges in.
         // With no filters enabled, comps stay enabled except for the hard
@@ -310,9 +310,9 @@ analyze.post('/', async (c) => {
     // env-defaulted harness must key the cache too, or a corelogic-default
     // deployment serves deterministic-harness reports to ordinary requests
     // (and vice versa) through the shared KV.
-    const effectiveHarness = (body.harness === 'agent' || body.harness === 'corelogic')
+    const effectiveHarness = (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript')
       ? body.harness
-      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
+      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'typescript'
           ? c.env.DEFAULT_HARNESS
           : undefined)
     const resultCacheKey = evalResultKey(
@@ -412,9 +412,9 @@ analyze.post('/', async (c) => {
         // Explicit harness param wins; else the deployment's DEFAULT_HARNESS
         // env drives it (alpha.flowstate runs the corelogic harness
         // deployment-wide — same dashboard, different eval seat).
-        harness: (body.harness === 'agent' || body.harness === 'corelogic')
+        harness: (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript')
           ? body.harness
-          : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
+          : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'typescript'
               ? c.env.DEFAULT_HARNESS
               : undefined),
       }),

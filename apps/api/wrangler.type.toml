@@ -1,0 +1,83 @@
+name = "flowstate-api-type"
+main = "src/index.ts"
+
+compatibility_date = "2024-09-09"
+compatibility_flags = ["nodejs_compat"]
+preview_urls = true
+
+# type.flowstate.homes — the typescript instant-eval lane on the legacy
+# Cotality provider. Same codebase, same bindings, different harness:
+# every eval is pure TypeScript over provider data — zero model calls.
+
+routes = [
+  { pattern = "api-type.flowstate.homes", custom_domain = true },
+]
+
+[vars]
+ENVIRONMENT = "production"
+DASHBOARD_URL = "https://type.flowstate.homes"
+PROPERTY_PROVIDER = "corelogic"
+DEFAULT_HARNESS = "typescript"
+DEVIN_ORG_ID = "org-6c0122ecb67544ccb259ae9b1e9cc4dc"
+COMPARABLE_CANDIDATE_LIMIT = "100"
+COMPARABLE_EXPANSION_RADIUS_MILES = "2"
+JEV_COMP_CLASSIFIER_V2_ENABLED = "false"
+JEV_ATTRIBUTE_SCREEN_ENABLED = "false"
+CONDITION_READER = "decisions"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "flowstate-api-db"
+database_id = "106d2645-8ec1-4ae9-8f72-7563ba8aa93f"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "API_CACHE"
+id = "076d6c5a242c4b5d9765d04b8b8755b6"
+
+[[r2_buckets]]
+binding = "REPORT_ASSETS"
+bucket_name = "flowstate-report-assets"
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "ANALYSIS_JOB"
+class_name = "AnalysisJobDO"
+
+[[durable_objects.bindings]]
+name = "BATCH_JOB"
+class_name = "BatchJobDO"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMIT_COORDINATOR"
+class_name = "RateLimitCoordinatorDO"
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["AnalysisJobDO"]
+
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["BatchJobDO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RateLimitCoordinatorDO"]
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+# Cron: sweeps dead/stuck batch jobs
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Basin lake — analysis outcomes → Iceberg on flowstate-data-lake
+[[pipelines]]
+stream = "adbb75b369b645cc930401161827d832"
+binding = "FLOWSTATE_ANALYSIS_EVENTS_STREAM"
