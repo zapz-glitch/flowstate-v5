@@ -58,8 +58,11 @@ export async function runTypeSelector(
   })
 
   const model = env.TYPE_SELECTOR_MODEL ?? TYPE_SELECTOR_MODEL
+  // Reasoning models burn the whole token budget in the reasoning trace
+  // before writing content — the budget must cover both or content comes
+  // back empty (observed: 2000 tokens → 2000 reasoning → no answer).
   const provider = env.OPENROUTER_API_KEY
-    ? createOpenRouterProvider({ apiKey: env.OPENROUTER_API_KEY, model, maxTokens: 2000 })
+    ? createOpenRouterProvider({ apiKey: env.OPENROUTER_API_KEY, model, maxTokens: 8000 })
     : null
   if (!provider) {
     base.debugNotes.push('type-selector: no OPENROUTER_API_KEY — deterministic seat')
@@ -118,7 +121,8 @@ export async function runTypeSelector(
       prompt: user,
       systemPrompt: sys,
       responseFormat: 'json',
-      maxTokens: 2000,
+      maxTokens: 8000,
+      reasoning: { enabled: true, effort: 'low' },
     })
     if (!res.success) throw new Error(res.error?.message ?? 'provider error')
     const text = res.data?.content ?? ''
