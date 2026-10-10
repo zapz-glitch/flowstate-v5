@@ -353,72 +353,22 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
-  // Redfin stingray is the fast path (~2-5s structured JSON); the Zillow
-  // scrape chain is the fallback (~15-45s rendered). Zillow gets a short
-  // head start the moment Redfin misses or stalls past 3s — a straggler
-  // comp must not serialize behind a failed first source — while Redfin
-  // still wins whenever it returns real evidence.
+  // Owner-specified chain: Zillow via Scrapfly (autocomplete zpid → ASP
+  // scrape, ~2s) is primary; Redfin stingray is the fallback — it breaks
+  // under concurrency at scale, so it only runs when Zillow misses.
   let photos: PropertyPhotos | null = null
-  const redfinPromise = fetchRedfinListing(env, comp).catch(() => null)
-  const zillowFetch = async (): Promise<PropertyPhotos | null> => {
-    try {
-      const photoService = createPhotoService(env, { provider: 'zillow' })
-      if (!photoService.isAvailable()) return null
+  try {
+    const photoService = createPhotoService(env, { provider: 'zillow' })
+    if (photoService.isAvailable()) {
       const result = await photoService.fetchPhotos(comp, {
         maxPhotos: 8,
         includeDescription: true,
         includePriceHistory: false,
       })
-      return result.success ? result.data : null
-    } catch { return null }
-  }
-  const zillowPromise = (async (): Promise<PropertyPhotos | null> => {
-    const first = await Promise.race([
-      redfinPromise,
-      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 3000)),
-    ])
-    if (first) return null // redfin already delivered — no scrape needed
-    return zillowFetch() // redfin missed or is still in flight at 3s
-  })()
-  try {
-    photos = await redfinPromise
-  } catch { photos = null }
-  if (!photos) {
-    try {
-      photos = await zillowPromise
-    } catch (error) {
-      evidence.skippedReason = error instanceof Error ? error.message : 'listing fetch failed'
-      return evidence
+      photos = result.success && result.data.photos.length > 0 ? result.data : null
     }
-  }
-
-  // No listing found — Google the property for photos via Firecrawl
-  // image search before the comp goes unclassified. Photos should
-  // never be missing: listing chain first, web image lookup second.
-  if (!photos && env.FIRECRAWL_API_KEY) {
-    try {
-      const res = await fetch('https://api.firecrawl.dev/v2/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.FIRECRAWL_API_KEY}` },
-        body: JSON.stringify({
-          query: `${comp.address}, ${comp.city}, ${comp.state} ${comp.zipCode ?? ''} home exterior`,
-          limit: 10,
-          sources: [{ type: 'images' }],
-        }),
-        signal: AbortSignal.timeout(30000),
-      })
-      if (res.ok) {
-        const data = (await res.json()) as { data?: { images?: Array<{ imageUrl?: string }> } }
-        const urls = (data.data?.images ?? [])
-          .map((i) => i.imageUrl)
-          .filter((u): u is string => !!u && /^https?:\/\//.test(u))
-          .slice(0, MAX_IMAGES)
-        if (urls.length) {
-          photos = { propertyId: comp.propertyId, photos: urls, source: 'google-images', fetchedAt: new Date().toISOString() }
-        }
-      }
-    } catch { /* fall through to no_listing */ }
-  }
+  } catch { photos = null }
+  if (!photos) photos = await fetchRedfinListing(env, comp).catch(() => null)
 
   if (!photos) {
     evidence.skippedReason = 'no_listing'

@@ -1,10 +1,11 @@
 /**
- * Listing Fetcher — Scrapfly primary, Firecrawl fallback
+ * Listing Fetcher — Scrapfly transport
  *
  * Evidence chain:
  *   Address → Zillow autocomplete zpid (free) → Scrapfly ASP scrape
  *   → photos + description → (Clef classification downstream).
- *   Firecrawl /v1/search + /v1/scrape remain the fallback transport.
+ *   The Redfin photo provider is the fallback when Zillow misses.
+ *   Firecrawl transport stays in the class but is not wired from env.
  *
  * Fallback order per comp: Zillow → Redfin → Realtor.com.
  * Zillow pages are only evidence when the canonical URL proves the scrape
