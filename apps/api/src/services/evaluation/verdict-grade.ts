@@ -259,15 +259,18 @@ export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelectio
     const lo = Math.min(...prices) * 0.9
     const hi = Math.max(...prices) * 1.1
     const soft = arvQualified.length < 2
-    if (selection.arv < lo || selection.arv > hi) {
+    // The envelope validates the comp-implied ARV — subject-side deductions
+    // (site exposure) are applied rules, not evidence drift.
+    const arvForEnvelope = selection.arvEvidence ?? selection.arv
+    if (arvForEnvelope < lo || arvForEnvelope > hi) {
       if (soft) {
         checks.d7 = 'warn'
         failures.push('d7_outside_implied_edge')
-        gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the non-as-is comps' price range $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%, weak renovated evidence — flag why or re-anchor)`)
+        gateFeedback.push(`d7: ARV $${arvForEnvelope.toLocaleString()} is outside the non-as-is comps' price range $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%, weak renovated evidence — flag why or re-anchor)`)
       } else {
         checks.d7 = 'fail'
         failures.push('d7_outside_evidence_edge')
-        gateFeedback.push(`d7: ARV $${selection.arv.toLocaleString()} is outside the renovated comps' price envelope $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%) — re-anchor inside the evidence`)
+        gateFeedback.push(`d7: ARV $${arvForEnvelope.toLocaleString()} is outside the renovated comps' price envelope $${Math.round(lo).toLocaleString()}–$${Math.round(hi).toLocaleString()} (±10%) — re-anchor inside the evidence`)
       }
     }
   } else {

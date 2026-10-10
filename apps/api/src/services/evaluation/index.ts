@@ -2350,6 +2350,10 @@ function stampPoolVerification(
 export interface AgentSelection {
   /** The ARV the agent derives under the ruleset — becomes the valuation anchor. */
   arv: number
+  /** The comp-implied ARV before subject-side deductions (site exposure).
+   *  Envelope checks (validate + d7) test THIS number — the deduction is an
+   *  applied rule, not evidence drift. Absent = arv is the evidence value. */
+  arvEvidence?: number
   conf: 'high' | 'medium' | 'low'
   /** Enabled-pool comp ids the agent selected — the only comps the client sees as selected. */
   selectedCompIds: string[]
@@ -2406,8 +2410,11 @@ export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComp
     } else {
       const lo = Math.min(...pickPrices) * 0.75
       const hi = Math.max(...pickPrices) * 1.25
-      if (sel.arv < lo || sel.arv > hi) {
-        fails.push(`arv ${sel.arv} outside the selected-evidence envelope ${Math.round(lo)}–${Math.round(hi)}`)
+      // Subject-side deductions (site exposure) are applied rules, not
+      // evidence — the envelope tests the comp-implied figure.
+      const arvForEnvelope = sel.arvEvidence ?? sel.arv
+      if (arvForEnvelope < lo || arvForEnvelope > hi) {
+        fails.push(`arv ${arvForEnvelope} outside the selected-evidence envelope ${Math.round(lo)}–${Math.round(hi)}`)
       }
     }
   }

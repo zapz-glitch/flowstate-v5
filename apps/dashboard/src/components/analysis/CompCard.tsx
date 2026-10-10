@@ -181,9 +181,9 @@ function CompCardInner({
                     : comp.badges.price === 'as_is' ? 'bg-orange-500/15 text-orange-600'
                     : 'bg-blue-500/15 text-blue-600'
                 )}
-                title={comp.classification?.reasoning || `Price: ${comp.badges.price}`}
+                title={comp.classification?.reasoning || `Sale price is ${comp.badges.price === 'renovated' ? 'ARV-grade' : comp.badges.price} evidence`}
               >
-                {comp.badges.price === 'renovated' ? 'RENOVATED'
+                {comp.badges.price === 'renovated' ? 'ARV'
                   : comp.badges.price === 'as_is' ? 'AS-IS'
                   : 'MEDIAN'}
               </div>

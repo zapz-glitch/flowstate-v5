@@ -1727,9 +1727,10 @@ export class AnalysisJobDO {
                 drivers: a.selection.drivers ?? null,
                 notes: a.selection.notes ?? null,
                 dataQuality: a.selection.dataQuality ?? null,
+                flags: a.selection.flags ?? null,
               })),
               selection: decision
-                ? { arv: decision.arv, conf: decision.conf, selectedCompIds: decision.selectedCompIds, drivers: decision.drivers ?? null, notes: decision.notes ?? null, dataQuality: decision.dataQuality ?? null }
+                ? { arv: decision.arv, conf: decision.conf, selectedCompIds: decision.selectedCompIds, drivers: decision.drivers ?? null, notes: decision.notes ?? null, dataQuality: decision.dataQuality ?? null, flags: decision.flags ?? null }
                 : null,
             },
             gate: {
