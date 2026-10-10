@@ -37,10 +37,12 @@ class SeatProvider extends OpenAICompatibleProvider {
       // 30s seat cap — a stalled reasoning response otherwise burns the
       // 60s default per attempt; the deterministic seat is the fallback.
       timeout: 30_000,
-      // Pin to baseten/fp8 — free routing lands on slow/flaky upstreams
-      // (4s–90s swings). OpenRouter-only field; other hosts ignore it.
+      // Prefer baseten/fp8 — free routing lands on slow/flaky upstreams
+      // (4s–90s swings). Fallbacks stay on: Baseten's shared pool 429s
+      // would otherwise drop the run to the deterministic seat.
+      // OpenRouter-only field; other hosts ignore it.
       ...(config.baseUrl.includes('openrouter.ai')
-        ? { providerPrefs: { only: ['baseten/fp8'], allow_fallbacks: false } }
+        ? { providerPrefs: { only: ['baseten/fp8'], allow_fallbacks: true } }
         : {}),
     })
   }
