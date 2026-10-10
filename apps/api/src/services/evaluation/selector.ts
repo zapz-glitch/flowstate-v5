@@ -851,7 +851,13 @@ function remedySelection(
     if (/outside the selected-evidence envelope/i.test(f)) {
       const prices = pickPrices()
       if (prices.length) {
-        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices) * 0.75), Math.max(...prices) * 1.25) / 500) * 500
+        // $500 rounding can push the value back over the bound it was
+        // just clamped to (e.g. cap 531250 -> 531500) — re-clamp hard so
+        // the repair never emits a still-outside ARV.
+        const lo = Math.min(...prices) * 0.75
+        const hi = Math.max(...prices) * 1.25
+        const rounded = Math.round(Math.min(Math.max(arv, lo), hi) / 500) * 500
+        const clamped = Math.min(Math.max(rounded, Math.ceil(lo)), Math.floor(hi))
         if (clamped !== arv) { arv = clamped; changed = true }
       }
       continue
@@ -867,7 +873,10 @@ function remedySelection(
     if (/extrapolat|above the (envelope|top)|beyond the/i.test(f)) {
       const prices = pickPrices()
       if (prices.length) {
-        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices)), Math.max(...prices)) / 500) * 500
+        const lo2 = Math.min(...prices)
+        const hi2 = Math.max(...prices)
+        const rounded = Math.round(Math.min(Math.max(arv, lo2), hi2) / 500) * 500
+        const clamped = Math.min(Math.max(rounded, Math.ceil(lo2)), Math.floor(hi2))
         if (clamped !== arv) { arv = clamped; changed = true }
       }
     }
