@@ -29,7 +29,9 @@ interface TypeSelectorEnv {
 class SeatProvider extends OpenAICompatibleProvider {
   readonly name = 'openrouter' as const
   constructor(config: { apiKey: string; model: string; baseUrl: string; maxTokens?: number }) {
-    super({ apiKey: config.apiKey, model: config.model, maxTokens: config.maxTokens, baseUrl: config.baseUrl })
+    // 30s seat cap — a stalled reasoning response otherwise burns the
+    // 60s default per attempt; the deterministic seat is the fallback.
+    super({ apiKey: config.apiKey, model: config.model, maxTokens: config.maxTokens, baseUrl: config.baseUrl, timeout: 30_000 })
   }
 }
 
