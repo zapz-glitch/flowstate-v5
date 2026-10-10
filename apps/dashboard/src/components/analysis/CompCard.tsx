@@ -105,7 +105,13 @@ function CompCardInner({
     && comp.neighborhoodName
     && normalizeGeoName(subject.neighborhoodName) === normalizeGeoName(comp.neighborhoodName)
   )
-  const geoMatched = tractMatches || blockGroupMatches || neighborhoodMatches || hasSubdivisionMatch
+  // Subdivision name missing ≠ no match — a comp sharing the subject's
+  // coded neighborhood AND block group is the same legal subdivision even
+  // when the provider left the field empty (most comps carry no name).
+  const inferredSubdivisionMatch = !!(
+    !comp.subdivision && subjectSubdiv && neighborhoodMatches && blockGroupMatches
+  )
+  const geoMatched = tractMatches || blockGroupMatches || neighborhoodMatches || hasSubdivisionMatch || inferredSubdivisionMatch
 
   return (
     <div
@@ -350,14 +356,27 @@ function CompCardInner({
         {/* Row 2: distance, subdivision, and actual geography values */}
         <div className="flex items-center gap-2 mt-1 text-[10px] text-foreground-tertiary flex-wrap pl-8">
           {comp.distanceMiles != null && <span>{comp.distanceMiles.toFixed(2)} mi</span>}
-          {comp.subdivision && (
+          {comp.subdivision ? (
             <>
               <span className="text-border">·</span>
-              <span className={cn(hasSubdivisionMatch && 'text-emerald-500')}>
+              <span
+                className={cn(hasSubdivisionMatch && 'text-emerald-500')}
+                title={hasSubdivisionMatch ? 'Same subdivision as the subject' : undefined}
+              >
                 {hasSubdivisionMatch && '✓ '}{comp.subdivision}
               </span>
             </>
-          )}
+          ) : inferredSubdivisionMatch ? (
+            <>
+              <span className="text-border">·</span>
+              <span
+                className="text-emerald-500"
+                title={`Same subdivision${subjectSubdiv ? ` (${subjectSubdiv})` : ''} — matched by block group + coded neighborhood; the provider left the name off this sale`}
+              >
+                ✓ Subdivision
+              </span>
+            </>
+          ) : null}
           {comp.adjustedPrice && comp.salePrice !== comp.adjustedPrice && (
             <><span className="text-border">·</span><span className="text-emerald-600">Adj: ${comp.adjustedPrice.toLocaleString()}</span></>
           )}
