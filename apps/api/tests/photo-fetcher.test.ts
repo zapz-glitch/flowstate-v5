@@ -84,16 +84,13 @@ function stubFetch(handlers: Array<{ endpoint: string; contains?: string; body: 
   assert.ok(ext.photos.every((p) => !p.includes('-h_')), 'agent headshots must be excluded')
 }
 
-// ── 2. Provider selection: Scrapfly key only — no Firecrawl in the photo path ──
+// ── 2. Provider selection: Firecrawl key only — no Scrapfly/Serper needed ──
 {
-  const env = { SCRAPFLY_API_KEY: 'scp-x' } as Env
+  const env = { FIRECRAWL_API_KEY: 'fc-x' } as Env
   assert.equal(isZillowFetcherAvailable(env), true)
-  assert.equal(getZillowFetcherProvider(env), 'scrapfly')
+  assert.equal(getZillowFetcherProvider(env), 'firecrawl-search+scrape')
   const fetcher = createZillowFetcher(env)
   assert.ok(fetcher instanceof ScrapflyZillowFetcher)
-  const firecrawlOnly = { FIRECRAWL_API_KEY: 'fc-x' } as Env
-  assert.equal(isZillowFetcherAvailable(firecrawlOnly), false)
-  assert.equal(createZillowFetcher(firecrawlOnly), null)
   const noKeys = {} as Env
   assert.equal(isZillowFetcherAvailable(noKeys), false)
   assert.equal(createZillowFetcher(noKeys), null)

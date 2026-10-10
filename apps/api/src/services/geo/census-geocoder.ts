@@ -20,44 +20,7 @@ export interface CensusGeography {
 
 const ENDPOINT = 'https://geocoding.geo.census.gov/geocoder/geographies/coordinates'
 const GEOCODIO_ENDPOINT = 'https://api.geocod.io/v1.9/reverse'
-const GEOCODIO_FORWARD_ENDPOINT = 'https://api.geocod.io/v1.9/geocode'
 const CACHE_TTL = 180 * 24 * 60 * 60
-
-/**
- * Forward-geocode an address through Geocodio and return its USPS-normalized
- * form ("100 Cay Ct SW, Atlanta, GA 30349"). Used as a fallback when a
- * property provider's own matcher misses on a young-city name its database
- * still files under the older mailing city (South Fulton → Atlanta).
- * Returns null on any failure — advisory only, one lookup per call.
- */
-export async function geocodeUspsAddress(
-  address: string,
-  geocodioKey?: string | null,
-): Promise<string | null> {
-  if (!geocodioKey || !address.trim()) return null
-  try {
-    const resp = await fetch(
-      `${GEOCODIO_FORWARD_ENDPOINT}?q=${encodeURIComponent(address)}&api_key=${geocodioKey}`,
-      { signal: AbortSignal.timeout(8000) },
-    )
-    if (!resp.ok) return null
-    const data = (await resp.json()) as {
-      results?: Array<{ formatted_address?: string; accuracy?: number; accuracy_type?: string }>
-    }
-    const top = data.results?.[0]
-    const formatted = top?.formatted_address?.trim()
-    if (!formatted) return null
-    // Only an exact-parcel match may re-key the lookup: interpolated or
-    // street-level results can land on a neighbouring house.
-    if (top?.accuracy_type !== 'rooftop' && top?.accuracy_type !== 'point') return null
-    const houseNumber = (s: string) => s.trim().match(/^(\d+[A-Z]?)\b/i)?.[1]?.toUpperCase()
-    const wanted = houseNumber(address)
-    if (!wanted || houseNumber(formatted) !== wanted) return null
-    return formatted
-  } catch {
-    return null
-  }
-}
 
 export async function fetchCensusGeography(
   latitude: number,

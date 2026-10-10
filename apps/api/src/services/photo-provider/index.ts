@@ -81,17 +81,18 @@ import { createListingPhotoProvider } from './providers/listing-provider'
 
 export type PhotoProviderType = 'zillow' | 'mls' | 'redfin' | 'realtor' | 'manual'
 
-/** Subject-photo fallback order: Redfin → Zillow → Realtor.com → none.
+/** Subject-photo fallback order: Redfin → Realtor.com → none.
  *  Redfin runs first so its listing metadata (ask price, flood signal)
- *  merges into whichever provider wins on photos. */
-const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'zillow', 'realtor']
+ *  merges into whichever provider wins on photos. Zillow is not in the
+ *  lookup chain — owner spec: Redfin for scrapfly lookups. */
+const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'realtor']
 
 /**
- * Comp-photo fallback order: Zillow first (richest listing data), then
- * Redfin and Realtor.com so comps without a Zillow listing still get
- * real listing photos instead of Street View.
+ * Comp-photo fallback order: Redfin first, then Realtor.com so comps
+ * without a Redfin listing still get real listing photos instead of
+ * Street View. Zillow is not in the lookup chain.
  */
-const COMP_FALLBACK_ORDER: PhotoProviderType[] = ['zillow', 'redfin', 'realtor']
+const COMP_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'realtor']
 
 /** Per-provider attempt cap for comp fetches */
 const COMP_ATTEMPT_TIMEOUT_MS = 15000

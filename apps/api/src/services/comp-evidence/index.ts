@@ -353,15 +353,16 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
-  // Owner-specified chain: Zillow via Scrapfly (autocomplete zpid → ASP
-  // scrape, ~2s) is primary; Redfin stingray is the fallback — it breaks
-  // under concurrency at scale, so it only starts when Zillow misses or
-  // stalls. When Zillow stalls past 5s, stingray launches in parallel so a
-  // slow scrape can't starve the comp past the 30s batch deadline —
-  // Zillow's result still wins if it lands first.
-  const zillowPromise = (async (): Promise<PropertyPhotos | null> => {
+  // Owner-specified chain: the Redfin listing provider (Scrapfly scrape of
+  // the redfin.com listing page) is primary; the stingray fast-fetch is the
+  // fallback — its direct calls break under concurrency, so it only starts
+  // when the scrape misses or stalls. When the scrape stalls past 5s,
+  // stingray launches in parallel so a slow scrape can't starve the comp
+  // past the 30s batch deadline — the scrape's result still wins if it
+  // lands first. No Zillow in the lookup chain.
+  const scrapePromise = (async (): Promise<PropertyPhotos | null> => {
     try {
-      const photoService = createPhotoService(env, { provider: 'zillow' })
+      const photoService = createPhotoService(env, { provider: 'redfin', fallbacks: ['realtor'] })
       if (!photoService.isAvailable()) return null
       const result = await photoService.fetchPhotos(comp, {
         maxPhotos: 8,
@@ -373,14 +374,14 @@ export async function gatherCompConditionEvidence(
   })()
   let photos: PropertyPhotos | null = null
   const first = await Promise.race([
-    zillowPromise.then(() => 'zillow' as const),
+    scrapePromise.then(() => 'scrape' as const),
     new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 5000)),
   ])
-  if (first === 'zillow') {
-    photos = (await zillowPromise) ?? (await fetchRedfinListing(env, comp).catch(() => null))
+  if (first === 'scrape') {
+    photos = (await scrapePromise) ?? (await fetchRedfinListing(env, comp).catch(() => null))
   } else {
-    const redfinPromise = fetchRedfinListing(env, comp).catch(() => null)
-    photos = (await zillowPromise) ?? (await redfinPromise)
+    const stingrayPromise = fetchRedfinListing(env, comp).catch(() => null)
+    photos = (await scrapePromise) ?? (await stingrayPromise)
   }
 
   if (!photos) {

@@ -46,7 +46,7 @@ import type {
   NormalizedAvm,
   NormalizedBuildingDetail,
 } from '../types'
-import { fetchCensusGeography, geocodeUspsAddress } from '../../geo/census-geocoder'
+import { fetchCensusGeography } from '../../geo/census-geocoder'
 import { buildRetrievalMeta } from '../retrieval-policy'
 
 // ─── MCP transport ────────────────────────────────────────────────────────────
@@ -722,22 +722,6 @@ class AttomMcpProvider implements PropertyProviderAdapter {
           const retryResults = await this.propertyData({ lookupMode: 'address', address: retry }, SUBJECT_DATASETS)
           const retryProperty = await normalizeMcpProperty(retryResults, this.env)
           if (retryProperty.id) { results = retryResults; property = retryProperty }
-        }
-      }
-      // Young-city miss: parcels in newly incorporated cities (South Fulton
-      // → Atlanta) sit under the USPS mailing city in ATTOM's index. Geocodio
-      // normalizes the address; retry once with its formatted form, with and
-      // without the street directional. (Seen live: 100 Cay Ct SW, South
-      // Fulton → "Property not found"; Atlanta spelling resolves.)
-      if (!property.id && this.env.GEOCODIO_API_KEY) {
-        const normalized = await geocodeUspsAddress(address, this.env.GEOCODIO_API_KEY).catch(() => null)
-        if (normalized) {
-          for (const candidate of new Set([normalized, stripStreetDirectional(normalized)])) {
-            if (candidate === address) continue
-            const retryResults = await this.propertyData({ lookupMode: 'address', address: candidate }, SUBJECT_DATASETS)
-            const retryProperty = await normalizeMcpProperty(retryResults, this.env)
-            if (retryProperty.id) { results = retryResults; property = retryProperty; break }
-          }
         }
       }
       if (!property.id) return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
