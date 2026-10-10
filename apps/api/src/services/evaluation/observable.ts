@@ -189,12 +189,12 @@ const SUBJECT_QUESTIONS = {
   s8_lot_premium: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent lot', OVERSIZED_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac premium lot', POOL: 'pool visible on property', NONE: 'no premium lot features evident', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? Check each label explicitly against the aerial: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the lot boundary — the tile is zoomed wide enough to show the water edge; (2) CORNER/CUL-DE-SAC — the lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — clearly larger parcel than its neighbors; (4) POOL visible. Answer WATERFRONT whenever water borders the property — do not answer NONE while a water body touches the lot.',
+    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? THE SUBJECT LOT IS AT THE CENTER OF THE AERIAL FRAME — judge that parcel, not the neighborhood. Check each label: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot's boundary; (2) CORNER/CUL-DE-SAC — the center lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — the center parcel is clearly larger than its neighbors; (4) POOL visible on the center lot. Answer WATERFRONT whenever water borders the center parcel — do not answer NONE while a water body touches the lot.',
   },
   s9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? Read the aerial itself — multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
+    instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? THE SUBJECT LOT IS AT THE CENTER OF THE AERIAL FRAME. Read the aerial itself — multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
   },
 }
 
@@ -233,12 +233,12 @@ const COMP_QUESTIONS = {
   c8_premium_attributes: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
-    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium? Check each label against the aerial: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the lot boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the lot.",
+    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium? THE COMP LOT IS AT THE CENTER OF ITS AERIAL FRAME — judge that parcel. Check each label: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot's boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the center lot.",
   },
   c9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
-    instructions: 'When a satellite image is supplied (aerial view; road and place labels may be overlaid), does the COMP have adverse site exposure? Read the aerial itself: multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. Interior residential lots are NEUTRAL. UNVERIFIED only when no satellite image is present; do not infer exposure from price or description alone.',
+    instructions: 'When a satellite image is supplied, does the COMP have adverse site exposure? THE COMP LOT IS AT THE CENTER OF ITS AERIAL FRAME. Read the aerial itself: multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. Interior residential lots are NEUTRAL. UNVERIFIED only when no satellite image is present; do not infer exposure from price or description alone.',
   },
   c10_physical_match: {
     type: 'noul' as const,
