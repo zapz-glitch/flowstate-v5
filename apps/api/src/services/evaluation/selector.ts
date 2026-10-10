@@ -101,7 +101,7 @@ interface CompLabels {
   diffs: number
 }
 
-interface RankedComp {
+export interface RankedComp {
   id: string
   comp: HarnessEvidence['comps'][number]
   profile: CompMatchProfile
@@ -175,7 +175,10 @@ function physicalEligibility(p: CompMatchProfile, bg = false): { excludes: strin
 export function runDeterministicSelector(
   ctx: Phase1Context,
   evidence: HarnessEvidence,
-  opts?: { priceBand?: { upper: number; lower: number } },
+  opts?: {
+    priceBand?: { upper: number; lower: number }
+    onRanked?: (ranked: RankedComp[]) => void
+  },
 ): AppraiserResult {
   const subject = evidence.subject
   // The preset filter ladder (±10yr, 210-day, style-match) belongs to the
@@ -415,6 +418,10 @@ export function runDeterministicSelector(
       diffs: r.audit.recoverable.length,
     }
   }
+  // type-selector seat: the typescript lane lets a reasoning model pick
+  // among the labeled eligible set — expose the ranked pool after labels
+  // and every hard gate have landed, before the code pick runs.
+  opts?.onRanked?.(ranked)
   const arvPool = clean.filter((r) => !asIsPriced(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !asIsPriced(r) && !isRenovated(r)).sort(rank)
   const medianFallback = arvPool.length === 0
