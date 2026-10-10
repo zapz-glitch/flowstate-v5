@@ -84,9 +84,9 @@ function getStatusLabel(step: AnalysisStep | null): string {
 }
 
 /** Reads evalProgressAtom — SSE ticks re-render this leaf, not the whole page. */
-function EvalProgressLabel() {
+function EvalProgressLabel({ fallback = 'Evaluating comparables...' }: { fallback?: string }) {
   const evalProgress = useAtomValue(evalProgressAtom)
-  return <>{evalProgress ?? 'Evaluating comparables...'}</>
+  return <>{evalProgress ?? fallback}</>
 }
 
 function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: number }) {
@@ -180,6 +180,8 @@ export default function AnalyzePage() {
   const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
   // Atom, not useState — eval_progress SSE ticks re-render only the label leaf.
   const setEvalProgress = useSetAtom(evalProgressAtom)
+  const picksShownRef = useRef(false)
+  const pocketShownRef = useRef(false)
   const setPermitProgress = useSetAtom(permitProgressAtom)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
@@ -294,16 +296,68 @@ export default function AnalyzePage() {
         }
         break
 
+      case 'geo_done': {
+        if (isAiOnly) break
+        // Live pocket reveal — stamp each comp's census geography + pocket
+        // tier so the map colors pins by block-group/tract/off-pocket.
+        const geoComps = (data.comps ?? []) as Array<{ id: string; censusTract: string | null; censusBlockGroup: string | null; pocketTier: string }>
+        if (geoComps.length) {
+          const byId = new Map(geoComps.map((g) => [String(g.id), g]))
+          setAnalysisResult((prev) => prev?.comps?.items ? ({
+            ...prev,
+            comps: {
+              ...prev.comps,
+              items: prev.comps.items.map((c) => {
+                const g = byId.get(String((c as { id?: unknown }).id))
+                return g ? { ...c, censusTract: g.censusTract, censusBlockGroup: g.censusBlockGroup, pocketTier: g.pocketTier } : c
+              }),
+            },
+          } as AnalyzeData) : prev)
+        }
+        const pm = data.pocketMedianPpsf
+        setEvalProgress(`${data.pocketCount ?? 0} comp(s) in your block group${pm ? ` · pocket median $${pm}/sqft` : ''}`)
+        // The pocket line holds until the picks land on the typescript lane —
+        // bookkeeping ticks would otherwise erase it inside a second.
+        if (data.harness === 'typescript') pocketShownRef.current = true
+        break
+      }
+
+      case 'appraiser_done': {
+        // Seat finished — highlight the picks on the map and surface the ARV
+        // before the full report lands.
+        const pickIds = new Set(((data.selectedCompIds ?? []) as string[]).map(String))
+        if (pickIds.size) {
+          setAnalysisResult((prev) => prev?.comps?.items ? ({
+            ...prev,
+            comps: {
+              ...prev.comps,
+              items: prev.comps.items.map((c) =>
+                pickIds.has(String((c as { id?: unknown }).id)) ? { ...c, picked: true } : c),
+            },
+          } as AnalyzeData) : prev)
+        }
+        if (data.arv) {
+          setEvalProgress(`Picked ${pickIds.size || 0} comp(s) · ARV $${Number(data.arv).toLocaleString()}${data.conf ? ` (${data.conf})` : ''}`)
+          picksShownRef.current = true
+        }
+        break
+      }
+
+      // Progress is reset at run start; clearing here would wipe the
+      // geo_done pocket line that lands before evaluation starts.
       case 'evaluation_started':
         if (!isAiOnly) setStreamingStep('evaluating')
-        setEvalProgress(null)
         break
 
       case 'eval_progress': {
         // Permit stages go to the Permits row; every other message is the evaluation's own label
         const permitStage = permitProgressFromEvent(data)
         if (permitStage) setPermitProgress(permitStage)
-        else if (typeof data.message === 'string') setEvalProgress(data.message)
+        // The picks/ARV line holds until completion — phase-2 bookkeeping
+        // ticks would otherwise replace it within milliseconds. The pocket
+        // line gets the same hold on the typescript lane (no per-comp reads
+        // follow it there; other lanes keep their live ticks).
+        else if (typeof data.message === 'string' && !picksShownRef.current && !pocketShownRef.current) setEvalProgress(data.message)
         break
       }
 
@@ -601,6 +655,10 @@ export default function AnalyzePage() {
     aiOnlyModeRef.current = false
     setStreamingStep('idle')
     setEvalProgress(null)
+    picksShownRef.current = false
+    pocketShownRef.current = false
+    // Last run's comp grid doesn't linger under the new run's status line.
+    setAnalysisResult((prev) => prev?.comps ? ({ ...prev, comps: { ...prev.comps, items: [] } } as AnalyzeData) : prev)
     setPermitProgress(null)
     setPhase('fetching')
     lastEventAtRef.current = Date.now()
@@ -1010,7 +1068,7 @@ export default function AnalyzePage() {
             streamingStep === 'idle' && isFetching ? 'Starting analysis...'
             : streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
-            : streamingStep === 'comps' ? 'Enriching comp details...'
+            : streamingStep === 'comps' ? <EvalProgressLabel fallback="Enriching comp details..." />
             : streamingStep === 'evaluating' ? <EvalProgressLabel />
             : null
           }

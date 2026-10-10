@@ -23,15 +23,19 @@ import { toDataUrl } from './image-utils'
 export interface OpenAICompatibleConfig extends BaseLLMProviderConfig {
   /** Override for providers using different endpoints */
   baseUrl: string
+  /** OpenRouter routing preferences (provider.only/allow_fallbacks etc.) */
+  providerPrefs?: Record<string, unknown>
 }
 
 // ─── OpenAI-Compatible Provider ──────────────────────────────────────────────
 
 export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
   abstract readonly name: LLMProviderType
+  protected readonly providerPrefs?: Record<string, unknown>
 
   constructor(config: OpenAICompatibleConfig) {
     super(config)
+    this.providerPrefs = config.providerPrefs
   }
 
   /**
@@ -135,6 +139,9 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
         effort: request.reasoning.effort ?? 'medium',
       }
     }
+
+    // OpenRouter routing preferences (pinned upstream provider)
+    if (this.providerPrefs) body.provider = this.providerPrefs
 
     const fetchOptions = this.createFetchOptions(
       'POST',

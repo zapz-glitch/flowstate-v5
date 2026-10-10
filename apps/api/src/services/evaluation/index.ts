@@ -204,7 +204,7 @@ export interface EvaluationParams {
    *  caller's appraisal overrides are verbatim — no DEFAULT_FILTERS /
    *  DEFAULT_ADJUSTMENTS injection — so enablement reflects only the hard
    *  data gates; the agent weighs the doctrine's geo/age/size preferences. */
-  harness?: 'agent' | 'corelogic'
+  harness?: 'agent' | 'corelogic' | 'typescript'
 }
 
 export interface GroupBResult {
@@ -496,7 +496,7 @@ export async function performAnalysisPhase1(
   let filters: AppraisalFilter[]
   let adjustments: AppraisalAdjustment[]
 
-  if (params.harness === 'agent' || params.harness === 'corelogic') {
+  if (params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript') {
     // Ruleset-governed run — the caller's overrides are the whole grid.
     // No default injection: an empty override means "no filters", so comps
     // stay enabled unless a hard data gate fails. The agent weighs geo /
@@ -537,8 +537,10 @@ export async function performAnalysisPhase1(
   // appraisal path below. Resolved at the points the pipeline actually
   // consumes them (photo stamps near comp selection, renovation level at
   // deriveBuybox).
+  // typescript lane: strictly provider math — zero listing fetches.
+  const photoLaneOn = params.harness !== 'typescript'
   const photoService = createPhotoService(env)
-  const photoBundlePromise: Promise<PhotoBundle | null> = (async () => {
+  const photoBundlePromise: Promise<PhotoBundle | null> = photoLaneOn ? (async () => {
     let photoBundle: PhotoBundle | null = null
     try {
       if (params.prefetchedPhotoBundle !== undefined) {
@@ -609,7 +611,7 @@ export async function performAnalysisPhase1(
       }
     }
     return photoBundle
-  })()
+  })() : Promise.resolve(null)
 
   // Vision + photo persistence chain — begins the moment subject photos
   // land, long before the appraisal path finishes.
@@ -805,7 +807,7 @@ export async function performAnalysisPhase1(
   )
   const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
 
-  const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
+  const redfinDetailsEnabled = photoLaneOn && !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
   if (redfinDetailsEnabled) params.apiLedger?.record('redfin:property-details', redfinTargetsById.size + 1)
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
@@ -913,9 +915,9 @@ export async function performAnalysisPhase1(
   const subjectSatellitePromise = observablesOn
     ? fetchSatelliteTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
-  const compEvidenceOn =
+  const compEvidenceOn = photoLaneOn && (
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
-    ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
+    ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env))))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
@@ -2036,7 +2038,7 @@ export async function performAnalysisPhase2(
       // verdict; a deterministic-fallback run synthesizes the equivalent
       // selection from its own B result so it is graded the same way
       // (spec §4). Never blocks the response.
-      ...((params.harness === 'agent' || params.harness === 'corelogic') && pipelineBResult != null
+      ...((params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript') && pipelineBResult != null
         ? {
             verdictGrade: gradeVerdict(
               buildHarnessEvidence(ctx),

@@ -101,7 +101,7 @@ interface CompLabels {
   diffs: number
 }
 
-interface RankedComp {
+export interface RankedComp {
   id: string
   comp: HarnessEvidence['comps'][number]
   profile: CompMatchProfile
@@ -175,6 +175,10 @@ function physicalEligibility(p: CompMatchProfile, bg = false): { excludes: strin
 export function runDeterministicSelector(
   ctx: Phase1Context,
   evidence: HarnessEvidence,
+  opts?: {
+    priceBand?: { upper: number; lower: number }
+    onRanked?: (ranked: RankedComp[]) => void
+  },
 ): AppraiserResult {
   const subject = evidence.subject
   // The preset filter ladder (±10yr, 210-day, style-match) belongs to the
@@ -317,6 +321,22 @@ export function runDeterministicSelector(
       r.audit.reasons.push(`R4 outsized-premium — $${Math.round(r.ppsf)}/sf is ${(r.ppsf / pocketMedian).toFixed(1)}x the pocket median`)
     }
   }
+  // R8 price segmentation (typescript lane) — pocket-relative band; both
+  // tails are outliers. Too high can never be evidence for this pocket,
+  // too low is distress/as-is priced and can't drive the verdict.
+  const band = opts?.priceBand
+  if (band && pocketMedian > 0) {
+    for (const r of ranked) {
+      if (r.audit.verdict !== 'eligible') continue
+      const ratio = r.ppsf / pocketMedian
+      if (ratio > band.upper || ratio < band.lower) {
+        r.audit.verdict = 'excluded'
+        r.audit.rules.push('R8')
+        r.audit.reasons.push(
+          `R8 price-segment — $${Math.round(r.ppsf)}/sf is ${ratio.toFixed(2)}x the pocket median (band ${band.lower}x–${band.upper}x)`)
+      }
+    }
+  }
   // clean is re-derived below after the outlier pass.
   const cleanSet = new Set(ranked.filter((r) => r.audit.verdict === 'eligible').map((r) => r.id))
   clean.length = 0
@@ -398,6 +418,10 @@ export function runDeterministicSelector(
       diffs: r.audit.recoverable.length,
     }
   }
+  // type-selector seat: the typescript lane lets a reasoning model pick
+  // among the labeled eligible set — expose the ranked pool after labels
+  // and every hard gate have landed, before the code pick runs.
+  opts?.onRanked?.(ranked)
   const arvPool = clean.filter((r) => !asIsPriced(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !asIsPriced(r) && !isRenovated(r)).sort(rank)
   const medianFallback = arvPool.length === 0
@@ -827,7 +851,13 @@ function remedySelection(
     if (/outside the selected-evidence envelope/i.test(f)) {
       const prices = pickPrices()
       if (prices.length) {
-        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices) * 0.75), Math.max(...prices) * 1.25) / 500) * 500
+        // $500 rounding can push the value back over the bound it was
+        // just clamped to (e.g. cap 531250 -> 531500) — re-clamp hard so
+        // the repair never emits a still-outside ARV.
+        const lo = Math.min(...prices) * 0.75
+        const hi = Math.max(...prices) * 1.25
+        const rounded = Math.round(Math.min(Math.max(arv, lo), hi) / 500) * 500
+        const clamped = Math.min(Math.max(rounded, Math.ceil(lo)), Math.floor(hi))
         if (clamped !== arv) { arv = clamped; changed = true }
       }
       continue
@@ -843,7 +873,10 @@ function remedySelection(
     if (/extrapolat|above the (envelope|top)|beyond the/i.test(f)) {
       const prices = pickPrices()
       if (prices.length) {
-        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices)), Math.max(...prices)) / 500) * 500
+        const lo2 = Math.min(...prices)
+        const hi2 = Math.max(...prices)
+        const rounded = Math.round(Math.min(Math.max(arv, lo2), hi2) / 500) * 500
+        const clamped = Math.min(Math.max(rounded, Math.ceil(lo2)), Math.floor(hi2))
         if (clamped !== arv) { arv = clamped; changed = true }
       }
     }
