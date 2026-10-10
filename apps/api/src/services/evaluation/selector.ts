@@ -76,7 +76,7 @@ interface CompAudit {
   missingData: string[]
 }
 
-type MatchDim = 'twin' | 'close' | 'moderate' | 'poor' | 'unknown'
+type MatchDim = 'exact' | 'close' | 'recoverable' | 'hard_failure' | 'unknown'
 
 /** Per-dimension labels — the raw value AND the label are both preserved
  *  per field; a comp never collapses into one score. pricePosition is
@@ -321,7 +321,7 @@ export function runDeterministicSelector(
   // A strong attribute can never compensate for a higher-priority
   // weakness; there is no weighted score anywhere in the pick path.
   const twinCount = (r: RankedComp) =>
-    r.labels ? [r.labels.sqft, r.labels.year, r.labels.lot].filter((d) => d === 'twin').length : 0
+    r.labels ? [r.labels.sqft, r.labels.year, r.labels.lot].filter((d) => d === 'exact').length : 0
   const rank = (a: RankedComp, b: RankedComp) =>
     GEO_TIER_RANK[a.profile.geoTier] - GEO_TIER_RANK[b.profile.geoTier]
     || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
@@ -354,9 +354,9 @@ export function runDeterministicSelector(
   // even at the same geo tier — `diffs` counts the exceptions.
   const physDim = (delta: number | null, twin: number, close: number, mod: number): MatchDim =>
     delta == null ? 'unknown'
-      : Math.abs(delta) <= twin ? 'twin'
+      : Math.abs(delta) <= twin ? 'exact'
       : Math.abs(delta) <= close ? 'close'
-      : Math.abs(delta) <= mod ? 'moderate' : 'poor'
+      : Math.abs(delta) <= mod ? 'recoverable' : 'hard_failure'
   for (const r of ranked) {
     const bg = r.profile.geoTier === 'BLOCK_GROUP'
     const mod = (b: number) => bg ? b * BG_LENIENCY : b
@@ -417,7 +417,7 @@ export function runDeterministicSelector(
   // Twin-gated: ≥3 pocket comps sqft-close to the subject → median over
   // those; else the broad pocket median rides flagged as the wider read.
   const pocketMembers = clean.filter(inPocketPick)
-  const pocketTwins = pocketMembers.filter((r) => r.labels?.sqft === 'twin' || r.labels?.sqft === 'close')
+  const pocketTwins = pocketMembers.filter((r) => r.labels?.sqft === 'exact' || r.labels?.sqft === 'close')
   const medianBase = (pocketTwins.length >= 3 ? pocketTwins : pocketMembers)
     .map((r) => r.ppsf).sort((a, b) => a - b)
   const qualifiedMedianPpsf = medianBase.length
@@ -446,7 +446,7 @@ export function runDeterministicSelector(
   // decides where the set ENDS. Nothing below the bar picks; when no comp
   // clears it, take the single best-ranked comp and flag the run thin.
   const isTrueComp = (r: RankedComp) =>
-    (r.labels?.sqft === 'twin' || r.labels?.sqft === 'close') &&
+    (r.labels?.sqft === 'exact' || r.labels?.sqft === 'close') &&
     (r.labels?.diffs ?? 9) <= TRUE_COMP_MAX_DIFFS
   const truePicks = ordered.filter(isTrueComp)
   const picks = truePicks.length > 0
