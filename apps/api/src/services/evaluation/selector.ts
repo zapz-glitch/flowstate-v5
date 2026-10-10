@@ -175,6 +175,7 @@ function physicalEligibility(p: CompMatchProfile, bg = false): { excludes: strin
 export function runDeterministicSelector(
   ctx: Phase1Context,
   evidence: HarnessEvidence,
+  opts?: { priceBand?: { upper: number; lower: number } },
 ): AppraiserResult {
   const subject = evidence.subject
   // The preset filter ladder (±10yr, 210-day, style-match) belongs to the
@@ -315,6 +316,22 @@ export function runDeterministicSelector(
       r.audit.verdict = 'excluded'
       r.audit.rules.push('R4')
       r.audit.reasons.push(`R4 outsized-premium — $${Math.round(r.ppsf)}/sf is ${(r.ppsf / pocketMedian).toFixed(1)}x the pocket median`)
+    }
+  }
+  // R8 price segmentation (typescript lane) — pocket-relative band; both
+  // tails are outliers. Too high can never be evidence for this pocket,
+  // too low is distress/as-is priced and can't drive the verdict.
+  const band = opts?.priceBand
+  if (band && pocketMedian > 0) {
+    for (const r of ranked) {
+      if (r.audit.verdict !== 'eligible') continue
+      const ratio = r.ppsf / pocketMedian
+      if (ratio > band.upper || ratio < band.lower) {
+        r.audit.verdict = 'excluded'
+        r.audit.rules.push('R8')
+        r.audit.reasons.push(
+          `R8 price-segment — $${Math.round(r.ppsf)}/sf is ${ratio.toFixed(2)}x the pocket median (band ${band.lower}x–${band.upper}x)`)
+      }
     }
   }
   // clean is re-derived below after the outlier pass.

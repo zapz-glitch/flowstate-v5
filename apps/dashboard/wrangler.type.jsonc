@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flowstate-dashboard-type",
+  "compatibility_date": "2025-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "preview_urls": true,
+  "main": ".open-next/worker.js",
+  // type.flowstate.homes — the typescript eval dashboard: identical UI,
+  // pointed at the typescript API which runs pure-TypeScript evals
+  "routes": [
+    { "pattern": "type.flowstate.homes", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "NEXT_PUBLIC_API_URL": "https://api-type.flowstate.homes",
+    "NEXT_PUBLIC_GOOGLE_MAP_KEY": "AIzaSyCQVFWXbhBwmp6mskH8ngBOLNbRds2LVDc"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+  // Secrets (set via wrangler secret put):
+  // - DASHBOARD_INTERNAL_SECRET (shared with API for session-based auth)
+  // - FASTMAIL_API_TOKEN (JMAP token — deal-form email delivery to hello@)
+}
