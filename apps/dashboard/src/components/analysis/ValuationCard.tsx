@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { EvalTimer } from './eval-timer'
 import type { ValuationData } from './shared-types'
 import { formatHeadlineMoney } from './headline-money'
 import { formatValuationNumber as safeFmt } from './valuation-number'
@@ -218,11 +219,14 @@ export function ValuationCard({
                 }
               />
               <div className="text-heading-sm font-semibold">${safeFmt(valuation.rehabCost)}</div>
-              {valuation.rehabLevel && (
-                <Badge variant="outline" className="mt-1.5">
-                  {valuation.rehabLevel}
-                </Badge>
-              )}
+              <div className="mt-1.5 flex items-center gap-2">
+                {valuation.rehabLevel && (
+                  <Badge variant="outline">
+                    {valuation.rehabLevel}
+                  </Badge>
+                )}
+                <EvalTimer />
+              </div>
               {(valuation.majorItemsCost ?? 0) > 0 && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">
                   Base: ${safeFmt(valuation.baseRehabCost)} + Items: ${safeFmt(valuation.majorItemsCost)}

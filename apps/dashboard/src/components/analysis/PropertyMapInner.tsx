@@ -215,6 +215,24 @@ function NativeMapCamera({ mapRef }: { mapRef: MutableRefObject<google.maps.Map 
   return null
 }
 
+// Card hover pulls the comp into frame — the marker is already highlighted
+// by activeMarkerKey, this just recenters when it sits outside the view.
+// A short dwell keeps a pointer sweep down the list from flying the camera.
+function CompAutoPan({ markers, activeMarkerKey }: { markers: MapMarker[]; activeMarkerKey?: string | null }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!map || !activeMarkerKey) return
+    const timer = setTimeout(() => {
+      const marker = markers.find((m) => markerKey(m) === activeMarkerKey)
+      if (!marker || marker.type === 'subject') return
+      const bounds = map.getBounds()
+      if (bounds && !bounds.contains(marker)) map.panTo(marker)
+    }, 180)
+    return () => clearTimeout(timer)
+  }, [map, activeMarkerKey, markers])
+  return null
+}
+
 // Right-click leaves full screen. Outside full screen the browser menu is untouched.
 function FullscreenRightClickExit() {
   const map = useMap()
@@ -411,6 +429,7 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
             zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
             <NativeMapCamera mapRef={nativeMap} />
             <FullscreenRightClickExit />
+            <CompAutoPan markers={correctedMarkers} activeMarkerKey={activeMarkerKey} />
             <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} />
           </Map> : <div role="status" className="p-4 text-sm">Loading 3D map…</div>)}
         {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}
