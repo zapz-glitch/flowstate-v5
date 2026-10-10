@@ -95,7 +95,11 @@ export async function runTypeSelector(
       || (GEO_RANK[a.profile.geoTier] ?? 9) - (GEO_RANK[b.profile.geoTier] ?? 9)
       || String(b.comp.saleDate ?? '').localeCompare(String(a.comp.saleDate ?? '')))
     .slice(0, MODEL_CAP)
-  if (eligible.length === 0) return base
+  if (eligible.length === 0) {
+    base.debugNotes.push(`type-selector: 0 eligible comps (ranked=${ranked.length} verdicts=${ranked.map((r) => r.audit.verdict).join(',')}) — deterministic seat`)
+    return base
+  }
+  base.debugNotes.push(`type-selector: seat call → ${eligible.length} eligible (ranked=${ranked.length})`)
 
   const subject = evidence.subject
   const rows = eligible.map((r) => {
