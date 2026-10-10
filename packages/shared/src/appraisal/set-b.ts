@@ -375,13 +375,26 @@ export function evaluateB(
   }
 
   // T1b — near-miss rescue + market-conditions adjustment. Same-pocket
-  // comps (same tract/BG, no road) killed ONLY on sale-age or label
-  // mismatches come back — with their price time-adjusted to the pocket's
-  // own measured trend, the way an appraiser does it. Sales ≤365d
-  // eligible; the trend is the OLS $/sf-per-month slope over cleaned
-  // same-tract sales; unmeasurable trend → −10% stale haircut past 180d.
+  // comps (same tract/BG, no road) killed ONLY on recoverable tolerances
+  // — sale age, year band, size band, lot band, label mismatches — come
+  // back with their price time-adjusted to the pocket's own measured
+  // trend, the way an appraiser does it. A maintained comp at the
+  // pocket's median price is living-condition evidence — the subject's
+  // move-in worst case — not a rejection; the bands were tolerances,
+  // not doctrine. Sales ≤365d eligible; the trend is the OLS $/sf-per-
+  // month slope over cleaned same-tract sales; unmeasurable trend →
+  // −10% stale haircut past 180d.
   {
-    const SOFT_KILL = /sale age|sale too old|geo scope|subdivision|neighborhood/i
+    const SOFT_KILL = /sale age|sale too old|geo scope|subdivision|neighborhood|year built difference|sqft difference|lot size difference/i
+    // The rescue stops at R2's disqualifying line — a comp past it is
+    // different stock, not a recoverable difference.
+    const withinRescuable = (c: BComp) => {
+      const yd = c.yearBuilt != null && subject.yearBuilt ? Math.abs(c.yearBuilt - subject.yearBuilt) : null
+      if (yd != null && yd > 50) return false
+      const sd = c.squareFeet && subject.squareFeet ? Math.abs(c.squareFeet - subject.squareFeet) / subject.squareFeet : null
+      if (sd != null && sd > 0.5) return false
+      return true
+    }
     const refMs = Math.max(...items.map((c) => Date.parse(c.saleDate ?? '') || 0)) || Date.now()
     const daysOld = (d?: string | null) => d ? (refMs - Date.parse(d)) / 864e5 : null
     const trendPts = items
@@ -409,6 +422,7 @@ export function evaluateB(
       if (!samePocket) return false
       const age = daysOld(c.saleDate)!
       if (age > 365) return false
+      if (!withinRescuable(c)) return false
       return true
     })
     for (const c of rescued) {
