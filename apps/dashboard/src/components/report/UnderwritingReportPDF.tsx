@@ -348,6 +348,13 @@ export function UnderwritingReportPDF({
   const formattedDate = fmtDate(date)
   const enabledComps = comps?.items?.filter((c) => c.isEnabled !== false) ?? []
   const excludedComps = comps?.items?.filter((c) => c.isEnabled === false) ?? []
+  // "Selected for ARV" = the model/engine picks (compGroup === 'arv'), not
+  // the whole enabled pool — a filter-passing comp isn't a selection.
+  // bRole === 'excluded' comps were dropped by verification after staging —
+  // they are not valuation evidence. Fallback to enabled for legacy saved
+  // reports that predate compGroup.
+  const arvMarked = enabledComps.filter((c) => c.compGroup === 'arv' && c.bRole !== 'excluded')
+  const selectedComps = arvMarked.length > 0 ? arvMarked : enabledComps
   const profitColor = (valuation?.projectedProfit ?? 0) > 0 ? C.green : C.red
 
   const recBgColor = (() => {
@@ -582,7 +589,7 @@ export function UnderwritingReportPDF({
         <Page size="LETTER" style={s.page}>
           <PageFooter date={formattedDate} />
 
-          <SectionTitle>Comparable Sales — Selected for ARV ({enabledComps.length})</SectionTitle>
+          <SectionTitle>Comparable Sales — Selected for ARV ({selectedComps.length})</SectionTitle>
 
           {/* Summary stats */}
           <View style={[s.row, s.gap8, { marginBottom: 8 }]}>
@@ -611,7 +618,7 @@ export function UnderwritingReportPDF({
             <Text style={[s.tableHeaderCell, { width: '6%', textAlign: 'right' }]}>Dist</Text>
             <Text style={[s.tableHeaderCell, { width: '7%', textAlign: 'right' }]}>Sold</Text>
           </View>
-          {enabledComps.map((comp, i) => (
+          {selectedComps.map((comp, i) => (
             <View key={i} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]} wrap={false}>
               <Text style={[s.tableCell, { width: '4%', color: C.muted }]}>{i + 1}</Text>
               <Text style={[s.tableCellBold, { width: '26%' }]}>
@@ -643,7 +650,7 @@ export function UnderwritingReportPDF({
             </View>
           ))}
 
-          {enabledComps.filter(comp => comp.photos?.[0]?.startsWith('data:image/')).map((comp, index) => (
+          {selectedComps.filter(comp => comp.photos?.[0]?.startsWith('data:image/')).map((comp, index) => (
             <View key={`photo-${index}`} style={{ marginTop: 8 }} wrap={false}>
               <Text style={s.tableCell}>{comp.address}</Text>
               <Image src={comp.photos![0]} style={{ width: 180, height: 110, objectFit: 'contain' }} />

@@ -111,7 +111,7 @@ export interface UseReportSettingsReturn {
 }
 
 export function useReportSettings(data: AnalyzeData | null): UseReportSettingsReturn {
-  const pythonAuthoritative = ['python-v4', 'ts-v5'].includes(data?.evaluationEngine ?? '')
+  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
   const [loading, setLoading] = useState(true)
   const [labels, setLabels] = useState<AppraisalDefaults | null>(null)
 

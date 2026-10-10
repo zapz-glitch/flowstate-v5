@@ -101,7 +101,7 @@ export function useAnalysisEvaluation({
   currentInputRef.current = inputData
   const activeSelection = serverSelection?.source === inputData ? serverSelection : null
   const data = activeSelection?.analysis ?? inputData
-  const pythonAuthoritative = data?.evaluationEngine === 'python-v4' || data?.evaluationEngine === 'ts-v5'
+  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
   // Settings panel open/close
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -408,10 +408,20 @@ export function useAnalysisEvaluation({
     })
 
     // When user manually selects comps, recompute stats from selected comps
+    // and restamp compGroup so "Selected for ARV" (PDF + saved report)
+    // means the user's picks, not the classification-derived tags.
     let { avgPricePerSqft, medianPrice, enabledCount, disabledCount } = recalcData
+    const markedItems = compOverride?.isManual
+      ? items.map((comp, i) => {
+          const picked = compOverride.selectedCompKeys.has(getCompKey(comp, i))
+          return picked
+            ? { ...comp, compGroup: 'arv' as const }
+            : comp.compGroup === 'arv' ? { ...comp, compGroup: null } : comp
+        })
+      : items
     if (compOverride?.isManual) {
       const compsItems = data.comps?.items || []
-      const selected = items.filter((_, i) => compOverride.selectedCompKeys.has(getCompKey(compsItems[i], i)))
+      const selected = markedItems.filter((_, i) => compOverride.selectedCompKeys.has(getCompKey(compsItems[i], i)))
       enabledCount = selected.length
       disabledCount = items.length - enabledCount
 
@@ -454,7 +464,7 @@ export function useAnalysisEvaluation({
       disabledCount,
       avgPricePerSqft,
       medianPrice,
-      items,
+      items: markedItems,
     }
   }, [recalcData, data?.comps, compOverride, pythonAuthoritative, selectionPending])
 

@@ -157,7 +157,7 @@ class MultiPhotoService implements PhotoService {
       this.providers.set('zillow', zillowProvider)
     }
 
-    // Listing-site fallbacks (Redfin, Realtor.com) — Firecrawl-based
+    // Listing-site fallbacks (Redfin, Realtor.com) — Scrapfly-based
     for (const site of ['redfin', 'realtor'] as const) {
       const provider = createListingPhotoProvider(env, site)
       if (provider.isAvailable()) {

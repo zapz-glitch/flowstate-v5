@@ -1,9 +1,11 @@
 /**
- * Firecrawl Listing Fetcher
+ * Listing Fetcher — Scrapfly transport
  *
- * Single-provider evidence chain (owner-specified decision tree):
- *   Address → Firecrawl /v1/search → listing URL → Firecrawl /v1/scrape
- *   → photos + description → (Clef classification downstream)
+ * Evidence chain:
+ *   Address → Zillow autocomplete zpid (free) → Scrapfly ASP scrape
+ *   → photos + description → (Clef classification downstream).
+ *   The Redfin photo provider is the fallback when Zillow misses.
+ *   Firecrawl transport stays in the class but is not wired from env.
  *
  * Fallback order per comp: Zillow → Redfin → Realtor.com.
  * Zillow pages are only evidence when the canonical URL proves the scrape
@@ -41,7 +43,10 @@ interface CachedZillowData {
 }
 
 export interface ScrapflyZillowFetcherConfig {
-  /** Firecrawl API key — the only transport this fetcher uses */
+  /** Scrapfly API key — primary scrape transport */
+  scrapflyApiKey?: string
+  scrapflyUrl?: string
+  /** Firecrawl API key — search + fallback scrape transport */
   firecrawlApiKey?: string
   /** Optional KV cache */
   cache?: KVNamespace
@@ -56,6 +61,8 @@ interface SiteLane {
 }
 
 export class ScrapflyZillowFetcher {
+  private scrapflyApiKey?: string
+  private scrapflyUrl: string
   private firecrawlApiKey?: string
   private cache?: KVNamespace
   private cacheTtl: number
@@ -63,10 +70,13 @@ export class ScrapflyZillowFetcher {
   /** Counter names kept identical to the Firecrawl fetcher — getCallStats()
    *  and the bundle's apiCallStats read these fields regardless of engine. */
   firecrawlCallCount = 0
+  scrapflyCallCount = 0
   cacheHitCount = 0
   llmCallCount = 0
 
   constructor(config: ScrapflyZillowFetcherConfig) {
+    this.scrapflyApiKey = config.scrapflyApiKey
+    this.scrapflyUrl = config.scrapflyUrl || 'https://api.scrapfly.io/scrape'
     this.firecrawlApiKey = config.firecrawlApiKey
     this.cache = config.cache
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
@@ -74,6 +84,7 @@ export class ScrapflyZillowFetcher {
 
   resetCallCounters(): void {
     this.firecrawlCallCount = 0
+    this.scrapflyCallCount = 0
     this.cacheHitCount = 0
     this.llmCallCount = 0
   }
@@ -101,10 +112,84 @@ export class ScrapflyZillowFetcher {
     return null
   }
 
-  /** /v1/scrape — extractor: listing URL → raw HTML (~5-8s). rawHtml because
-   *  the sanitized `html` format strips the script/meta blocks that carry
-   *  canonical URLs, JSON-LD, and gallery photo srcsets. */
+  /** Scrape transport chain: Scrapfly (ASP) → Firecrawl. */
   private async scrape(url: string): Promise<string | null> {
+    return (await this.scrapeViaScrapfly(url)) ?? (await this.scrapeViaFirecrawl(url))
+  }
+
+  /** Scrapfly ASP scrape (~2s, no JS render — Zillow ships the gallery +
+   *  canonical in the server HTML). One retry on 429: the plan caps
+   *  concurrency, and a queued slot frees within seconds. */
+  private async scrapeViaScrapfly(url: string, attempt = 0): Promise<string | null> {
+    if (!this.scrapflyApiKey) return null
+    // The key rides in the query string — only ever send it to Scrapfly.
+    const host = (() => { try { return new URL(this.scrapflyUrl).hostname } catch { return '' } })()
+    // exact domain or a real subdomain only — 'evil-scrapfly.io' ends the
+    // same way but is not Scrapfly, and the key rides in the query string.
+    if (host !== 'scrapfly.io' && !host.endsWith('.scrapfly.io')) return null
+    try {
+      const params = new URLSearchParams({ key: this.scrapflyApiKey, url, asp: 'true', country: 'us' })
+      const res = await fetch(`${this.scrapflyUrl}?${params}`, { signal: AbortSignal.timeout(60_000) })
+      if (res.status === 429 && attempt === 0) {
+        await new Promise((r) => setTimeout(r, 2000))
+        return this.scrapeViaScrapfly(url, 1)
+      }
+      if (!res.ok) return null
+      const data = (await res.json()) as { result?: { status_code?: number; content?: string } }
+      this.scrapflyCallCount++
+      const status = data.result?.status_code
+      const html = data.result?.content
+      return html && html.length > 100 && !(status != null && status >= 400) ? html : null
+    } catch {
+      return null
+    }
+  }
+
+  /** Zillow's public autocomplete — address → zpid, free and keyless.
+   *  A zpid URL lands on the canonical homedetails page in one scrape, so
+   *  no search engine is needed for the Zillow lane. */
+  private async resolveZpidUrl(property: ZillowPropertyIdentifier): Promise<string | null> {
+    const q = [property.address, property.city, property.state, property.zipCode].filter(Boolean).join(' ')
+    try {
+      const res = await fetch(
+        `https://www.zillowstatic.com/autocomplete/v3/suggestions?q=${encodeURIComponent(q)}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' }, signal: AbortSignal.timeout(8000) },
+      )
+      if (!res.ok) return null
+      const data = (await res.json()) as {
+        results?: Array<{
+          resultType?: string
+          metaData?: { zpid?: number; streetNumber?: string; streetName?: string; zipCode?: string }
+        }>
+      }
+      const norm = (s?: string) => (s ?? '').toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, ' ').trim()
+      const wantedNum = property.address.match(/\d+/)?.[0]
+      const wantedAddr = norm(property.address)
+      const hit = data.results?.find((r) => {
+        const m = r.metaData
+        if (r.resultType !== 'Address' || !m?.zpid) return false
+        // Same house number on a different street is a different home —
+        // number alone is not proof.
+        if (wantedNum && m.streetNumber !== wantedNum) return false
+        const mStreet = norm(m.streetName)
+        if (mStreet && !wantedAddr.includes(mStreet)) return false
+        if (property.zipCode && m.zipCode && m.zipCode !== property.zipCode) return false
+        return true
+      })
+      if (!hit?.metaData?.zpid) return null
+      // /homes/<slug>_rb/ is a SEARCH URL — the canonical listing lives on
+      // /homedetails/<slug>/<zpid>_zpid/.
+      const slug = norm(property.address).replace(/\s+/g, '-')
+      return `https://www.zillow.com/homedetails/${slug}/${hit.metaData.zpid}_zpid/`
+    } catch {
+      return null
+    }
+  }
+
+  /** Firecrawl /v1/scrape — rawHtml because the sanitized `html` format
+   *  strips the script/meta blocks that carry canonical URLs, JSON-LD, and
+   *  gallery photo srcsets. */
+  private async scrapeViaFirecrawl(url: string): Promise<string | null> {
     if (!this.firecrawlApiKey) return null
     try {
       const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
@@ -206,7 +291,14 @@ export class ScrapflyZillowFetcher {
     }
 
     if (site === 'zillow') {
-      // Constructed URL first — address → canonical zillow slug is a code
+      // zpid URL first — autocomplete resolves the exact parcel for free.
+      const zpidUrl = await this.resolveZpidUrl(property)
+      if (zpidUrl) {
+        const html = await this.scrape(zpidUrl)
+        const hit = html ? parseZillow(html) : null
+        if (hit) return hit
+      }
+      // Constructed URL next — address → canonical zillow slug is a code
       // transform, so one scrape often replaces the search+scrape pair.
       const generated = await this.scrape(generateZillowUrl(property))
       if (generated) {
@@ -380,9 +472,10 @@ export class ScrapflyZillowFetcher {
   }
 
   /** Compatibility shim — the stats reader polls this name. */
-  getCallStats(): { firecrawlCalls: number; cacheHits: number; llmCalls: number } {
+  getCallStats(): { firecrawlCalls: number; scrapflyCalls: number; cacheHits: number; llmCalls: number } {
     return {
       firecrawlCalls: this.firecrawlCallCount,
+      scrapflyCalls: this.scrapflyCallCount,
       cacheHits: this.cacheHitCount,
       llmCalls: this.llmCallCount,
     }

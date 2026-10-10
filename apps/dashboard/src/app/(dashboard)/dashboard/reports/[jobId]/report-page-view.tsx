@@ -52,8 +52,8 @@ const RERUN_STAGES: Array<{ event: string; label: string }> = [
   { event: 'subject_found', label: 'Scoring subject' },
   { event: 'comps_found', label: 'Pulling comps' },
   { event: 'evaluation_started', label: 'Evaluating' },
-  { event: 'llm_started', label: 'Selecting comps' },
-  { event: 'llm_complete', label: 'Finalizing' },
+  { event: 'eval_progress', label: 'Evaluating' },
+  { event: 'evaluation_complete', label: 'Finalizing' },
 ]
 
 // ─── Give Offer fallback — queue disposition when the report can't load ────
@@ -446,7 +446,13 @@ export function ReportPageView({ params, queue }: {
     // Advance the rerun stage line — never backwards (events can interleave)
     const stageIdx = RERUN_STAGES.findIndex((s) => s.event === eventType)
     if (stageIdx >= 0) {
-      setRerunStage((prev) => (typeof prev === 'number' && prev > stageIdx + 1 ? prev : stageIdx + 1))
+      setRerunStage((prev) => {
+        // Terminal states own the control — late events can't regress Done/Failed back to a stage
+        if (prev === 'done' || prev === 'error') return prev
+        // eval_progress also fires for permit lookups pre-evaluation — only count it mid-eval
+        if (eventType === 'eval_progress' && (typeof prev !== 'number' || prev < 4)) return prev
+        return typeof prev === 'number' && prev > stageIdx + 1 ? prev : stageIdx + 1
+      })
     }
     const clearRerunStageSoon = (ms: number) => {
       if (rerunStageTimerRef.current) clearTimeout(rerunStageTimerRef.current)
@@ -519,8 +525,12 @@ export function ReportPageView({ params, queue }: {
         setRefreshing(false)
         setRefreshStreamUrl(null)
         setRefreshToken(null)
-        setRerunStage('done')
-        clearRerunStageSoon(2500)
+        // Terminal event fires after errors too — keep Failed and let its own timer clear it
+        setRerunStage((prev) => {
+          if (prev === 'error') return prev
+          clearRerunStageSoon(2500)
+          return 'done'
+        })
         break
       case 'error':
         setAiAnalyzing(false)
@@ -575,6 +585,10 @@ export function ReportPageView({ params, queue }: {
     if (!report?.address) return
     setRefreshing(true)
     setRefreshResult(null)
+    if (rerunStageTimerRef.current) {
+      clearTimeout(rerunStageTimerRef.current)
+      rerunStageTimerRef.current = null
+    }
     setRerunStage(1)
     const rerunFailed = () => {
       if (rerunStageTimerRef.current) clearTimeout(rerunStageTimerRef.current)

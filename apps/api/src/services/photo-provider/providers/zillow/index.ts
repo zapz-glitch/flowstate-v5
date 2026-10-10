@@ -50,9 +50,7 @@ export type ZillowFetcher = ScrapflyZillowFetcher | FirecrawlZillowFetcher | Gem
  * Requires Firecrawl API key. OpenRouter is optional (fallback for LLM parsing).
  */
 export function isZillowFetcherAvailable(env: Env): boolean {
-  if (env.SCRAPFLY_API_KEY) return true
-  if (env.FIRECRAWL_API_KEY) return true
-  return false
+  return Boolean(env.SCRAPFLY_API_KEY)
 }
 
 /**
@@ -60,12 +58,12 @@ export function isZillowFetcherAvailable(env: Env): boolean {
  * Uses Firecrawl v2 JSON extraction (primary) + OpenRouter LLM (fallback)
  */
 export function createZillowFetcher(env: Env): ZillowFetcher | null {
-  // Owner-specified chain — Firecrawl only:
-  //   Address → /v1/search → URL → /v1/scrape → photos+text → Clef.
-  // No Scrapfly, no Serper, no Stingray in the fetch path.
-  if (env.FIRECRAWL_API_KEY) {
+  // Owner-specified chain: Scrapfly (Zillow) primary → Redfin provider
+  // fallback. No Firecrawl in the photo path.
+  if (env.SCRAPFLY_API_KEY) {
     return createScrapflyZillowFetcher({
-      firecrawlApiKey: env.FIRECRAWL_API_KEY,
+      scrapflyApiKey: env.SCRAPFLY_API_KEY,
+      scrapflyUrl: env.SCRAPFLY_URL,
       cache: env.API_CACHE,
       cacheTtl: 30 * 24 * 60 * 60,
     })
@@ -81,8 +79,7 @@ export const createZillowFetcherFromEnv = createZillowFetcher
  * Get the provider name being used
  */
 export function getZillowFetcherProvider(env: Env): string | null {
-  if (env.FIRECRAWL_API_KEY) return 'firecrawl-search+scrape'
-  return null
+  return env.SCRAPFLY_API_KEY ? 'scrapfly' : null
 }
 
 // ─── Photo Provider Implementation ──────────────────────────────────────────
@@ -126,7 +123,7 @@ export class ZillowPhotoProvider implements PhotoProvider {
       return {
         success: false,
         propertyId: property.propertyId,
-        error: 'Zillow fetcher not available - FIRECRAWL_API_KEY required',
+        error: 'Zillow fetcher not available - SCRAPFLY_API_KEY required',
         code: 'PROVIDER_UNAVAILABLE',
       }
     }
