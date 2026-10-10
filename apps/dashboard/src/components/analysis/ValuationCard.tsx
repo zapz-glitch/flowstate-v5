@@ -140,6 +140,17 @@ export function ValuationCard({
                   )}
                 </div>
               )}
+              {(valuation.bMechanics?.flags ?? [])
+                .filter((f) => f.includes('site_exposure:'))
+                .map((f, i) => {
+                  const side = /site_exposure:(\w+)/.exec(f)?.[1] ?? ''
+                  const amt = /\(-\$?([\d,]+)/.exec(f)?.[1]
+                  return (
+                    <div key={i} className="text-[9px] font-mono text-amber-600 dark:text-amber-500 mt-1 truncate" title={f}>
+                      site exposure: {side.toLowerCase()}{amt ? ` · -$${amt}` : ''}
+                    </div>
+                  )
+                })}
             </div>
             {valuation.listPrice != null && (
               <div className="p-3 min-w-[120px] flex-1">
