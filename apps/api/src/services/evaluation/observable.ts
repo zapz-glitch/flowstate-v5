@@ -432,10 +432,12 @@ async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
     const g = await fetchTile(`https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&maptype=hybrid&key=${key}`).catch(() => null)
     if (g) return g
   }
-  // Web-Mercator bbox ≈ zoom 18 (~0.6m/px → ~380m across at 640px).
+  // Web-Mercator bbox ≈ zoom 17 (~600m across at 640px).
+  // x = lng·(πR_earth)/180 needs the half-extent constant; y needs
+  // R_earth itself: y = R_earth·ln(tan(π/4 + φ/2)).
   const R = 20037508.34
   const x = (lng as number) * R / 180
-  const y = Math.log(Math.tan((90 + (lat as number)) * Math.PI / 360)) / (Math.PI / 180) * R
+  const y = (R / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (lat as number) * Math.PI / 360))
   // half-width ~300m (~600m across) — wide enough that a waterfront
   // boundary (bay/canal/lake edge) is visible in frame, not just the
   // street block. Waterfront reads failed at 380m when the water sat
