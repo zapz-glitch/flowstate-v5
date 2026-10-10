@@ -117,13 +117,24 @@ export async function runTypeSelector(
   })
 
   try {
-    const res = await provider.execute({
+    // One retry — the reasoning provider intermittently returns an empty
+    // completion; a second call is cheap against the deterministic seat.
+    let res = await provider.execute({
       prompt: user,
       systemPrompt: sys,
       responseFormat: 'json',
       maxTokens: 8000,
       reasoning: { enabled: true, effort: 'low' },
     })
+    if ((!res.success || !res.data?.content)) {
+      res = await provider.execute({
+        prompt: user,
+        systemPrompt: sys,
+        responseFormat: 'json',
+        maxTokens: 8000,
+        reasoning: { enabled: true, effort: 'low' },
+      })
+    }
     if (!res.success) throw new Error(res.error?.message ?? 'provider error')
     const text = res.data?.content ?? ''
     const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
