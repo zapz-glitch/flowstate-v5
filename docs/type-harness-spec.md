@@ -93,3 +93,21 @@ The preset tolerance ladder maps directly onto the label classes — no fuzzy ju
 
 1. If assessor condition is present, do we apply a discount/adjustment rule or display only? (Default: display only.)
 2. Cul-de-sac / corner inference from road geometry — worth the extra call?
+
+## v3 — reasoning-model pick seat
+
+TypeScript still IDs every data set (labels, geo tiers, price groups, band
+bounds). The pick seat is now `deepseek/deepseek-v4.1-flash:fast` via
+OpenRouter (`TYPE_SELECTOR_MODEL`, OPENROUTER_API_KEY secret):
+
+- Every eligible comp is stamped with a match tier in code: **tier 1** =
+  in-pocket + all physical labels exact/close + fresh + ARV-priced;
+  **tier 2** = in-pocket + ≤1 recoverable diff OR clean physicals priced
+  median; **tier 3** = in-pocket + ≤2 recoverable diffs. Hard exclusions
+  (off-pocket, out-of-band, aged, anomalous) never reach the model.
+- The model picks 1–3 — most tier-1s first, tier-2/3 as the stated
+  fallback — and posts the ARV its picks justify.
+- Guards: ids must come from the eligible set; ARV must sit inside the
+  picks' own $/sf envelope (±50%); malformed/empty answers keep the
+  deterministic selection. `type_seat:<model>` flag marks a model pick.
+- Reasoning models need an 8k token budget (reasoning trace + answer).
