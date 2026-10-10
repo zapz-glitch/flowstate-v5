@@ -87,8 +87,11 @@ export async function runTypeSelector(
   // that answers in seconds.
   const MODEL_CAP = 12
   const GEO_RANK: Record<string, number> = { BLOCK_GROUP: 0, NEIGHBORHOOD: 1, SUBDIVISION: 2, TRACT: 3, OFF_POCKET: 4 }
+  // 'picked' verdicts are stamped inside the same call before it returns —
+  // the ranked array we captured is post-mutation, so eligible membership is
+  // "not ruled out", not "still stamped eligible".
   const eligible = ranked
-    .filter((r) => r.audit.verdict === 'eligible')
+    .filter((r) => r.audit.verdict === 'eligible' || r.audit.verdict === 'picked')
     .sort((a, b) =>
       tierOf(a) - tierOf(b)
       || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
