@@ -414,6 +414,33 @@ export function runDeterministicSelector(
   // never only-BG (a 2-comp BG can't fill a pick set on its own).
   const inPocketPick = inPocket
 
+  // R7 foreign-pocket keying — needed BEFORE the medians so the foreign
+  // baseline can exclude foreign members. A comp outside the subject's
+  // subdivision/neighborhood is keyed to its own pocket; comps with no
+  // subdivision data aren't foreign (unknown ≠ different).
+  const normGeo = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+  const subjectSubKey =
+    normGeo(subject.subdivision as string | null | undefined) ??
+    normGeo(subject.neighborhoodName as string | null | undefined)
+  const foreignKey = (r: RankedComp): string | null => {
+    if (r.profile.geoTier !== 'TRACT') return null
+    const k = normGeo(r.comp.subdivision) ?? normGeo(r.comp.neighborhoodName)
+    return k && k !== subjectSubKey ? k : null
+  }
+  const foreignGroups = new Map<string, RankedComp[]>()
+  for (const r of clean) {
+    const k = foreignKey(r)
+    if (k) {
+      const g = foreignGroups.get(k) ?? []
+      g.push(r)
+      foreignGroups.set(k, g)
+    }
+  }
+  const medianOf = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b)
+    return s.length ? s[Math.floor((s.length - 1) / 2)] : 0
+  }
+
   // Similarity-qualified pocket median $/sf — the base price position is
   // labeled against. Pocket members only (the gate's own in-pocket
   // test), arm's-length and non-outlier by construction of `clean`.
@@ -427,6 +454,12 @@ export function runDeterministicSelector(
     ? medianBase[Math.floor((medianBase.length - 1) / 2)]
     : 0
   const medianScope = pocketTwins.length >= 3 ? 'similarity-qualified' : 'broad-pocket'
+  // R7 baseline: the subject pocket's own median, foreign members
+  // excluded — otherwise a tract full of one expensive subdivision sets
+  // the baseline and validates its own price. Falls back to the broad
+  // read when every pocket member is foreign.
+  const ownPocketPpsf = pocketMembers.filter((r) => foreignKey(r) === null).map((r) => r.ppsf)
+  const ownPocketMedianPpsf = ownPocketPpsf.length ? medianOf(ownPocketPpsf) : qualifiedMedianPpsf
 
   // Picks: ARV-qualified comps always join the set first (even below
   // MIN_PICKS — d4 wants every qualified comp used), then in-pocket
@@ -455,49 +488,29 @@ export function runDeterministicSelector(
   // R7 foreign-pocket validation — a comp OUTSIDE the subject's own
   // subdivision/neighborhood only picks when its pocket proves consistent:
   // the same median check the subject pocket gets, run on the foreign
-  // subdivision. ≥2 pool members in that subdivision → their median $/sf
-  // must sit within ±25% of the subject pocket's qualified median (an
+  // subdivision against the pocket's OWN median (foreign members
+  // excluded — a tract full of one expensive subdivision can't validate
+  // its own price). ≥2 pool members in that subdivision → their median
+  // $/sf must sit within ±25% of the subject pocket's median (an
   // extension of the neighborhood, not a pricier or cheaper pocket — the
   // 3757-Oakman-class miss). A foreign singleton has no pocket to validate;
   // it picks only when its own $/sf already sits inside the subject
   // pocket's envelope. Failing both, the comp stays context — labeled, not
-  // deleted.
-  const normGeo = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
-  const subjectSubKey =
-    normGeo(subject.subdivision as string | null | undefined) ??
-    normGeo(subject.neighborhoodName as string | null | undefined)
-  const foreignKey = (r: RankedComp): string | null => {
-    if (r.profile.geoTier !== 'TRACT') return null
-    const k = normGeo(r.comp.subdivision) ?? normGeo(r.comp.neighborhoodName)
-    return k && k !== subjectSubKey ? k : null
-  }
-  const foreignGroups = new Map<string, RankedComp[]>()
-  for (const r of clean) {
-    const k = foreignKey(r)
-    if (k) {
-      const g = foreignGroups.get(k) ?? []
-      g.push(r)
-      foreignGroups.set(k, g)
-    }
-  }
+  // deleted — and can never become a fallback driver.
   const FOREIGN_BAND_LO = 0.75
   const FOREIGN_BAND_HI = 1.33
   const inBand = (ppsf: number) =>
-    qualifiedMedianPpsf > 0 && ppsf >= qualifiedMedianPpsf * FOREIGN_BAND_LO && ppsf <= qualifiedMedianPpsf * FOREIGN_BAND_HI
-  const medianOf = (xs: number[]) => {
-    const s = [...xs].sort((a, b) => a - b)
-    return s.length ? s[Math.floor((s.length - 1) / 2)] : 0
-  }
+    ownPocketMedianPpsf > 0 && ppsf >= ownPocketMedianPpsf * FOREIGN_BAND_LO && ppsf <= ownPocketMedianPpsf * FOREIGN_BAND_HI
   const foreignOk = (r: RankedComp): boolean => {
     const k = foreignKey(r)
     if (!k) return true
     const members = foreignGroups.get(k) ?? []
     if (members.length >= 2) {
       const fm = medianOf(members.map((m) => m.ppsf))
-      if (qualifiedMedianPpsf > 0) {
+      if (ownPocketMedianPpsf > 0) {
         if (!inBand(fm)) {
           r.audit.reasons.push(
-            `R7 foreign-pocket — ${k} median $${Math.round(fm)}/sf vs subject pocket $${Math.round(qualifiedMedianPpsf)}/sf (outside ±25%)`
+            `R7 foreign-pocket — ${k} median $${Math.round(fm)}/sf vs subject pocket $${Math.round(ownPocketMedianPpsf)}/sf (outside ±25%)`
           )
           return false
         }
@@ -508,17 +521,21 @@ export function runDeterministicSelector(
     }
     if (!inBand(r.ppsf)) {
       r.audit.reasons.push(
-        `R7 foreign-singleton — $${Math.round(r.ppsf)}/sf outside subject pocket envelope ($${Math.round(qualifiedMedianPpsf * FOREIGN_BAND_LO)}–${Math.round(qualifiedMedianPpsf * FOREIGN_BAND_HI)}/sf)`
+        `R7 foreign-singleton — $${Math.round(r.ppsf)}/sf outside subject pocket envelope ($${Math.round(ownPocketMedianPpsf * FOREIGN_BAND_LO)}–${Math.round(ownPocketMedianPpsf * FOREIGN_BAND_HI)}/sf)`
       )
       return false
     }
     return true
   }
 
-  const truePicks = ordered.filter((r) => isTrueComp(r) && foreignOk(r))
+  // One eligibility pass — the gate's audit reasons push once per comp,
+  // and the fallback picks draw only from comps that cleared R7 (a
+  // rejected foreign comp never becomes a driver).
+  const eligible = ordered.filter(foreignOk)
+  const truePicks = eligible.filter(isTrueComp)
   const picks = truePicks.length > 0
     ? truePicks.slice(0, MAX_PICKS)
-    : ordered.slice(0, MIN_PICKS)
+    : eligible.slice(0, MIN_PICKS)
   // Drivers carry the pricing weight — in-pocket picks only (the set is
   // already <=3 true comps, so every in-pocket pick drives). When the pool
   // has zero clean in-pocket comps we fall back to the raw ranking and let
