@@ -189,12 +189,12 @@ const SUBJECT_QUESTIONS = {
   s8_lot_premium: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent lot', OVERSIZED_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac premium lot', POOL: 'pool visible on property', NONE: 'no premium lot features evident', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? THE SUBJECT LOT IS AT THE CENTER OF THE AERIAL FRAME — judge that parcel, not the neighborhood. Check each label: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; (2) CORNER/CUL-DE-SAC — the center lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — the center parcel is clearly larger than its neighbors; (4) POOL visible on the center lot. Answer WATERFRONT whenever water borders the center parcel — do not answer NONE while a water body touches the lot.',
+    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile (second image) frames the parcel itself; judge that parcel, not the neighborhood. Check each label: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; (2) CORNER/CUL-DE-SAC — the center lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — the center parcel is clearly larger than its neighbors; (4) POOL visible on the center lot. Answer WATERFRONT whenever water borders the center parcel — do not answer NONE while a water body touches the lot.',
   },
   s9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? THE SUBJECT LOT IS AT THE CENTER OF THE AERIAL FRAME. Read the aerial itself — multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
+    instructions: 'From the aerial/satellite image, does the SUBJECT have adverse site exposure? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up frames the parcel itself. Read the aerial itself — multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = on a side edge, backing = behind the lot. Interior residential lots are NEUTRAL.',
   },
 }
 
@@ -233,12 +233,12 @@ const COMP_QUESTIONS = {
   c8_premium_attributes: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
-    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium? THE COMP LOT IS AT THE CENTER OF ITS AERIAL FRAME — judge that parcel. Check each label: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the center lot.",
+    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium? THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile frames the parcel itself; judge that parcel. Check each label: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the center lot.",
   },
   c9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
-    instructions: 'When a satellite image is supplied, does the COMP have adverse site exposure? THE COMP LOT IS AT THE CENTER OF ITS AERIAL FRAME. Read the aerial itself: multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. Interior residential lots are NEUTRAL. UNVERIFIED only when no satellite image is present; do not infer exposure from price or description alone.',
+    instructions: 'When a satellite image is supplied, does the COMP have adverse site exposure? THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up frames the parcel itself. Read the aerial itself: multi-lane roads, commercial rooftops, and rail are visible even without labels. Pick the exposure SIDE: fronting = busy road/commercial on the street side, siding = side edge, backing = behind the lot. Interior residential lots are NEUTRAL. UNVERIFIED only when no satellite image is present; do not infer exposure from price or description alone.',
   },
   c10_physical_match: {
     type: 'noul' as const,
@@ -424,7 +424,7 @@ async function fetchTile(url: string) {
  *  project, so this 403s today) → USGS imagery+topo hybrid (aerial photo
  *  with road/place labels, US-only, no key) → Esri World Imagery
  *  (aerial only, no labels, worldwide). Null when coords/fetch miss. */
-async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
+async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>, half = 300) {
   const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
   const key = env.GOOGLE_MAPS_KEY
@@ -438,11 +438,10 @@ async function fetchSatelliteTile(env: Env, subject: Record<string, unknown>) {
   const R = 20037508.34
   const x = (lng as number) * R / 180
   const y = (R / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (lat as number) * Math.PI / 360))
-  // half-width ~300m (~600m across) — wide enough that a waterfront
-  // boundary (bay/canal/lake edge) is visible in frame, not just the
-  // street block. Waterfront reads failed at 380m when the water sat
-  // just outside the crop.
-  const half = 300
+  // Default half-width ~300m (~600m across) — wide enough that a
+  // waterfront boundary (bay/canal/lake edge) is visible in frame, not
+  // just the street block. The close-up pass uses ~90m so the subject
+  // parcel itself fills the frame.
   const bbox = `${Math.round(x - half)},${Math.round(y - half)},${Math.round(x + half)},${Math.round(y + half)}`
   const usgs = await fetchTile(`https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=640,640&format=jpg&f=image`).catch(() => null)
   if (usgs) return usgs
@@ -484,14 +483,16 @@ export async function decisionsSubjectObservables(
   if (!isDecisionsAvailable(env)) return null
   const started = Date.now()
   const urls = input.photoUrls.length > 0 ? input.photoUrls : (input.coverPhotoUrl ? [input.coverPhotoUrl] : [])
-  const [sat, street, images] = await Promise.all([
+  const [sat, satClose, street, images] = await Promise.all([
     fetchSatelliteTile(env, input.subject).catch(() => null),
+    fetchSatelliteTile(env, input.subject, 90).catch(() => null),
     fetchStreetViewTile(env, { latitude: input.subject.latitude as number | null ?? null, longitude: input.subject.longitude as number | null ?? null }).catch(() => null),
     fetchImagesAsBase64(urls, { concurrency: 10 }),
   ])
   const satImg = sat ?? input.satelliteImage ?? null
   const imgs = [
     ...(satImg ? [{ mimeType: satImg.content_type ?? 'image/png', base64: satImg.base64 }] : []),
+    ...(satClose ? [{ mimeType: satClose.content_type ?? 'image/png', base64: satClose.base64 }] : []),
     ...(street ? [{ mimeType: street.content_type ?? 'image/jpeg', base64: street.base64 }] : []),
     ...urls.map((u) => images.get(u)).filter((i): i is NonNullable<typeof i> => !!i),
   ]
@@ -506,7 +507,8 @@ export async function decisionsSubjectObservables(
     matchedMarket: input.benchmark,
     description: input.description ?? null,
     imageOrder: [
-      ...(satImg ? ['satellite aerial'] : []),
+      ...(satImg ? ['satellite aerial (wide ~600m)'] : []),
+      ...(satClose ? ['satellite close-up (~180m — subject parcel centered)'] : []),
       ...(street ? ['street view (curb-level)'] : []),
       'listing photos',
     ],
@@ -596,8 +598,9 @@ export async function decisionsCompObservables(
     const fetched = await fetchImageAsBase64(input.coverPhotoUrl).catch(() => null)
     if (fetched) img = { base64: fetched.base64, content_type: fetched.mimeType }
   }
-  const [satImg, streetImg] = await Promise.all([
+  const [satImg, satCloseImg, streetImg] = await Promise.all([
     fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
+    fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }, 90).catch(() => null),
     fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null),
   ])
 
@@ -612,7 +615,8 @@ export async function decisionsCompObservables(
     description: input.description ?? null,
     imageOrder: [
       ...(img ? ['comp listing cover photo'] : []),
-      ...(satImg ? ['comp satellite aerial'] : []),
+      ...(satImg ? ['comp satellite aerial (wide ~600m)'] : []),
+      ...(satCloseImg ? ['comp satellite close-up (~180m — comp parcel centered)'] : []),
       ...(streetImg ? ['comp street view'] : []),
       ...(input.subjectStreetViewImage ? ['SUBJECT street view'] : []),
     ],
@@ -632,6 +636,7 @@ export async function decisionsCompObservables(
     images: [
       ...(img ? [{ content_type: img.content_type, base64: img.base64 }] : []),
       ...(satImg ? [{ content_type: satImg.content_type, base64: satImg.base64 }] : []),
+      ...(satCloseImg ? [{ content_type: satCloseImg.content_type, base64: satCloseImg.base64 }] : []),
       ...(streetImg ? [{ content_type: streetImg.content_type, base64: streetImg.base64 }] : []),
       ...(input.subjectStreetViewImage ? [{ content_type: input.subjectStreetViewImage.content_type, base64: input.subjectStreetViewImage.base64 }] : []),
     ],
