@@ -6,16 +6,27 @@
  * A malformed/missing model answer keeps the deterministic selection —
  * honest degrade, never invented data.
  */
-import { createOpenRouterProvider } from '../llm/openai-compatible'
+import { OpenAICompatibleProvider } from '../llm/openai-compatible'
 import type { Phase1Context, HarnessEvidence } from './index'
 import type { AppraiserResult } from './appraiser'
 import { runDeterministicSelector, type RankedComp } from './selector'
 
 const TYPE_SELECTOR_MODEL = 'deepseek/deepseek-v4.1-flash'
+const TYPE_SELECTOR_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 interface TypeSelectorEnv {
   OPENROUTER_API_KEY?: string
+  TYPE_SELECTOR_API_KEY?: string
+  TYPE_SELECTOR_BASE_URL?: string
   TYPE_SELECTOR_MODEL?: string
+}
+
+/** Any OpenAI-compatible chat-completions endpoint (OpenRouter, Inception). */
+class SeatProvider extends OpenAICompatibleProvider {
+  readonly name = 'openrouter' as const
+  constructor(config: { apiKey: string; model: string; baseUrl: string; maxTokens?: number }) {
+    super({ apiKey: config.apiKey, model: config.model, maxTokens: config.maxTokens, baseUrl: config.baseUrl })
+  }
 }
 
 interface ModelPick {
@@ -58,14 +69,15 @@ export async function runTypeSelector(
   })
 
   const model = env.TYPE_SELECTOR_MODEL ?? TYPE_SELECTOR_MODEL
+  const apiKey = env.TYPE_SELECTOR_API_KEY ?? env.OPENROUTER_API_KEY
   // Reasoning models burn the whole token budget in the reasoning trace
   // before writing content — the budget must cover both or content comes
   // back empty (observed: 2000 tokens → 2000 reasoning → no answer).
-  const provider = env.OPENROUTER_API_KEY
-    ? createOpenRouterProvider({ apiKey: env.OPENROUTER_API_KEY, model, maxTokens: 8000 })
+  const provider = apiKey
+    ? new SeatProvider({ apiKey, model, baseUrl: env.TYPE_SELECTOR_BASE_URL ?? TYPE_SELECTOR_BASE_URL, maxTokens: 8000 })
     : null
   if (!provider) {
-    base.debugNotes.push('type-selector: no OPENROUTER_API_KEY — deterministic seat')
+    base.debugNotes.push('type-selector: no seat API key — deterministic seat')
     return base
   }
 
@@ -134,21 +146,18 @@ export async function runTypeSelector(
   try {
     // One retry — the reasoning provider intermittently returns an empty
     // completion; a second call is cheap against the deterministic seat.
-    let res = await provider.execute({
+    // The reasoning flag only goes to models that accept it (deepseek);
+    // Mercury and other non-reasoning seats would 400 on it.
+    const req = {
       prompt: user,
       systemPrompt: sys,
-      responseFormat: 'json',
+      responseFormat: 'json' as const,
       maxTokens: 8000,
-      reasoning: { enabled: true, effort: 'low' },
-    })
+      ...(model.includes('deepseek') ? { reasoning: { enabled: true, effort: 'low' as const } } : {}),
+    }
+    let res = await provider.execute(req)
     if ((!res.success || !res.data?.content)) {
-      res = await provider.execute({
-        prompt: user,
-        systemPrompt: sys,
-        responseFormat: 'json',
-        maxTokens: 8000,
-        reasoning: { enabled: true, effort: 'low' },
-      })
+      res = await provider.execute(req)
     }
     if (!res.success) throw new Error(res.error?.message ?? 'provider error')
     const text = res.data?.content ?? ''
