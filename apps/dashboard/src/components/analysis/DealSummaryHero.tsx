@@ -179,6 +179,17 @@ export function DealSummaryHero({ valuation, isRecalculated, disposition }: Deal
               Floor {floorSource}
             </div>
           )}
+          {(valuation.bMechanics?.flags ?? [])
+            .filter((f) => f.includes('site_exposure:'))
+            .map((f, i) => {
+              const side = /site_exposure:(\w+)/.exec(f)?.[1] ?? ''
+              const amt = /\(-\$?([\d,]+)/.exec(f)?.[1]
+              return (
+                <div key={i} className="text-[10px] font-mono text-amber-600 dark:text-amber-500 mt-0.5 truncate" title={f}>
+                  site: {side.toLowerCase()}{amt ? ` -$${amt}` : ''}
+                </div>
+              )
+            })}
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Buy</div>
