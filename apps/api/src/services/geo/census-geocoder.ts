@@ -42,10 +42,18 @@ export async function geocodeUspsAddress(
     )
     if (!resp.ok) return null
     const data = (await resp.json()) as {
-      results?: Array<{ formatted_address?: string; accuracy?: number }>
+      results?: Array<{ formatted_address?: string; accuracy?: number; accuracy_type?: string }>
     }
-    const formatted = data.results?.[0]?.formatted_address?.trim()
-    return formatted || null
+    const top = data.results?.[0]
+    const formatted = top?.formatted_address?.trim()
+    if (!formatted) return null
+    // Only an exact-parcel match may re-key the lookup: interpolated or
+    // street-level results can land on a neighbouring house.
+    if (top?.accuracy_type !== 'rooftop' && top?.accuracy_type !== 'point') return null
+    const houseNumber = (s: string) => s.trim().match(/^(\d+[A-Z]?)\b/i)?.[1]?.toUpperCase()
+    const wanted = houseNumber(address)
+    if (!wanted || houseNumber(formatted) !== wanted) return null
+    return formatted
   } catch {
     return null
   }
