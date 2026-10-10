@@ -557,6 +557,9 @@ export function runDeterministicSelector(
 
   const selection: AgentSelection = {
     arv: arvAdjusted,
+    // The comp-implied figure — envelope checks validate evidence, not the
+    // subject-side site deduction applied on top of it.
+    ...(siteDeduction > 0 ? { arvEvidence: arv } : {}),
     conf,
     selectedCompIds: picks.map((p) => p.id),
     drivers: driverIds,

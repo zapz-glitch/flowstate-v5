@@ -481,28 +481,49 @@ export async function fetchStreetOrientation(subject: Record<string, unknown>): 
   const m = /^\d+\s+(.+?)(?:,|$)/.exec(addr)
   if (!m) return null
   const street = m[1]!.replace(/\s+(NW|NE|SW|SE|N|S|E|W)$/i, ' $1').trim()
-  const city = /,\s*([^,]+?),\s*[A-Z]{2}/.exec(addr)?.[1]
+  // Structured fields win; the address string is the fallback when the
+  // provider only carries a street line.
+  const city = (subject.city as string | undefined)
+    ?? /,\s*([^,]+?),\s*[A-Z]{2}/.exec(addr)?.[1]
+  const state = (subject.state as string | undefined)
+    ?? /,\s*([A-Z]{2})(?:\s|\d|,|$)/.exec(addr)?.[1]
   const u = new URL('https://nominatim.openstreetmap.org/search')
   u.searchParams.set('street', street)
   if (city) u.searchParams.set('city', city.trim())
+  if (state) u.searchParams.set('state', state.trim())
   u.searchParams.set('format', 'json')
   u.searchParams.set('polygon_geojson', '1')
+  // Bound the search to ~±5km around the parcel — a same-named street in
+  // another city can't leak an orientation.
+  const vb = 0.05
+  u.searchParams.set('viewbox', `${(lng as number) - vb},${(lat as number) + vb},${(lng as number) + vb},${(lat as number) - vb}`)
+  u.searchParams.set('bounded', '1')
   const res = await fetch(u, { headers: { 'User-Agent': 'flowstate-eval/1.0' }, signal: AbortSignal.timeout(10000) }).catch(() => null)
   if (!res?.ok) return null
   const hits = await res.json().catch(() => null) as Array<{ geojson?: { type: string; coordinates: unknown } }> | null
-  const coords: Array<[number, number]> = []
+  const lines: Array<Array<[number, number]>> = []
   for (const h of hits ?? []) {
     const g = h.geojson
-    if (g?.type === 'LineString') for (const c of g.coordinates as [number, number][]) coords.push(c)
-    else if (g?.type === 'MultiLineString') for (const l of g.coordinates as [number, number][][]) for (const c of l) coords.push(c)
+    if (g?.type === 'LineString') lines.push(g.coordinates as [number, number][])
+    else if (g?.type === 'MultiLineString') for (const l of g.coordinates as [number, number][][]) lines.push(l)
   }
-  if (!coords.length) return null
+  if (!lines.length) return null
+  // Nearest point on each SEGMENT, not just vertices — a long segment
+  // spanning the parcel has its closest approach between endpoints.
+  const mx = Math.cos((lat as number) * Math.PI / 180) * 111320
+  const my = 110540
   let best = { d: Infinity, b: 0 }
-  for (const [lon, la] of coords) {
-    const dx = (lon - (lng as number)) * Math.cos((lat as number) * Math.PI / 180) * 111320
-    const dy = (la - (lat as number)) * 110540
-    const d = Math.hypot(dx, dy)
-    if (d < best.d) best = { d, b: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360 }
+  for (const line of lines) {
+    for (let i = 0; i + 1 < line.length; i++) {
+      const ax = (line[i]![0] - (lng as number)) * mx, ay = (line[i]![1] - (lat as number)) * my
+      const bx = (line[i + 1]![0] - (lng as number)) * mx, by = (line[i + 1]![1] - (lat as number)) * my
+      const dx = bx - ax, dy = by - ay
+      const len2 = dx * dx + dy * dy
+      const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0
+      const px = ax + t * dx, py = ay + t * dy
+      const d = Math.hypot(px, py)
+      if (d < best.d) best = { d, b: (Math.atan2(px, py) * 180 / Math.PI + 360) % 360 }
+    }
   }
   const edge: FrameEdge = best.b >= 315 || best.b < 45 ? 'north' : best.b < 135 ? 'east' : best.b < 225 ? 'south' : 'west'
   return { streetEdge: edge, bearingDeg: Math.round(best.b), streetName: street }
