@@ -15,6 +15,9 @@ PROPERTY_PROVIDER = "corelogic"
 # Condition reader: the OpenAI Decisions model reads the subject and comps
 # against the renovation tiers (probability per tier); haiku is the backup.
 CONDITION_READER = "decisions"
+# Record every outbound API call of every run to a per-job call log, kept
+# 90 days in local KV (.wrangler/state). Read it at /v1/analyze/jobs/:id/calls.
+CALL_LOG_ENABLED = "true"
 # Devin org for offer-workflow session messages
 DEVIN_ORG_ID = "org-6c0122ecb67544ccb259ae9b1e9cc4dc"
 # Comp price classifier v2 in shadow mode locally (matches wrangler.toml):

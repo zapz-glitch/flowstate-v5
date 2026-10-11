@@ -114,6 +114,9 @@ export interface Env {
   ANTHROPIC_API_KEY?: string
   REASONING_PROVIDER?: string // 'anthropic' | 'openrouter' | unset → anthropic when ANTHROPIC_API_KEY set
   REASONING_MODEL?: string // default 'claude-haiku-5-5'
+  REASONING_OPENROUTER_MODEL?: string // OpenRouter model for the reasoning lane (assist-model arm B)
+  /** 'true' records every outbound API call of every run to a 90-day per-job call log */
+  CALL_LOG_ENABLED?: string
   // ─── Condition-reader lane ───
   /** 'decisions' routes Clef reads through the OpenAI Decisions API; unset → Workers AI Clef */
   CONDITION_READER?: string

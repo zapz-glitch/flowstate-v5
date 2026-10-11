@@ -30,7 +30,7 @@ import {
 } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
-import { runOpusAppraiser } from '../services/evaluation/appraiser'
+import { runAssistShadowSelection, runOpusAppraiser } from '../services/evaluation/appraiser'
 import { runDeterministicSelector } from '../services/evaluation/selector'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
@@ -61,6 +61,9 @@ import { isReasoningProviderAvailable } from '../services/llm'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
+import { withAssistArm, type AssistArm } from '../services/llm/assist-arms'
+import { assistModel } from '../services/evaluation/assist'
+import { loadCallLog, newCallLog, runWithCallLog, saveCallLog, summarizeCallLog } from '../services/observability/call-log'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
 import { createApiLedger } from '../services/api-ledger'
@@ -175,11 +178,19 @@ export interface StartStreamingRequest {
   /** 'agent' pauses the run at the evidence-complete boundary and waits for
    *  the Evaluation Agent's comp-selection verdict instead of evaluateB. */
   harness?: 'agent' | 'corelogic'
+  /** Assist-model A/B arm — pins the reasoning lane's model for this run
+   *  (A = haiku, B = DeepSeek). Unset = the deployment's own model. */
+  arm?: AssistArm
+  /** Job whose call log this run replays identical calls from, so two arms
+   *  evaluate the same provider data and decision-model answers. */
+  replayCallsFrom?: string
 }
 
 export class AnalysisJobDO {
   private state: DurableObjectState
   private env: Env
+  /** The deployment env as bound — `env` is this with a run's arm applied. */
+  private readonly baseEnv: Env
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
@@ -201,6 +212,7 @@ export class AnalysisJobDO {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
+    this.baseEnv = env
     this.persistence = new ChunkedJobState(state.storage)
     state.blockConcurrencyWhile(async () => {
       this.jobState = await this.persistence.read()
@@ -359,8 +371,9 @@ export class AnalysisJobDO {
     // SSE connection holding the object alive) lose the run mid-flight.
     this.runActive = true
     this.markEvalActive(body)
+    this.env = withAssistArm(this.baseEnv, body.arm)
     this.state.waitUntil(
-      this.runStreamingAnalysis(body)
+      this.runRecorded(body, () => this.runStreamingAnalysis(body))
         .catch((err) => {
           console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
           const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
@@ -377,6 +390,32 @@ export class AnalysisJobDO {
     )
 
     return new Response('OK', { status: 200 })
+  }
+
+  /**
+   * Run the pipeline with every outbound API call recorded to this job's
+   * call log (kept 90 days). On by CALL_LOG_ENABLED, and always for an A/B
+   * arm or a replay run. A replay source must belong to the same user.
+   */
+  private async runRecorded(config: StartStreamingRequest, run: () => Promise<void>): Promise<void> {
+    const recording = this.env.CALL_LOG_ENABLED === 'true' || !!config.arm || !!config.replayCallsFrom
+    if (!recording) return run()
+    const source = config.replayCallsFrom ? await loadCallLog(this.env.API_CACHE, config.replayCallsFrom) : null
+    const replay = source && source.userId === config.userId ? source : null
+    const log = newCallLog({
+      jobId: config.jobId,
+      userId: config.userId,
+      address: config.search.address ?? config.search.streetAddress ?? null,
+      meta: { harness: config.harness ?? null, arm: config.arm ?? null, assistModel: assistModel(this.env) },
+      replayedFrom: replay ? replay.jobId : null,
+    })
+    try {
+      await runWithCallLog(log, { store: this.env.API_CACHE, replayFrom: replay }, run)
+    } finally {
+      const saved = await saveCallLog(this.env.API_CACHE, log)
+      const summary = summarizeCallLog(log)
+      console.log(`[call-log] ${config.jobId} ${saved ? 'saved' : 'NOT saved'} — ${log.entries.length} calls ${JSON.stringify(summary)}`)
+    }
   }
 
   private async runStreamingAnalysis(config: StartStreamingRequest): Promise<void> {
@@ -1635,9 +1674,15 @@ export class AnalysisJobDO {
         // Corelogic harness: code is the selection seat — no model call.
         // The gate still verifies; a reject completes on the deterministic
         // engine below. Agent harness keeps the Sonnet appraiser.
+        // A/B runs only: the arm's assist model makes its own selection on
+        // the same evidence, beside the appraiser. Recorded, never applied.
+        const shadowPromise = config.arm
+          ? runAssistShadowSelection(this.env, ctx, evidence).catch(() => null)
+          : Promise.resolve(null)
         const appraisal = config.harness === 'corelogic'
           ? runDeterministicSelector(ctx, evidence)
           : await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+        const shadowSelection = await shadowPromise
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
         const seat = config.harness === 'corelogic' ? 'Selector' : `Opus (${appraisal?.model ?? 'unavailable'})`
@@ -1712,6 +1757,13 @@ export class AnalysisJobDO {
                   classified: d.classified,
                 }]),
               ),
+            },
+            abTest: {
+              arm: config.arm ?? null,
+              assistModel: assistModel(this.env),
+              assistCalls: (appraisal as { assistCalls?: number } | null)?.assistCalls ?? 0,
+              replayedCallsFrom: config.replayCallsFrom ?? null,
+              shadowSelection,
             },
             opus: {
               model: appraisal?.model ?? null,

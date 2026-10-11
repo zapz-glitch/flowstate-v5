@@ -26,7 +26,7 @@
  * accepted/final selection was.
  */
 
-import { createSpecialistProvider } from '../llm'
+import { createReasoningProvider, createSpecialistProvider } from '../llm'
 import { decisionsRun, type DecisionsEnv } from '../decisions'
 import { fetchImageAsBase64 } from '../llm/image-utils'
 import { compMatchProfile } from './observable'
@@ -34,8 +34,13 @@ import { COMP_DOCTRINE } from './comp-doctrine'
 import { gradeVerdict, type VerdictGrade } from './verdict-grade'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
 import { validateAgentSelection } from './index'
+import { assistModel, assistReason } from './assist'
 
 const MAX_CLARIFICATIONS = 5
+/** Ceiling on the assist model's shadow selection (A/B runs only). */
+const SHADOW_SELECTION_TIMEOUT_MS = 240_000
+/** Reasoning requests the appraiser may send its assist sub-agent per review. */
+const MAX_REASONING_REQUESTS = 5
 const MAX_REVISIONS = 2
 
 const APPRAISER_PROMPT = `You are the appraiser — the final decision maker on comp selection and ARV for a wholesale real-estate acquisition.
@@ -57,6 +62,8 @@ Your job, IN ORDER:
 
 If anything is missing or ambiguous, you may ask the Decisions sub-agent to clarify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Decisions answers with probability + verdict; you decide.
 
+You also have a REASONING ASSISTANT — a separate model you can hand a question that needs judgment rather than a probability: weigh conflicting evidence on a comp, look over the findings already gathered (condition reads, satellite reads, exterior match, price position) and say what they add up to, or work out why the gate is rejecting a selection. Up to ${MAX_REASONING_REQUESTS} requests TOTAL across the whole review, and only when it would change your decision — you never have to use it. The assistant answers in prose with its confidence and the evidence it used; it has no authority, you decide.
+
 Return STRICT JSON:
 {
   "selectedCompIds": ["<compId>", ...],
@@ -71,9 +78,12 @@ Return STRICT JSON:
   "flags": ["<evidence gaps or caveats worth surfacing>"],
   "clarifyRequests": [
     { "compId": "<id or null>", "question": "<targeted question for the Decisions sub-agent>" }
+  ],
+  "reasoningRequests": [
+    { "compId": "<id, or null for a question about the whole pool>", "question": "<question for the reasoning assistant>" }
   ]
 }
-Set "clarifyRequests" to an empty array when you're ready to decide — presence of requests means you want answers BEFORE this selection is final (the harness will call you again with the findings; keep deciding fields null-safe but always include them).
+Set "clarifyRequests" and "reasoningRequests" to empty arrays when you're ready to decide — presence of requests means you want answers BEFORE this selection is final (the harness will call you again with the findings; keep deciding fields null-safe but always include them).
 
 DOCTRINE:
 ${COMP_DOCTRINE}
@@ -112,8 +122,20 @@ const SELECTION_SCHEMA = {
         additionalProperties: false,
       },
     },
+    reasoningRequests: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          compId: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          question: { type: 'string' },
+        },
+        required: ['compId', 'question'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['selectedCompIds', 'drivers', 'arv', 'conf', 'notes', 'dataQuality', 'flags', 'clarifyRequests'],
+  required: ['selectedCompIds', 'drivers', 'arv', 'conf', 'notes', 'dataQuality', 'flags', 'clarifyRequests', 'reasoningRequests'],
   additionalProperties: false,
 } as const
 
@@ -122,6 +144,12 @@ export interface ClarifyFinding {
   question: string
   answer: string
   confidence: number
+  /** Which sub-agent answered — 'decisions' (probability) when unset */
+  source?: 'decisions' | 'assist'
+  /** The model that answered, for assist findings */
+  model?: string
+  /** Evidence the assist model said it relied on */
+  evidence?: string[]
 }
 
 export interface AppraiserResult {
@@ -137,6 +165,10 @@ export interface AppraiserResult {
   /** True when Opus never answered (provider missing or call failed) —
    *  deterministic path is the right continuation, not a retry. */
   unavailable: boolean
+  /** The reasoning model available as the assist sub-agent this run */
+  assistModel?: string | null
+  /** How many reasoning requests the appraiser actually sent it */
+  assistCalls?: number
 }
 
 /** The comp row Opus sees — trimmed to decision inputs, in the order the
@@ -232,6 +264,7 @@ interface ParsedSelection {
   dataQuality?: unknown
   flags?: unknown
   clarifyRequests?: unknown
+  reasoningRequests?: unknown
 }
 
 function parseSelection(content: string): ParsedSelection | null {
@@ -363,25 +396,10 @@ async function gateFailClarify(
   return findings
 }
 
-/** Run the Opus appraiser over a frozen evidence bundle. The bundle is
- *  immutable — clarify answers and revision feedback are appended to the
- *  prompt state, never written back. */
-export async function runOpusAppraiser(
-  env: Parameters<typeof createSpecialistProvider>[0],
-  ctx: Phase1Context,
-  evidence: HarnessEvidence,
-): Promise<AppraiserResult> {
-  const out: AppraiserResult = {
-    selection: null, model: null, attempts: [], clarifications: [], debugNotes: [], unavailable: false,
-  }
-  // Sonnet 5.5 is the appraiser seat on the observable-evidence lane —
-  // high effort on the first pass, max effort on every retry.
-  const provider = createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
-  if (!provider) { out.unavailable = true; return out }
-  out.model = provider.model
-
-  const compIds = new Set(evidence.comps.map((c) => c.id))
-  const baseState = {
+/** The evidence state every selection seat reads — the appraiser, and the
+ *  assist model's shadow selection, see exactly the same bundle. */
+function appraiserState(evidence: HarnessEvidence) {
+  return {
     task: 'Review the complete dataset and post the final comp selection + ARV.',
     subject: evidence.subject,
     renovationEvidence: evidence.renovationEvidence ?? null,
@@ -404,8 +422,89 @@ export async function runOpusAppraiser(
     subjectObservables: evidence.subjectObservables ?? null,
     comps: appraiserCompRows(evidence),
   }
+}
 
+export interface ShadowSelection {
+  model: string
+  durationMs: number
+  /** Null when the model's answer was not a usable selection */
+  selection: AgentSelection | null
+  /** Gate grade of that selection — the same code gate the appraiser faces */
+  gate: { accepted: boolean; score: number; gateFails: string[]; failures: string[]; warnings: string[] } | null
+  error?: string
+}
+
+/**
+ * Shadow selection — the assist model makes its own comp selection.
+ *
+ * For the assist-model A/B only. The arm's model (haiku or DeepSeek) gets
+ * the appraiser's exact prompt and evidence, posts one selection, and the
+ * deterministic gate grades it. Nothing is fed back: the report's picks and
+ * ARV still come from the appraiser. What this records is how each model
+ * decides on identical evidence — its picks, drivers, ARV, written
+ * reasoning, whether the gate would accept it, and how long it took — so
+ * the two arms can be compared on decision quality against latency.
+ */
+export async function runAssistShadowSelection(
+  env: Parameters<typeof createReasoningProvider>[0],
+  ctx: Phase1Context,
+  evidence: HarnessEvidence,
+): Promise<ShadowSelection | null> {
+  // A full-pool selection at high reasoning effort can run minutes on a
+  // slower model — the point is to measure it, not to cut it off at 60s.
+  const provider = createReasoningProvider(env, 'openai/gpt-6-luna', { timeout: SHADOW_SELECTION_TIMEOUT_MS })
+  if (!provider) return null
+  const started = Date.now()
+  const done = (rest: Omit<ShadowSelection, 'model' | 'durationMs'>): ShadowSelection =>
+    ({ model: provider.model, durationMs: Date.now() - started, ...rest })
+  const prompt = `${APPRAISER_PROMPT}\n\nThis is a single-pass review: decide from the evidence as given and leave "clarifyRequests" and "reasoningRequests" empty.\n\nSTATE:\n${JSON.stringify(appraiserState(evidence))}`
+  const res = await provider.execute({
+    prompt,
+    responseFormat: 'json',
+    jsonSchema: { name: 'appraiser_selection', schema: SELECTION_SCHEMA },
+    maxTokens: 16384,
+    reasoning: { enabled: true, effort: 'high' },
+  }).catch((e) => ({ success: false as const, error: { message: e instanceof Error ? e.message : String(e) }, data: undefined }))
+  const content = res?.success ? res.data?.content : null
+  if (!content) return done({ selection: null, gate: null, error: (res as { error?: { message?: string } })?.error?.message ?? 'no answer' })
+  const parsed = parseSelection(String(content))
+  const sel = parsed ? toAgentSelection(parsed, new Set(evidence.comps.map((c) => c.id))) : null
+  if (!sel) return done({ selection: null, gate: null, error: 'answer was not a usable selection' })
+  const invalid = validateAgentSelection(sel, ctx.appraisalResult.comparables)
+  if (invalid.length > 0) {
+    return done({ selection: sel, gate: { accepted: false, score: 0, gateFails: ['validation'], failures: ['coherence_validation'], warnings: invalid } })
+  }
+  const grade = gradeVerdict(evidence, sel)
+  return done({
+    selection: sel,
+    gate: { accepted: grade.gateFails.length === 0, score: grade.score, gateFails: grade.gateFails, failures: grade.failures, warnings: grade.warnings },
+  })
+}
+
+/** Run the Opus appraiser over a frozen evidence bundle. The bundle is
+ *  immutable — clarify answers and revision feedback are appended to the
+ *  prompt state, never written back. */
+export async function runOpusAppraiser(
+  env: Parameters<typeof createSpecialistProvider>[0],
+  ctx: Phase1Context,
+  evidence: HarnessEvidence,
+): Promise<AppraiserResult> {
+  const out: AppraiserResult = {
+    selection: null, model: null, attempts: [], clarifications: [], debugNotes: [], unavailable: false,
+  }
+  // Sonnet 5.5 is the appraiser seat on the observable-evidence lane —
+  // high effort on the first pass, max effort on every retry.
+  const provider = createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
+  if (!provider) { out.unavailable = true; return out }
+  out.model = provider.model
+
+  const compIds = new Set(evidence.comps.map((c) => c.id))
+  const baseState = appraiserState(evidence)
+
+  out.assistModel = assistModel(env)
+  out.assistCalls = 0
   let clarificationsUsed = 0
+  let reasoningUsed = 0
   let revisionsUsed = 0
   let clarificationBlock: ClarifyFinding[] = []
   let lastGrade: VerdictGrade | null = null
@@ -415,7 +514,7 @@ export async function runOpusAppraiser(
   // Decision loop — clarify rounds count against MAX_CLARIFICATIONS; gate
   // rejects consume revisions; a passing grade (or a plain-text answer we
   // can coerce) ends the loop.
-  for (let round = 0; round <= MAX_CLARIFICATIONS + MAX_REVISIONS + 1; round++) {
+  for (let round = 0; round <= MAX_CLARIFICATIONS + MAX_REASONING_REQUESTS + MAX_REVISIONS + 1; round++) {
     const state = {
       ...baseState,
       ...(clarificationBlock.length ? { clarificationFindings: clarificationBlock } : {}),
@@ -439,19 +538,41 @@ export async function runOpusAppraiser(
       out.unavailable = out.attempts.length === 0; break
     }
 
-    // Clarify round — Opus asks, haiku answers, loop continues.
-    const wantsClarify = Array.isArray(parsed.clarifyRequests)
-      && (parsed.clarifyRequests as unknown[]).length > 0
-      && clarificationsUsed < MAX_CLARIFICATIONS
-    if (wantsClarify) {
-      const reqs = (parsed.clarifyRequests as Array<{ compId?: unknown; question?: unknown }>)
-        .filter((r) => typeof r.question === 'string' && r.question.length > 0)
-        .slice(0, MAX_CLARIFICATIONS - clarificationsUsed)
-      const answers = await Promise.all(reqs.map((r) => decisionsClarify(env, evidence, {
+    // Sub-agent round — the appraiser asks, the sub-agents answer, the loop
+    // continues. Probability questions go to Decisions; reasoning questions
+    // go to the assist model. Each has its own budget, and a round with any
+    // answerable request is not a selection (and consumes no revision), so
+    // the appraiser can also ask after a gate rejection.
+    const requestsOf = (v: unknown) => (Array.isArray(v) ? v as Array<{ compId?: unknown; question?: unknown }> : [])
+      .filter((r) => typeof r.question === 'string' && r.question.length > 0)
+      .map((r) => ({
         compId: typeof r.compId === 'string' && compIds.has(r.compId) ? r.compId : null,
         question: String(r.question),
-      })))
-      for (const a of answers) if (a) { clarificationBlock.push(a); clarificationsUsed++ }
+      }))
+    const clarifyReqs = requestsOf(parsed.clarifyRequests).slice(0, MAX_CLARIFICATIONS - clarificationsUsed)
+    const reasoningReqs = out.assistModel
+      ? requestsOf(parsed.reasoningRequests).slice(0, MAX_REASONING_REQUESTS - reasoningUsed)
+      : []
+    if (clarifyReqs.length > 0 || reasoningReqs.length > 0) {
+      const rows = appraiserCompRows(evidence)
+      const [clarified, reasoned] = await Promise.all([
+        Promise.all(clarifyReqs.map((r) => decisionsClarify(env, evidence, r))),
+        Promise.all(reasoningReqs.map((r) => assistReason(env, {
+          evidence,
+          comps: rows,
+          request: r,
+          gateFeedback: lastGrade ? { failures: lastGrade.failures, feedback: lastGrade.gateFeedback } : null,
+        }))),
+      ])
+      // A request counts against its budget whether or not it was answered —
+      // an unanswerable question must not be re-asked forever.
+      clarificationsUsed += clarifyReqs.length
+      reasoningUsed += reasoningReqs.length
+      out.assistCalls = reasoningUsed
+      for (const a of clarified) if (a) clarificationBlock.push({ ...a, source: 'decisions' })
+      for (const a of reasoned) {
+        if (a) clarificationBlock.push({ compId: a.compId, question: a.question, answer: a.answer, confidence: a.confidence, source: 'assist', model: a.model, evidence: a.evidence })
+      }
       out.clarifications = clarificationBlock
       continue
     }
