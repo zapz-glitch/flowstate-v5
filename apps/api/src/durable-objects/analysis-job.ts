@@ -38,7 +38,7 @@ import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
 import { createPropertyApi } from '../services/property-api'
-import { mergeComparablePools } from '../services/property-api/comparable-pool'
+import { mergeComparablePools, nearestComparables } from '../services/property-api/comparable-pool'
 import {
   resolveCandidateLimit,
   providerMaxComps,
@@ -626,9 +626,21 @@ export class AnalysisJobDO {
     }
     if (config.enrichment?.permits !== false) sendProgress(permitsRequested())
 
-    const compsPromise = config.harness === 'corelogic'
+    // COMP_POOL_NEAREST keeps only that many comps — the ones closest to the
+    // subject — as the whole pool: every read, and the appraiser's
+    // selection, works from those and nothing farther out.
+    const nearestCap = Number(this.env.COMP_POOL_NEAREST) || null
+    const compsPromise = (config.harness === 'corelogic'
       ? propertyApi.getComparablesWithFallback(comparablesParams)
       : propertyApi.getComparables(comparablesParams)
+    ).then((res) => {
+      if (!res.success || !nearestCap) return res
+      const kept = nearestComparables(res.data.comparables, nearestCap)
+      if (kept.length < res.data.comparables.length) {
+        console.log(`[AnalysisJobDO] comp pool: kept the ${kept.length} nearest of ${res.data.comparables.length}`)
+      }
+      return { ...res, data: { ...res.data, comparables: kept } }
+    })
 
     // ── Clef digest passes — the agent-assist layer, three stages ──────
     // A rides the comps-landed tap (sale records only), B fires inside the
@@ -1676,7 +1688,8 @@ export class AnalysisJobDO {
         // engine below. Agent harness keeps the Sonnet appraiser.
         // A/B runs only: the arm's assist model makes its own selection on
         // the same evidence, beside the appraiser. Recorded, never applied.
-        const shadowPromise = config.arm
+        // Pointless when that model already holds the appraiser seat.
+        const shadowPromise = config.arm && this.env.APPRAISER_SEAT !== 'reasoning'
           ? runAssistShadowSelection(this.env, ctx, evidence).catch(() => null)
           : Promise.resolve(null)
         const appraisal = config.harness === 'corelogic'

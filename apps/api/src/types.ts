@@ -115,6 +115,10 @@ export interface Env {
   REASONING_PROVIDER?: string // 'anthropic' | 'openrouter' | unset → anthropic when ANTHROPIC_API_KEY set
   REASONING_MODEL?: string // default 'claude-haiku-5-5'
   REASONING_OPENROUTER_MODEL?: string // OpenRouter model for the reasoning lane (assist-model arm B)
+  /** Keep only this many comps — the nearest to the subject — as the whole pool */
+  COMP_POOL_NEAREST?: string
+  /** 'reasoning' seats the reasoning lane's model as the appraiser (comp selection); unset = Sonnet */
+  APPRAISER_SEAT?: string
   /** 'true' records every outbound API call of every run to a 90-day per-job call log */
   CALL_LOG_ENABLED?: string
   // ─── Condition-reader lane ───

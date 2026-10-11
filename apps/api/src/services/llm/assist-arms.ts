@@ -1,11 +1,12 @@
 /**
  * Assist-model A/B arms.
  *
- * The "assist model" is the reasoning lane's model: the backup reader when
+ * An arm puts one model in every reasoning role of a run: the appraiser
+ * seat that selects the comps and posts the ARV, the backup reader when
  * the decision model cannot call a condition, and the sub-agent the
- * appraiser may ask to reason over the evidence. An arm swaps that one
- * model and nothing else — the decision model, the appraiser, the gate and
- * every rule stay the same, so a difference between arms is the assist model.
+ * appraiser may ask to reason over the evidence. The decision model, the
+ * gate and every rule stay the same, so a difference between arms is that
+ * one model.
  *
  *   A — claude-haiku-5-5 (Anthropic direct)
  *   B — deepseek/deepseek-v4.1-flash (OpenRouter)
@@ -23,6 +24,7 @@ export function parseAssistArm(value: unknown): AssistArm | undefined {
 }
 
 interface AssistArmEnv {
+  APPRAISER_SEAT?: string
   REASONING_PROVIDER?: string
   REASONING_MODEL?: string
   REASONING_OPENROUTER_MODEL?: string
@@ -36,6 +38,6 @@ export function withAssistArm<E extends AssistArmEnv>(env: E, arm: AssistArm | u
   if (!arm) return env
   const { provider, model } = ASSIST_ARMS[arm]
   return provider === 'anthropic'
-    ? { ...env, REASONING_PROVIDER: 'anthropic', REASONING_MODEL: model }
-    : { ...env, REASONING_PROVIDER: 'openrouter', REASONING_OPENROUTER_MODEL: model }
+    ? { ...env, APPRAISER_SEAT: 'reasoning', REASONING_PROVIDER: 'anthropic', REASONING_MODEL: model }
+    : { ...env, APPRAISER_SEAT: 'reasoning', REASONING_PROVIDER: 'openrouter', REASONING_OPENROUTER_MODEL: model }
 }

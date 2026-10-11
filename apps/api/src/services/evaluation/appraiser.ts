@@ -39,6 +39,9 @@ import { assistModel, assistReason } from './assist'
 const MAX_CLARIFICATIONS = 5
 /** Ceiling on the assist model's shadow selection (A/B runs only). */
 const SHADOW_SELECTION_TIMEOUT_MS = 240_000
+/** Ceiling on one selection call when the reasoning-lane model holds the
+ *  appraiser seat — a full pool at high effort outruns the 60s default. */
+const APPRAISER_SEAT_TIMEOUT_MS = 240_000
 /** Reasoning requests the appraiser may send its assist sub-agent per review. */
 const MAX_REASONING_REQUESTS = 5
 const MAX_REVISIONS = 2
@@ -492,9 +495,14 @@ export async function runOpusAppraiser(
   const out: AppraiserResult = {
     selection: null, model: null, attempts: [], clarifications: [], debugNotes: [], unavailable: false,
   }
-  // Sonnet 5.5 is the appraiser seat on the observable-evidence lane —
-  // high effort on the first pass, max effort on every retry.
-  const provider = createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
+  // The appraiser seat. APPRAISER_SEAT=reasoning puts the reasoning lane's
+  // model in it (haiku, or the assist-model arm's model) — the same model
+  // then selects the comps, backs up the decision model, and answers its own
+  // reasoning requests as a sub-agent. Unset keeps Sonnet 5.5 in the seat.
+  // High effort on the first pass, max effort on every retry.
+  const provider = (env as { APPRAISER_SEAT?: string }).APPRAISER_SEAT === 'reasoning'
+    ? createReasoningProvider(env, 'openai/gpt-6-luna', { timeout: APPRAISER_SEAT_TIMEOUT_MS })
+    : createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
   if (!provider) { out.unavailable = true; return out }
   out.model = provider.model
 

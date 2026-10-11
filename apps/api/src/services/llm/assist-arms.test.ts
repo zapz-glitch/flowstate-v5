@@ -2,7 +2,8 @@
  * Assist-model A/B arms.
  *
  * Ways this can fail, each covered below:
- *  - an arm changes anything other than the reasoning lane's model
+ *  - an arm changes anything other than the reasoning model and its seat
+ *  - an arm leaves Sonnet in the appraiser seat, so the arm model never selects comps
  *  - arm B still resolves to haiku because the Anthropic key is present
  *  - arm B uses the call site's default OpenRouter model instead of DeepSeek
  *  - an unknown arm value is accepted
@@ -13,7 +14,8 @@ import { describe, expect, it } from 'vitest'
 import { createReasoningProvider } from './index'
 import { parseAssistArm, withAssistArm } from './assist-arms'
 
-const ENV = { ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o', OPENAI_API_KEY: 'd', CONDITION_READER: 'decisions' }
+const ENV: { ANTHROPIC_API_KEY: string; OPENROUTER_API_KEY: string; OPENAI_API_KEY: string; CONDITION_READER: string; APPRAISER_SEAT?: string } =
+  { ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o', OPENAI_API_KEY: 'd', CONDITION_READER: 'decisions' }
 
 describe('withAssistArm', () => {
   it('arm A pins the reasoning lane to haiku on Anthropic', () => {
@@ -26,6 +28,11 @@ describe('withAssistArm', () => {
     const provider = createReasoningProvider(withAssistArm(ENV, 'B'), 'openai/gpt-6-luna')
     expect(provider?.name).toBe('openrouter')
     expect(provider?.model).toBe('deepseek/deepseek-v4.1-flash')
+  })
+
+  it('seats the arm model as the appraiser in both arms', () => {
+    expect(withAssistArm(ENV, 'A').APPRAISER_SEAT).toBe('reasoning')
+    expect(withAssistArm(ENV, 'B').APPRAISER_SEAT).toBe('reasoning')
   })
 
   it('changes nothing else and does not mutate the shared env', () => {
