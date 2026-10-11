@@ -170,20 +170,12 @@ class PropertyValuationService implements ValuationService {
     const totalRehabCost = baseRehabCost + majorItemsCost + additionPlay
 
     const closingCosts = Math.round(arv * (closingCostsPercent / 100))
+    const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
     const minProfit = desiredProfit ?? (typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0)
     // Location-risk deduction — major road/railroad/commercial proximity
     // discounts what a buyer will pay post-rehab. An explicit dollar amount
     // (position-tiered proximity config) wins over the percentage form.
     const locationPenalty = locationPenaltyAmount ?? Math.round(arv * (locationPenaltyPercent / 100))
-
-    // Carrying = carry% × (Buy Price + Rehab). Buy Price depends on Carrying,
-    // so solve the loop algebraically first:
-    // Buy Price (pre-carry) = (ARV − Rehab − Closing − Profit − Penalty − carry%×Rehab) / (1 + carry%)
-    const carryRate = carryingCostsPercent / 100
-    const buyBeforeCarry =
-      (arv - totalRehabCost - closingCosts - minProfit - locationPenalty - carryRate * totalRehabCost) /
-      (1 + carryRate)
-    const carryingCosts = Math.round((buyBeforeCarry + totalRehabCost) * carryRate)
 
     // Buy Price = ARV − Rehab − Closing − Carrying − Profit Target − Location Penalty
     const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit - locationPenalty
