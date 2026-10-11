@@ -34,6 +34,8 @@ import {
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, or, lt, asc } from 'drizzle-orm';
 import { analysisRuns, harnessQueue, savedReports, compTierOverrides } from '../db/schema';
+import { parseAssistArm } from '../services/llm/assist-arms';
+import { loadCallBodies, loadCallLog, summarizeCallLog, summarizeModelCalls } from '../services/observability/call-log';
 import { applyCompTierOverrides } from '../utils/comp-tier-overrides';
 
 type Variables = { auth: AuthContext };
@@ -145,6 +147,14 @@ interface AnalyzeRequest {
    *  verdict to /jobs/:jobId/harness/selection and the deterministic tail
    *  finishes the eval. Omitted = today's deterministic Set-B path. */
   harness?: 'agent' | 'corelogic';
+
+  /** Assist-model A/B arm: 'A' = claude-haiku-5-5, 'B' =
+   *  deepseek/deepseek-v4.1-flash. Pins the backup reader and the
+   *  appraiser's reasoning sub-agent for this run; nothing else changes. */
+  arm?: 'A' | 'B';
+  /** Replay identical outbound calls from this earlier job's call log, so
+   *  both arms of an A/B evaluate the same evidence. */
+  replayCallsFrom?: string;
 }
 
 const ALLOWED_MODELS = new Set([
@@ -310,6 +320,8 @@ analyze.post('/', async (c) => {
     // env-defaulted harness must key the cache too, or a corelogic-default
     // deployment serves deterministic-harness reports to ordinary requests
     // (and vice versa) through the shared KV.
+    // An A/B arm keys the cache too — arm A's report is never served as arm B's.
+    const assistArm = parseAssistArm(body.arm);
     const effectiveHarness = (body.harness === 'agent' || body.harness === 'corelogic')
       ? body.harness
       : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
@@ -318,7 +330,7 @@ analyze.post('/', async (c) => {
     const resultCacheKey = evalResultKey(
       auth.userId,
       body.address ?? '',
-      evalParamsHash + (effectiveHarness ? `:${effectiveHarness}` : ''),
+      evalParamsHash + (effectiveHarness ? `:${effectiveHarness}` : '') + (assistArm ? `:arm${assistArm}` : ''),
     );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
@@ -417,6 +429,10 @@ analyze.post('/', async (c) => {
           : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
               ? c.env.DEFAULT_HARNESS
               : undefined),
+        arm: assistArm,
+        replayCallsFrom: typeof body.replayCallsFrom === 'string' && /^job_[\w-]{1,80}$/.test(body.replayCallsFrom)
+          ? body.replayCallsFrom
+          : undefined,
       }),
     });
     // A live run owns the DO — don't error, hand the caller the same job
@@ -504,6 +520,34 @@ analyze.post('/', async (c) => {
  */
 // Registered before /jobs/:jobId so 'queue' isn't captured as a jobId param.
 analyze.get('/jobs/queue', harnessQueueListHandler);
+
+/**
+ * GET /analyze/jobs/:jobId/calls
+ * The job's call log — every outbound API call the run made (provider,
+ * scrapes, imagery, decision model, reasoning models) with request,
+ * response and timing. Kept 90 days. `?summary=1` returns counts only;
+ * `?seq=N` returns one call with its full request and response bodies
+ * (large bodies are stored apart from the index).
+ */
+analyze.get('/jobs/:jobId/calls', async (c) => {
+  const log = await loadCallLog(c.env.API_CACHE, c.req.param('jobId'));
+  // Same answer for "no log" and "not yours" — a job id is not an oracle.
+  if (!log || log.userId !== c.get('auth').userId) {
+    return c.json({ success: false, error: 'No call log for this job' }, 404);
+  }
+  const seq = Number(c.req.query('seq'));
+  if (Number.isInteger(seq) && seq > 0) {
+    const entry = log.entries.find((e) => e.seq === seq);
+    if (!entry) return c.json({ success: false, error: 'No such call' }, 404);
+    return c.json({ success: true, data: { ...entry, ...(await loadCallBodies(c.env.API_CACHE, entry)) } });
+  }
+  const summary = summarizeCallLog(log);
+  if (c.req.query('summary')) {
+    const { entries, ...header } = log;
+    return c.json({ success: true, data: { ...header, calls: entries.length, summary, models: summarizeModelCalls(log) } });
+  }
+  return c.json({ success: true, data: { ...log, summary, models: summarizeModelCalls(log) } });
+});
 
 analyze.get('/jobs/:jobId', async (c) => {
   const auth = c.get('auth');

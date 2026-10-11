@@ -19,6 +19,7 @@
  */
 
 import type { HarnessEvidence, AgentSelection } from './index'
+import { noCompPassesRules } from './rule-passers'
 
 export type CheckResult = 'pass' | 'fail' | 'warn' | 'skipped'
 
@@ -120,9 +121,17 @@ function coherenceOutliers(group: GradeComp[]): Set<string> {
   return new Set(priced.filter((c) => c.salePrice! < lo || c.salePrice! > hi).map((c) => c.id))
 }
 
-export function gradeVerdict(evidence: HarnessEvidence, selection: AgentSelection): VerdictGrade {
+export function gradeVerdict(evidenceIn: HarnessEvidence, selection: AgentSelection): VerdictGrade {
   const failures: string[] = []
   const warnings: string[] = []
+  // When no comp passes the filter rules, the appraiser's job is to pick the
+  // comps closest to them — a rule-failing pick is then expected, not a
+  // violation. Grade the pool as if its comps were eligible, and say so.
+  const rulesPassedByNone = noCompPassesRules(evidenceIn.comps)
+  const evidence: HarnessEvidence = rulesPassedByNone
+    ? { ...evidenceIn, comps: evidenceIn.comps.map((c) => ({ ...c, isEnabled: true })) }
+    : evidenceIn
+  if (rulesPassedByNone) warnings.push('no_comp_passes_filter_rules')
   const gateFeedback: string[] = []
   let scorePenalty = 0
   const checks: VerdictGrade['checks'] = {

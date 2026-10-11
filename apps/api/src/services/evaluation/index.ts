@@ -56,7 +56,9 @@ import type {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
-import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
+import { pickFrontCoverImage } from './exterior-match'
+import { noCompPassesRules } from './rule-passers'
+import { applySubjectTierVerdict, computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
@@ -913,6 +915,12 @@ export async function performAnalysisPhase1(
   const subjectSatellitePromise = observablesOn
     ? fetchSatelliteTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
+  // Subject cover photo — the listing photo that best shows the front of
+  // the house, saved once per eval as the reference image every comp's
+  // exterior match compares against.
+  const subjectCoverPromise = observablesOn
+    ? photoBundlePromise.then((pb) => pickFrontCoverImage(env, pb?.subject?.photos ?? [])).catch(() => null)
+    : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
     ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
@@ -949,6 +957,20 @@ export async function performAnalysisPhase1(
           const classifyInputs = clefInputs
             .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
             .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
+          // Comp condition classify. With CONDITION_READER=decisions the
+          // decision model reads the pool (condition, sale tier, and the
+          // renovation tier with a probability per tier) and falls back to
+          // the reasoning reader (haiku) for any comp it cannot answer.
+          // Without it, haiku is the reader. The two are not chained: the
+          // haiku pool read re-reads every comp another model stamped.
+          const classifyCompPool = async () => {
+            const subjectRef = { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined }
+            if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+              await classifyCompBatchDecisions(env, classifyInputs, subjectRef).catch(() => null)
+            } else if (env.ANTHROPIC_API_KEY) {
+              await classifyCompPoolHaiku(env, classifyInputs, subjectRef).catch(() => null)
+            }
+          }
           if (observablesOn) {
             // C1-C7 per comp — cover photo + description + closed price vs
             // the code-computed pocket benchmark. Parallel lanes. Runs over
@@ -976,11 +998,14 @@ export async function performAnalysisPhase1(
                   ppsf,
                   description: ev?.listing?.description ?? null,
                   coverImage: ev?._images?.[0] ?? null,
+                  listingImages: ev?._images ?? null,
                   coverPhotoUrl: ev?.listing?.coverPhotoUrl ?? null,
                   latitude: comp.latitude ?? null,
                   longitude: comp.longitude ?? null,
                   subjectStreetViewImage: await subjectStreetViewPromise,
                   subjectSatelliteImage: await subjectSatellitePromise,
+                  subjectCoverImage: await subjectCoverPromise,
+                  subjectAddress: bundle.property.address ?? null,
                   subjectRef: {
                     squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
                     lotSizeAcres: bundle.property.lotSizeAcres,
@@ -1021,28 +1046,10 @@ export async function performAnalysisPhase1(
             // classify path rather than appraising condition-blind.
             if (Object.keys(compObservables).length === 0 && classifyInputs.length) {
               console.warn('[observables] lane answered 0 comps — falling back to comp classify')
-              if (env.ANTHROPIC_API_KEY) {
-                await classifyCompPoolHaiku(
-                  env, classifyInputs,
-                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-                ).catch(() => null)
-              } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
-                await classifyCompBatchDecisions(
-                  env, classifyInputs,
-                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-                ).catch(() => null)
-              }
+              await classifyCompPool()
             }
-          } else if (env.ANTHROPIC_API_KEY) {
-            await classifyCompPoolHaiku(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
-          } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
-            await classifyCompBatchDecisions(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
+          } else {
+            await classifyCompPool()
           }
           console.log(`[observables] comp lane done — ${Object.keys(compObservables).length}/${clefInputs.length} answered`)
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
@@ -1548,6 +1555,10 @@ export async function performAnalysisPhase1(
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
   const subjectObservables = await subjectObservablesPromise.catch(() => null)
+  if (subjectObservables) {
+    subjectObservables.coverPhotoUrl = (await subjectCoverPromise)?.url ?? null
+    applySubjectTierVerdict(subjectObservables, renovation)
+  }
   // Clef digests settle inside the same window — stage A/B/C advisory
   // reads merged per comp for the harness evidence bundle.
   const compDigestMap = params.compDigests ? await params.compDigests.catch(() => null) : null
@@ -2388,7 +2399,11 @@ export interface AgentSelection {
  *  outcome appeal. Returns the list of failures; empty = accepted. */
 export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComparable[]): string[] {
   const fails: string[] = []
-  const enabled = new Map(comps.filter((c) => c.isEnabled && c.id).map((c) => [c.id, c] as const))
+  // When no comp passes the filter rules, the selection's job is to pick
+  // the comps closest to those rules — so every priced comp is eligible.
+  // As soon as one comp passes, only rule-passers are.
+  const eligible = noCompPassesRules(comps) ? comps : comps.filter((c) => c.isEnabled)
+  const enabled = new Map(eligible.filter((c) => c.id).map((c) => [c.id, c] as const))
   const picks = sel.selectedCompIds ?? []
   if (picks.length === 0) fails.push('empty selection — at least one comp is required')
   for (const id of picks) {

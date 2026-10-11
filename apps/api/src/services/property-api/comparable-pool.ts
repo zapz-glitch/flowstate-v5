@@ -59,3 +59,19 @@ export function mergeComparablePools(defaults: NormalizedComparable[], expanded:
   }
   return { comparables, conflictIds }
 }
+
+/**
+ * The `limit` comps closest to the subject, nearest first. Distance is the
+ * only ranking: a comp with no distance on record sorts last, and ties keep
+ * the provider's order. A missing or non-positive limit returns the pool
+ * unchanged.
+ */
+export function nearestComparables<C extends { distanceMiles?: number | null }>(comps: C[], limit: number | null | undefined): C[] {
+  if (!limit || !Number.isFinite(limit) || limit <= 0 || comps.length <= limit) return comps
+  const far = (c: C) => (typeof c.distanceMiles === 'number' && Number.isFinite(c.distanceMiles) ? c.distanceMiles : Infinity)
+  return comps
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => far(a.c) - far(b.c) || a.i - b.i)
+    .slice(0, Math.floor(limit))
+    .map(({ c }) => c)
+}
