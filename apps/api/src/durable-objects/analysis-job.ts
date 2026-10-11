@@ -56,7 +56,7 @@ import {
   describeLadderConcessions, filtersForLadder, geoLevelForScope, ladderFactorAt, ladderLimitsAt, lastUsefulLadderStep,
 } from '../services/appraisal/filter-ladder'
 import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
-import { startCompEvidenceBatch } from '../services/comp-evidence'
+import { startCompEvidenceBatch, type CompConditionEvidence } from '../services/comp-evidence'
 import { startCompDigestBatch, type CompDigest, type DigestComp, type DigestSubject } from '../services/comp-evidence/digest'
 import { isClefAvailable } from '../services/clef'
 import { isReasoningProviderAvailable } from '../services/llm'
@@ -662,6 +662,10 @@ export class AnalysisJobDO {
       config.harness === 'corelogic' ||
       (config.harness === 'agent' && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
 
+    // TypeScript lane's comp-condition fan-out — fired on the 12-comp
+    // enriched shortlist (below) so listing truth reaches the pick seat
+    // without scraping the whole pool.
+    let typeCompEvidence: Promise<Map<string, CompConditionEvidence | null> | null> | null = null
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
     // search→scrape→Clef runs beside geo/enrich instead of behind it.
     const prefetchedCompEvidence = compsPromise.then(async (res) => {
@@ -1200,6 +1204,20 @@ export class AnalysisJobDO {
             || Math.abs((a.squareFeet ?? 0) - subjSqftFast) - Math.abs((b.squareFeet ?? 0) - subjSqftFast))
           .slice(0, FAST_ENRICH)
         const enriched = await propertyApi.enrichComparables(shortlist, { concurrency: FAST_ENRICH })
+        // Comp condition evidence: stingray + listing scrape + classify on
+        // the same 12-comp shortlist, overlapped with the label/gate math —
+        // the pick seat sees 'renovated'/'as-is'/investor truth from the
+        // listings, not just price badges.
+        apiLedger.record('scrape:comp-evidence', enriched.length)
+        typeCompEvidence = startCompEvidenceBatch(this.env, enriched.map((c) => ({
+          propertyId: c.id, address: c.address, city: c.city, state: c.state,
+          zipCode: c.zipCode, latitude: c.latitude ?? null, longitude: c.longitude ?? null,
+          salePrice: c.salePrice ?? undefined, saleDate: c.saleDate ? String(c.saleDate) : undefined,
+          yearBuilt: c.yearBuilt ?? undefined, squareFeet: c.squareFeet ?? undefined,
+        })), {
+          subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
+          gatherOnly: false, lanes: FAST_ENRICH, perCompTimeoutMs: 25_000, globalDeadlineMs: 75_000,
+        }).catch(() => null)
         const enrichedByIdFast = new Map(enriched.map((e) => [e.id, e]))
         candidatesEnriched += enriched.filter((c) => c.isEnriched).length
         // Geocodio-stamped geography must survive the merge — a CoreLogic
@@ -1732,7 +1750,7 @@ export class AnalysisJobDO {
             // model picks identical-or-closest (falls back to the
             // deterministic seat on any failure). Supervised price
             // segmentation — both band tails are outliers (owner spec).
-            ? await runTypeSelector(this.env, ctx, evidence, { priceBand: { upper: 2.0, lower: 0.5 } }).catch(() => null)
+            ? await runTypeSelector(this.env, ctx, evidence, { priceBand: { upper: 2.0, lower: 0.5 }, compEvidence: typeCompEvidence }).catch(() => null)
             : runDeterministicSelector(ctx, evidence)
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null

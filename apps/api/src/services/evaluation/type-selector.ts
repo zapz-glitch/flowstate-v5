@@ -10,6 +10,7 @@ import { OpenAICompatibleProvider } from '../llm/openai-compatible'
 import type { Phase1Context, HarnessEvidence } from './index'
 import type { AppraiserResult } from './appraiser'
 import { runDeterministicSelector, type PocketValues, type RankedComp } from './selector'
+import type { CompConditionEvidence } from '../comp-evidence'
 
 const TYPE_SELECTOR_MODEL = 'deepseek/deepseek-v4.1-flash'
 const TYPE_SELECTOR_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions'
@@ -98,7 +99,7 @@ export async function runTypeSelector(
   env: TypeSelectorEnv,
   ctx: Phase1Context,
   evidence: HarnessEvidence,
-  opts?: { priceBand?: { upper: number; lower: number } },
+  opts?: { priceBand?: { upper: number; lower: number }; compEvidence?: Promise<Map<string, CompConditionEvidence | null> | null> | null },
 ): Promise<AppraiserResult> {
   let ranked: RankedComp[] = []
   let pocket: PocketValues | null = null
@@ -170,8 +171,23 @@ export async function runTypeSelector(
   }
   base.debugNotes.push(`type-selector: seat call → ${eligible.length} eligible (ranked=${ranked.length})`)
 
+  // Comp listing evidence — already running since the shortlist enriched;
+  // by seat-call time it's usually settled. Bounded so a slow scrape
+  // chain can't hold the seat past its budget.
+  const compEvidence = opts?.compEvidence
+    ? await Promise.race([
+        opts.compEvidence,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 45_000)),
+      ]).catch(() => null)
+    : null
+  if (compEvidence) {
+    const got = eligible.filter((r) => compEvidence.get(r.id)?.condition || compEvidence.get(r.id)?.listing).length
+    base.debugNotes.push(`type-selector: listing evidence on ${got}/${eligible.length} eligible comps`)
+  }
+
   const rows = eligible.map((r) => {
     const l = r.labels
+    const ev = compEvidence?.get(r.id) ?? null
     return {
       id: r.id,
       tier: tierOf(r, subjSqft, subject.yearBuilt ?? null),
@@ -189,6 +205,13 @@ export async function runTypeSelector(
       block: (r.comp as { censusBlockGroup?: string | null }).censusBlockGroup ?? null,
       hood: r.comp.neighborhoodName ?? r.comp.subdivision ?? null,
       lbl: l ? `sqft:${l.sqft}|yr:${l.year}|lot:${l.lot}|style:${l.style}|feat:${l.feat}|sale:${l.saleAge}|${l.pricePosition}→${l.priceEvidence}|${l.sanity}|diffs:${l.diffs}` : '',
+      cond: ev?.condition?.conditionLabel ?? null,
+      inv: ev?.investorSignal ? 1 : 0,
+      l_pool: ev?.listing?.details?.pool ?? null,
+      l_cons: ev?.listing?.details?.construction ?? ev?.listing?.details?.style ?? null,
+      msf: ev?.listing?.details?.marketedSqft ?? null,
+      photos: ev?.listing?.photoCount ?? 0,
+      desc: ev?.listing?.description?.slice(0, 160) ?? null,
       group: r.group,
     }
   })
@@ -213,6 +236,11 @@ export async function runTypeSelector(
       'pool|con(struction)|fnd(oundation)|gar(age) vs the subject: m=match, ' +
       'd=differs, u=unknown — prefer feature matches (pool subject needs pool ' +
       'comps, block construction needs block comps); the pocket median bounds you. ' +
+      'The "cond" field is the comp\'s verified listing condition ' +
+      '(renovated/updated/dated/as-is) and "inv" marks investor-marketed sales — ' +
+      'a renovated subject wants renovated comps; dated comps price the floor. ' +
+      'l_pool/l_cons/msf are listing-extracted pool/construction/marketed-sqft — ' +
+      'they override a u (unknown) in feat when present. ' +
       'Pocket = same block group AND same neighborhood as the subject. pocketValues ' +
       'lists every block/neighborhood median $/sf and its ratio to the pocket; ' +
       'comps outside the pocket already proved their group sits within 0.75x-1.33x. ' +
@@ -226,6 +254,7 @@ export async function runTypeSelector(
     subject: {
       address: subject.address, sqft: subject.squareFeet, beds: subject.bedrooms,
       baths: subject.bathrooms, yearBuilt: subject.yearBuilt, lotSqft: subject.lotSizeSquareFeet,
+      condition: subject.condition ?? null,
     },
     band: opts?.priceBand ?? null,
     // Pocket = block group AND neighborhood. Every eligible comp outside it
