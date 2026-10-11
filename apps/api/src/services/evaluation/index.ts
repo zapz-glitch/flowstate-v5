@@ -56,6 +56,7 @@ import type {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
+import { pickFrontCoverImage } from './exterior-match'
 import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
@@ -913,6 +914,12 @@ export async function performAnalysisPhase1(
   const subjectSatellitePromise = observablesOn
     ? fetchSatelliteTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
+  // Subject cover photo — the listing photo that best shows the front of
+  // the house, saved once per eval as the reference image every comp's
+  // exterior match compares against.
+  const subjectCoverPromise = observablesOn
+    ? photoBundlePromise.then((pb) => pickFrontCoverImage(env, pb?.subject?.photos ?? [])).catch(() => null)
+    : Promise.resolve(null)
   const compEvidenceOn =
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
     ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
@@ -995,6 +1002,8 @@ export async function performAnalysisPhase1(
                   longitude: comp.longitude ?? null,
                   subjectStreetViewImage: await subjectStreetViewPromise,
                   subjectSatelliteImage: await subjectSatellitePromise,
+                  subjectCoverImage: await subjectCoverPromise,
+                  subjectAddress: bundle.property.address ?? null,
                   subjectRef: {
                     squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
                     lotSizeAcres: bundle.property.lotSizeAcres,
@@ -1544,6 +1553,7 @@ export async function performAnalysisPhase1(
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
   const subjectObservables = await subjectObservablesPromise.catch(() => null)
+  if (subjectObservables) subjectObservables.coverPhotoUrl = (await subjectCoverPromise)?.url ?? null
   // Clef digests settle inside the same window — stage A/B/C advisory
   // reads merged per comp for the harness evidence bundle.
   const compDigestMap = params.compDigests ? await params.compDigests.catch(() => null) : null

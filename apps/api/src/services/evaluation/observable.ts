@@ -18,6 +18,7 @@
 
 import { decisionsRun, isDecisionsAvailable } from '../decisions'
 import { RENOVATION_LEVEL_DEFINITIONS, renovationTierProbabilities } from '../vision/renovation'
+import { decisionsExteriorMatch, type CoverImage } from './exterior-match'
 import { fetchImagesAsBase64, fetchImageAsBase64 } from '../llm/image-utils'
 import type { Env } from '../../types'
 
@@ -408,6 +409,9 @@ export interface SubjectObservables {
   renovationTier: string | null
   /** Probability per renovation tier behind `renovationTier` */
   renovationTierProbabilities?: Record<string, number> | null
+  /** The subject's saved cover photo — the first listing photo that loads,
+   *  used as the reference image for every comp's exterior match. */
+  coverPhotoUrl?: string | null
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
@@ -444,6 +448,13 @@ export interface CompObservables {
   conditionTierProbabilities?: Record<string, number> | null
   /** P(comp is a physical match to the subject) — street view lane. */
   physicalMatchP: number | null
+  /** P(the comp's exterior matches the subject's) — listing cover photo vs
+   *  listing cover photo. Null when either photo is missing. */
+  exteriorMatchP?: number | null
+  /** P(the comp's cover photo shows the front of the house) */
+  coverIsFrontP?: number | null
+  /** P(the subject's cover photo shows the front of the house) */
+  subjectCoverIsFrontP?: number | null
   /** P(comp is a finished/renovated/move-in-ready version of the subject) —
    *  ARV-fitness ladder: flipper-complete highest, maintained ~70-80s,
    *  fixer/investor lowest. */
@@ -763,6 +774,10 @@ export async function decisionsCompObservables(
     /** Subject wide satellite aerial for the c12 development-vintage lane —
      *  fetched once per eval and shared across every comp call. */
     subjectSatelliteImage?: { base64: string; content_type?: string } | null
+    /** Subject listing cover photo — reference image for the exterior
+     *  match, fetched once per eval and shared across every comp call. */
+    subjectCoverImage?: CoverImage | null
+    subjectAddress?: string | null
     /** Subject's geo/physical fields — feeds the code-computed matchProfile. */
     subjectRef?: MatchLike
     benchmark: PocketBenchmark | null
@@ -809,6 +824,13 @@ export async function decisionsCompObservables(
       'Decisions classifies evidence. The appraiser selects comps and determines ARV.',
     ],
   }
+  // Cover photo vs cover photo — its own two-image call, beside the main read.
+  const exteriorPromise = decisionsExteriorMatch(env, {
+    subjectCover: input.subjectCoverImage,
+    compCover: img,
+    subjectAddress: input.subjectAddress ?? null,
+    compAddress: (input.comp.address as string | undefined) ?? null,
+  }).catch(() => null)
   const res = await decisionsRun(env, {
     state,
     questions: COMP_QUESTIONS,
@@ -823,6 +845,7 @@ export async function decisionsCompObservables(
   }).catch(() => null)
   const a = (res?.answers ?? {}) as DecisionsAnswers
   if (Object.keys(a).length === 0) return null
+  const exterior = await exteriorPromise
 
   return {
     pricePosition: pos.tier,
@@ -840,6 +863,9 @@ export async function decisionsCompObservables(
     conditionTier: choiceOf(a, 'c13_condition_tier'),
     conditionTierProbabilities: tierProbsOf(a, 'c13_condition_tier'),
     physicalMatchP: probOf(a, 'c10_physical_match'),
+    exteriorMatchP: exterior?.matchP ?? null,
+    coverIsFrontP: exterior?.compCoverIsFrontP ?? null,
+    subjectCoverIsFrontP: exterior?.subjectCoverIsFrontP ?? null,
     arvFitnessP: probOf(a, 'c11_arv_fitness'),
     confidence: confs(a),
     imagesRead: state.imageOrder,
