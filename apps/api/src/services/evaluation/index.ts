@@ -537,8 +537,9 @@ export async function performAnalysisPhase1(
   // appraisal path below. Resolved at the points the pipeline actually
   // consumes them (photo stamps near comp selection, renovation level at
   // deriveBuybox).
-  // typescript lane: strictly provider math — zero listing fetches.
-  const photoLaneOn = params.harness !== 'typescript'
+  // typescript lane: subject listing fetch + vision condition stay on (the
+  // comp listing fan-out stays off — compEvidenceOn keeps its harness gate).
+  const photoLaneOn = true
   const photoService = createPhotoService(env)
   const photoBundlePromise: Promise<PhotoBundle | null> = photoLaneOn ? (async () => {
     let photoBundle: PhotoBundle | null = null
