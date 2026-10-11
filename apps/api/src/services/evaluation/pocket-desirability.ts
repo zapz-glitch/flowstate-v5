@@ -5,8 +5,8 @@
  * Contract: docs/HAIKU-POCKET-DESIRABILITY.md. Haiku gathers its own web
  * signal via Anthropic's server-side web_search tool when the reasoning
  * lane is Anthropic (the model searches, reads, and scores in one call).
- * When the lane is not Anthropic or the tool call fails, Serper →
- * Scrapfly gathers evidence and haiku scores what it is given.
+ * When the lane is not Anthropic or the tool call fails, a Scrapfly web
+ * search gathers evidence and haiku scores what it is given.
  * Classification only — no decision authority; the result rides the
  * evidence bundle for the Opus appraiser and lands in the run trace.
  *
@@ -18,6 +18,7 @@
 import type { Env } from '../../types'
 import type { NormalizedProperty } from '../property-api/types'
 import { createReasoningProvider } from '../llm'
+import { webSearch } from '../web-search'
 
 export interface PocketDesirability {
   /** 0-10 desirability rating — 10 = deepest demand, fastest resale. */
@@ -65,37 +66,8 @@ const DESIRABILITY_SCHEMA = {
 } as const
 
 async function gatherWebSignal(env: Env, query: string): Promise<string[]> {
-  const serper = env.SERPER_API_KEY
-  if (serper) {
-    const res = await fetch('https://google.serper.dev/search', {
-      method: 'POST',
-      headers: { 'X-API-KEY': serper, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, num: 6 }),
-      signal: AbortSignal.timeout(10000),
-    }).catch(() => null)
-    const data = res?.ok
-      ? await res.json<{ organic?: Array<{ title?: string; snippet?: string }> }>().catch(() => null)
-      : null
-    const snippets = (data?.organic ?? [])
-      .map((o) => `${o.title ?? ''}: ${o.snippet ?? ''}`.trim())
-      .filter(Boolean)
-      .slice(0, 6)
-    if (snippets.length) return snippets
-  }
-  // Serper missing/empty (e.g. out of credits) — scrape the same SERP via
-  // Scrapfly and let haiku pull signal from the stripped page text.
-  const flyKey = env.SCRAPFLY_API_KEY
-  const flyUrl = env.SCRAPFLY_URL || 'https://api.scrapfly.io/scrape'
-  if (!flyKey) return []
-  const target = `https://www.google.com/search?q=${encodeURIComponent(query)}`
-  const res = await fetch(
-    `${flyUrl}?key=${encodeURIComponent(flyKey)}&url=${encodeURIComponent(target)}&render_js=true`,
-    { signal: AbortSignal.timeout(20000) },
-  ).catch(() => null)
-  if (!res?.ok) return []
-  const data = await res.json<{ result?: { content?: string } }>().catch(() => null)
-  const clean = (data?.result?.content ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-  return clean ? [clean.slice(0, 4000)] : []
+  const results = await webSearch(env, query, { limit: 6, timeoutMs: 10_000 })
+  return results.map((o) => `${o.title}: ${o.snippet}`.trim()).filter((s) => s !== ':')
 }
 
 async function executeDesirability(
@@ -148,7 +120,7 @@ export async function ratePocketDesirability(env: Env, property: NormalizedPrope
     || location.address || 'unknown location'
 
   // Primary path — haiku searches the web itself via Anthropic's
-  // server-side web_search tool. No Serper/Scrapfly needed.
+  // server-side web_search tool. No Scrapfly search needed.
   if (provider.name === 'claude') {
     const found = await executeDesirability(
       provider,
@@ -158,7 +130,7 @@ export async function ratePocketDesirability(env: Env, property: NormalizedPrope
     if (found) return found
   }
 
-  // Fallback — gather SERP evidence ourselves (Serper, else Scrapfly)
+  // Fallback — gather SERP evidence ourselves (Scrapfly web search)
   // and let haiku score what it is given.
   const snippets = await gatherWebSignal(env, `${anchor} real estate market demand homes for sale neighborhood`)
   return executeDesirability(

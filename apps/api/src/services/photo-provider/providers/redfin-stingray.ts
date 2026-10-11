@@ -1,7 +1,7 @@
 /**
  * Redfin comp listing fetcher — the fast evidence path.
  *
- * The rendered-scrape chain (Serper → Firecrawl/Scrapfly on Zillow) costs
+ * The rendered-scrape chain (web search → Firecrawl/Scrapfly on Zillow) costs
  * 15-45s per comp. Redfin's internal "stingray" JSON API serves the same
  * evidence (photos + listing remarks + property facts) without any JS
  * render: autocomplete resolves address → propertyId, then

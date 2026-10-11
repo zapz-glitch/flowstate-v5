@@ -5,10 +5,11 @@
  * - Pocket = census tract + block group + neighborhood trio (zip fallback).
  * - Score 0-10 = alpha delta (40%) + band discipline (25%) + desirability (35%).
  * - Deterministic inputs come from the run_records payload; desirability is
- *   a once-per-pocket Serper + Luna classify cached for ~90 days.
+ *   a once-per-pocket web search + Luna classify cached for ~90 days.
  */
 
 import type { Env } from '../../types'
+import { webSearch } from '../web-search'
 
 const REFRESH_DAYS = 90
 
@@ -202,50 +203,11 @@ async function classifyMetro(env: Env, city: string | null, state: string | null
   return out && out.length < 40 ? out : null
 }
 
-/** Desirability classify — Serper gather → Luna verdict, cached per pocket. */
+/** Desirability classify — Scrapfly web search gather → Luna verdict, cached per pocket. */
 async function classifyDesirability(env: Env, id: PocketIdentity): Promise<{ score: number; evidence: unknown } | null> {
-  const serper = (env as Env & { SERPER_API_KEY?: string }).SERPER_API_KEY
-
-
-  let snippets: string[] = []
   const q = `${id.neighborhood ?? id.city} ${id.state} real estate market demand neighborhood`
-  if (serper) {
-    const res = await fetch('https://google.serper.dev/search', {
-      method: 'POST',
-      headers: { 'X-API-KEY': serper, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q, num: 6 }),
-      signal: AbortSignal.timeout(10000),
-    }).catch(() => null)
-    if (res?.ok) {
-      const data = await res.json<{ organic?: Array<{ title?: string; snippet?: string }> }>()
-      snippets = (data.organic ?? []).map((o) => `${o.title ?? ''}: ${o.snippet ?? ''}`).filter(Boolean).slice(0, 6)
-    }
-  } else {
-    // Scrapfly MCP fallback — web_scrape a Google SERP for the same evidence.
-    const mcpUrl = (env as Env & { SCRAPFLY_MCP_URL?: string }).SCRAPFLY_MCP_URL
-    if (mcpUrl) {
-      const res = await fetch(mcpUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
-        body: JSON.stringify({
-          jsonrpc: '2.0', id: 1, method: 'tools/call',
-          params: { name: 'web_scrape', arguments: { url: `https://www.google.com/search?q=${encodeURIComponent(q)}` } },
-        }),
-        signal: AbortSignal.timeout(20000),
-      }).catch(() => null)
-      if (res?.ok) {
-        const raw = await res.text()
-        const m = raw.match(/data: (\{.*\})/)
-        try {
-          const data = m ? JSON.parse(m[1]) : null
-          const text = data?.result?.content?.[0]?.text ?? ''
-          // Strip tags + chunk lines — Luna picks signal from the SERP text.
-          const clean = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
-          snippets = [clean.slice(0, 2500)]
-        } catch { /* malformed SSE — skip evidence */ }
-      }
-    }
-  }
+  const snippets = (await webSearch(env, q, { limit: 6, timeoutMs: 10_000 }))
+    .map((o) => `${o.title}: ${o.snippet}`)
 
   // Clef (Workers AI) — a native score question returns a probability-
   // weighted 0..4, scaled to 0-10. Same System One shape as TypeSafe.

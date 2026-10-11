@@ -34,7 +34,7 @@ Normalization: lowercase, strip punctuation/spaces, e.g.
 | `score` | 0–10 |
 | `median_lo`, `median_hi` | pocket price band from comp evidence |
 | `inputs_json` | deterministic inputs snapshot |
-| `evidence_json` | Serper/LLM desirability evidence |
+| `evidence_json` | Web-search/LLM desirability evidence |
 | `scored_by` | `deterministic` \| `clef` |
 | `eval_count` | how many evals have hit this pocket |
 | `scored_at`, `refresh_due_at` | refresh cadence ~90d or on drift |
@@ -45,7 +45,7 @@ Normalization: lowercase, strip punctuation/spaces, e.g.
 |---|---|---|
 | 40% | **Alpha delta** — list price vs pocket median band vs ARV band. List below the band = upside to capture; at/above = thin | run payload (deterministic) |
 | 25% | **Band discipline** — comp-selection bands reused: coherence, outlier flags already emitted at eval time. Bands are the ground truth — they keep scoring honest | run payload (deterministic) |
-| 35% | **Desirability + activity** — demand, reputation, momentum signals | Serper search → Clef/Luna classify, cached per pocket |
+| 35% | **Desirability + activity** — demand, reputation, momentum signals | Scrapfly web search → Clef/Luna classify, cached per pocket |
 
 The comp-selection bands (T1/T2 tiers, price-band outliers) are written
 into run_records at eval time — scoring reads them back rather than
@@ -62,7 +62,7 @@ per pocket and cache.
 2. Queue read resolves each item's `pocket_key`.
    - **Hit** → cached score + name, zero cost.
    - **Miss** → provisional deterministic score now + enqueue scoring
-     job (Serper + Clef) → row written; next read is cached.
+     job (web search + Clef) → row written; next read is cached.
 3. Re-score on refresh_due_at (90-day cadence) — plus opportunistic
    refresh when a new eval lands in a stale pocket.
 
@@ -80,7 +80,7 @@ urgent styling inside their metro group — no separate pinned section.
 ## 6. Cost profile
 
 - Queue read: SQL join only — instant, zero external calls.
-- New pocket: ~1 Serper query + ~1 Clef/Luna classify, once.
+- New pocket: ~1 Scrapfly web search (1 credit) + ~1 Clef/Luna classify, once.
 - New city: 1 metro classify, once.
 - No re-evaluation of anything already scored.
 
@@ -88,7 +88,7 @@ urgent styling inside their metro group — no separate pinned section.
 
 - [x] Pocket = tract + block group + neighborhood
 - [x] Refresh: 90-day timer
-- [x] Serper key — approved for flowstate-api
+- [x] Scrapfly key (`SCRAPFLY_API_KEY`) — web search for flowstate-api
 - [ ] Classifier: Clef (Workers AI binding) vs Luna (OpenRouter, already wired)
 - [ ] Card display: numeric score + pocket name chip?
 

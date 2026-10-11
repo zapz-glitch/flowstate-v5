@@ -135,12 +135,11 @@ export interface Env {
   // ─── Firecrawl ─────────────────────────────────────────────────────────────────
   // Firecrawl API for web scraping (Zillow photos)
   FIRECRAWL_API_KEY?: string
-  /** Scrapfly — listing fetch engine (Zillow/Redfin/Realtor) + URL discovery */
+  /** Scrapfly — listing fetch engine (Zillow/Redfin/Realtor) + web search
+   *  (listing-URL discovery, pocket-desirability evidence) */
   SCRAPFLY_API_KEY?: string
   /** Scrapfly scrape endpoint — defaults to https://api.scrapfly.io/scrape */
   SCRAPFLY_URL?: string
-  /** Serper — Google site-search for listing URL resolution */
-  SERPER_API_KEY?: string
   /** Google Maps Platform — Street View Static curb-appeal fallback */
   GOOGLE_MAPS_KEY?: string
   /** Geocodio — metered census-geography lookups (primary path; free 2.5k/day) */
