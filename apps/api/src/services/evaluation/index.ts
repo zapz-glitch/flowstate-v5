@@ -57,7 +57,7 @@ import type {
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
 import { pickFrontCoverImage } from './exterior-match'
-import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
+import { applySubjectTierVerdict, computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
@@ -997,6 +997,7 @@ export async function performAnalysisPhase1(
                   ppsf,
                   description: ev?.listing?.description ?? null,
                   coverImage: ev?._images?.[0] ?? null,
+                  listingImages: ev?._images ?? null,
                   coverPhotoUrl: ev?.listing?.coverPhotoUrl ?? null,
                   latitude: comp.latitude ?? null,
                   longitude: comp.longitude ?? null,
@@ -1553,7 +1554,10 @@ export async function performAnalysisPhase1(
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
   const subjectObservables = await subjectObservablesPromise.catch(() => null)
-  if (subjectObservables) subjectObservables.coverPhotoUrl = (await subjectCoverPromise)?.url ?? null
+  if (subjectObservables) {
+    subjectObservables.coverPhotoUrl = (await subjectCoverPromise)?.url ?? null
+    applySubjectTierVerdict(subjectObservables, renovation)
+  }
   // Clef digests settle inside the same window — stage A/B/C advisory
   // reads merged per comp for the harness evidence bundle.
   const compDigestMap = params.compDigests ? await params.compDigests.catch(() => null) : null

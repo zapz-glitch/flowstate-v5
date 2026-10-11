@@ -94,7 +94,7 @@ describe('subject renovation read — decision model first', () => {
     const body = calls.decisions[0]
     const tier = body.questions.find((q: any) => q.name === 'renovation_level')
     expect(tier.type).toBe('choice')
-    expect(tier.instructions).toContain('most like')
+    expect(tier.instructions).toContain('Based on the photos and the listing description, what tier of renovation')
     for (const d of RENOVATION_LEVEL_DEFINITIONS) {
       expect(tier.choices).toContainEqual({ value: d.name, description: d.criteria })
     }

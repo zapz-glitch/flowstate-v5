@@ -20,6 +20,7 @@ import {
   RENOVATION_TIER_CHOICES,
   RENOVATION_TIER_UNVERIFIED,
   renovationLevelToIndex,
+  renovationTierInstructions,
   renovationTierProbabilities,
 } from '../vision/renovation'
 
@@ -164,14 +165,7 @@ export const CONDITION_QUESTIONS: Record<string, Question> = {
   // same definition sentences) as the subject, so the two are comparable.
   renovation_tier: {
     type: 'choice',
-    instructions:
-      'Which renovation tier is this property most like, judged by the work ' +
-      'it would have needed AS SOLD to reach finished retail condition? Use ' +
-      'the listing photos and description only — price is not evidence of ' +
-      'condition. A freshly renovated sale needs almost nothing (Lipstick); ' +
-      'a dated but sound home needs cosmetic work; damage or failing systems ' +
-      `is Heavy Rehab. Choose ${RENOVATION_TIER_UNVERIFIED} when there is no ` +
-      'photo or description to judge from.',
+    instructions: renovationTierInstructions('comp'),
     criteria: {
       ...RENOVATION_TIER_CHOICES,
       [RENOVATION_TIER_UNVERIFIED]: 'No photo or description evidence to support a tier.',

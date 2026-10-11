@@ -75,6 +75,24 @@ export const RENOVATION_TIER_CHOICES: Record<string, string> = Object.fromEntrie
 /** Fallback option — the evidence cannot support any tier. */
 export const RENOVATION_TIER_UNVERIFIED = 'Unverified'
 
+/**
+ * The one renovation-tier question, asked once per property from its
+ * listing photos and description. The subject and every comp get the same
+ * wording so their tiers are comparable; a comp is judged as it was sold.
+ */
+export function renovationTierInstructions(property: 'subject' | 'comp'): string {
+  return (
+    'Based on the photos and the listing description, what tier of renovation does this property need to reach ' +
+    'finished retail condition? ' +
+    (property === 'comp'
+      ? 'Judge the property as it was when it sold — a freshly renovated sale needs almost nothing. '
+      : '') +
+    'Weigh the whole property and the most expensive work required: a dated kitchen alone is not Heavy Rehab, ' +
+    'and partial demo is not Full Gut. Price is not evidence of condition. ' +
+    'Answer that the tier is unverified only when the photos and description cannot support any tier.'
+  )
+}
+
 /** Keep only the five tiers from a model's probability map, keyed by tier
  *  name and rounded. Null when the map carries no tier. */
 export function renovationTierProbabilities(
@@ -410,9 +428,7 @@ async function runClefChunkReads(
       ...questions,
       renovation_level: {
         ...questions.renovation_level,
-        instructions:
-          'Which renovation tier is this property most like? ' + questions.renovation_level.instructions +
-          ` Choose ${RENOVATION_TIER_UNVERIFIED} only when the photos and description cannot support any tier.`,
+        instructions: renovationTierInstructions('subject'),
         criteria: {
           ...RENOVATION_TIER_CHOICES,
           [RENOVATION_TIER_UNVERIFIED]: 'The photos and description do not show enough of the property to support a tier.',
