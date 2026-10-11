@@ -2273,6 +2273,7 @@ export function toBCompsOf(
     adjustedPrice: comp.adjustedSalePrice ?? null,
     distanceMiles: comp.distanceMiles ?? null,
     sameBlockGroup: comp.sameBlockGroup ?? null,
+    censusBlockGroup: comp.censusBlockGroup ?? null,
     censusTract: comp.censusTract ?? null,
     neighborhoodName: comp.neighborhoodName ?? null,
     subdivision: comp.subdivision ?? null,

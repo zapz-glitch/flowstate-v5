@@ -9,7 +9,7 @@
 import { OpenAICompatibleProvider } from '../llm/openai-compatible'
 import type { Phase1Context, HarnessEvidence } from './index'
 import type { AppraiserResult } from './appraiser'
-import { runDeterministicSelector, type RankedComp } from './selector'
+import { runDeterministicSelector, type PocketValues, type RankedComp } from './selector'
 
 const TYPE_SELECTOR_MODEL = 'deepseek/deepseek-v4.1-flash'
 const TYPE_SELECTOR_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions'
@@ -101,10 +101,19 @@ export async function runTypeSelector(
   opts?: { priceBand?: { upper: number; lower: number } },
 ): Promise<AppraiserResult> {
   let ranked: RankedComp[] = []
+  let pocket: PocketValues | null = null
   const base = runDeterministicSelector(ctx, evidence, {
     priceBand: opts?.priceBand,
-    onRanked: (r) => { ranked = r },
+    pocketValueGate: true,
+    onRanked: (r, p) => { ranked = r; pocket = p },
   })
+  const pv = pocket as PocketValues | null
+  if (pv) {
+    const fmt = (g: PocketValues['blocks']) => g.slice(0, 6).map((x) => `${x.subject ? '*' : ''}${x.key}:$${x.medianPpsf}/sf n${x.n} ${x.ratio}x`).join(', ')
+    base.debugNotes.push(`pocket-value: $${pv.pocketPpsf}/sf (${pv.scope}, n=${pv.pocketN}) · blocks [${fmt(pv.blocks)}] · hoods [${fmt(pv.neighborhoods)}]`)
+    const r9 = ranked.filter((r) => r.audit.rules.includes('R9'))
+    if (r9.length) base.debugNotes.push(...r9.slice(0, 6).map((r) => `${r.id}: ${r.audit.reasons.find((x) => x.startsWith('R9'))}`))
+  }
 
   const model = env.TYPE_SELECTOR_MODEL ?? TYPE_SELECTOR_MODEL
   const apiKey = env.TYPE_SELECTOR_API_KEY ?? env.OPENROUTER_API_KEY
@@ -177,6 +186,8 @@ export async function runTypeSelector(
       saleDate: r.comp.saleDate,
       distMi: r.comp.distanceMiles != null ? Math.round(r.comp.distanceMiles * 10) / 10 : null,
       geo: l?.geo ?? r.profile.geoTier,
+      block: (r.comp as { censusBlockGroup?: string | null }).censusBlockGroup ?? null,
+      hood: r.comp.neighborhoodName ?? r.comp.subdivision ?? null,
       lbl: l ? `sqft:${l.sqft}|yr:${l.year}|lot:${l.lot}|style:${l.style}|feat:${l.feat}|sale:${l.saleAge}|${l.pricePosition}→${l.priceEvidence}|${l.sanity}|diffs:${l.diffs}` : '',
       group: r.group,
     }
@@ -201,7 +212,12 @@ export async function runTypeSelector(
       'support; as-is sales are floor evidence only. The "feat" field is ' +
       'pool|con(struction)|fnd(oundation)|gar(age) vs the subject: m=match, ' +
       'd=differs, u=unknown — prefer feature matches (pool subject needs pool ' +
-      'comps, block construction needs block comps); the pocket median bounds you.',
+      'comps, block construction needs block comps); the pocket median bounds you. ' +
+      'Pocket = same block group AND same neighborhood as the subject. pocketValues ' +
+      'lists every block/neighborhood median $/sf and its ratio to the pocket; ' +
+      'comps outside the pocket already proved their group sits within 0.75x-1.33x. ' +
+      'Prefer in-pocket comps; an out-of-pocket ARV pick should come from the ' +
+      'group whose ratio is closest to 1.00.',
     tiers: {
       '1': 'in-pocket geo, sqft within ±250, era year built, fresh sale, ARV price — identical data set',
       '2': 'in-pocket geo, sqft within 20%, year within ±20 — closest data set',
@@ -212,12 +228,17 @@ export async function runTypeSelector(
       baths: subject.bathrooms, yearBuilt: subject.yearBuilt, lotSqft: subject.lotSizeSquareFeet,
     },
     band: opts?.priceBand ?? null,
-    pocketMedian: (() => {
+    // Pocket = block group AND neighborhood. Every eligible comp outside it
+    // already proved its own block/neighborhood median sits within
+    // 0.75x-1.33x of this value (R9) — the ratio field is that proof.
+    pocketMedian: pv?.pocketPpsf ?? (() => {
       const xs = eligible
         .filter((r) => r.profile.geoTier === 'BLOCK_GROUP' || r.profile.geoTier === 'SUBDIVISION')
         .map((r) => r.ppsf).filter((v) => v > 0).sort((a, b) => a - b)
       return xs.length ? Math.round(xs[Math.floor((xs.length - 1) / 2)]) : null
     })(),
+    pocketScope: pv?.scope ?? null,
+    pocketValues: pv ? { blocks: pv.blocks.slice(0, 8), neighborhoods: pv.neighborhoods.slice(0, 8) } : null,
     eligible: rows,
   })
 

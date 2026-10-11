@@ -58,6 +58,21 @@ const MIN_PICKS = 1
  *  twin-or-close AND the comp can carry at most 2 recoverable
  *  exceptions. Below the bar the evidence is context, not a pick. */
 const TRUE_COMP_MAX_DIFFS = 2
+/** R9 pocket-value band — a comp outside the subject pocket (block group
+ *  AND neighborhood) is evidence only when its own group's median $/sf
+ *  sits within this ratio of the subject pocket's median. */
+const POCKET_VALUE_BAND = { lo: 0.75, hi: 1.33 }
+
+/** Quantified pocket values — the subject pocket's median plus every block
+ *  group and neighborhood group's median in the pool. */
+export interface PocketValues {
+  /** Median $/sf of the subject pocket and how it was measured. */
+  pocketPpsf: number
+  scope: 'block+neighborhood' | 'block' | 'neighborhood' | 'tract'
+  pocketN: number
+  blocks: Array<{ key: string; n: number; medianPpsf: number; ratio: number; subject: boolean }>
+  neighborhoods: Array<{ key: string; n: number; medianPpsf: number; ratio: number; subject: boolean }>
+}
 /** Extreme-variance anomaly threshold — a comp this likely to carry an
  *  unexplained premium never makes the ARV pool. */
 const ANOMALY_P = 0.7
@@ -180,7 +195,10 @@ export function runDeterministicSelector(
   evidence: HarnessEvidence,
   opts?: {
     priceBand?: { upper: number; lower: number }
-    onRanked?: (ranked: RankedComp[]) => void
+    /** R9: pocket = block group AND neighborhood; foreign groups must
+     *  prove a similar median value before their comps can price. */
+    pocketValueGate?: boolean
+    onRanked?: (ranked: RankedComp[], pocket: PocketValues | null) => void
   },
 ): AppraiserResult {
   const subject = evidence.subject
@@ -340,6 +358,80 @@ export function runDeterministicSelector(
       }
     }
   }
+  // R9 pocket-value gate (typescript lane) — pocket = block group AND
+  // neighborhood match. Every block group and neighborhood in the pool
+  // gets its own median $/sf. A comp outside the subject pocket on either
+  // dimension is ARV evidence only when that group's median sits inside
+  // the subject pocket's band — a similar pocket, not a pricier/cheaper
+  // one. Singletons have no group to measure, so their own $/sf must fit.
+  // Unknown geography is not a mismatch.
+  let pocketValues: PocketValues | null = null
+  if (opts?.pocketValueGate) {
+    const norm = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+    const med = (xs: number[]) => {
+      const s = [...xs].sort((a, b) => a - b)
+      return s.length ? s[Math.floor((s.length - 1) / 2)] : 0
+    }
+    const subjBg = (subject.censusBlockGroup as string | null | undefined) ?? null
+    // One hood field for both sides — mixing neighborhoodName with
+    // subdivision would mark every comp foreign.
+    const hoodField = subject.neighborhoodName ? 'neighborhoodName' : subject.subdivision ? 'subdivision' : null
+    const subjHood = hoodField ? norm(subject[hoodField] as string | null) : null
+    const bgOf = (r: RankedComp) =>
+      (r.comp as { censusBlockGroup?: string | null }).censusBlockGroup ??
+      (r.comp.sameBlockGroup === true ? subjBg : null)
+    const hoodOf = (r: RankedComp) => hoodField ? norm(r.comp[hoodField] as string | null | undefined) : null
+    const pool = ranked.filter((r) => r.audit.verdict === 'eligible' && r.ppsf > 0)
+    const group = (keyOf: (r: RankedComp) => string | null) => {
+      const m = new Map<string, number[]>()
+      for (const r of pool) {
+        const k = keyOf(r)
+        if (k) m.set(k, [...(m.get(k) ?? []), r.ppsf])
+      }
+      return m
+    }
+    const bgGroups = group(bgOf)
+    const hoodGroups = group(hoodOf)
+    const both = pool.filter((r) => subjBg && bgOf(r) === subjBg && subjHood && hoodOf(r) === subjHood)
+    const bgOnly = subjBg ? bgGroups.get(subjBg) ?? [] : []
+    const hoodOnly = subjHood ? hoodGroups.get(subjHood) ?? [] : []
+    const [pocketPpsf, scope, pocketN] =
+      both.length >= 2 ? [med(both.map((r) => r.ppsf)), 'block+neighborhood' as const, both.length]
+      : bgOnly.length >= 2 ? [med(bgOnly), 'block' as const, bgOnly.length]
+      : hoodOnly.length >= 2 ? [med(hoodOnly), 'neighborhood' as const, hoodOnly.length]
+      : [pocketMedian, 'tract' as const, pocketClean.length]
+    const table = (m: Map<string, number[]>, subjKey: string | null) =>
+      [...m.entries()].map(([key, xs]) => {
+        const medianPpsf = med(xs)
+        return { key, n: xs.length, medianPpsf: Math.round(medianPpsf), ratio: pocketPpsf > 0 ? Math.round((medianPpsf / pocketPpsf) * 100) / 100 : 0, subject: key === subjKey }
+      }).sort((a, b) => b.n - a.n)
+    pocketValues = {
+      pocketPpsf: Math.round(pocketPpsf), scope, pocketN,
+      blocks: table(bgGroups, subjBg), neighborhoods: table(hoodGroups, subjHood),
+    }
+    const inBand = (v: number) => v >= pocketPpsf * POCKET_VALUE_BAND.lo && v <= pocketPpsf * POCKET_VALUE_BAND.hi
+    if (pocketPpsf > 0) {
+      for (const r of pool) {
+        const fails: string[] = []
+        const check = (dim: string, key: string | null, subjKey: string | null, groups: Map<string, number[]>) => {
+          if (!key || !subjKey || key === subjKey) return
+          const xs = groups.get(key) ?? []
+          const v = xs.length >= 2 ? med(xs) : r.ppsf
+          if (!inBand(v)) {
+            fails.push(`${dim} ${key} ${xs.length >= 2 ? `median $${Math.round(v)}/sf (n=${xs.length})` : `singleton $${Math.round(v)}/sf`} = ${(v / pocketPpsf).toFixed(2)}x pocket`)
+          }
+        }
+        check('block', bgOf(r), subjBg, bgGroups)
+        check('neighborhood', hoodOf(r), subjHood, hoodGroups)
+        if (fails.length) {
+          r.audit.verdict = 'excluded'
+          r.audit.rules.push('R9')
+          r.audit.reasons.push(
+            `R9 pocket-value — ${fails.join('; ')} vs subject pocket $${Math.round(pocketPpsf)}/sf (${scope}, band ${POCKET_VALUE_BAND.lo}x–${POCKET_VALUE_BAND.hi}x)`)
+        }
+      }
+    }
+  }
   // clean is re-derived below after the outlier pass.
   const cleanSet = new Set(ranked.filter((r) => r.audit.verdict === 'eligible').map((r) => r.id))
   clean.length = 0
@@ -448,7 +540,7 @@ export function runDeterministicSelector(
   // type-selector seat: the typescript lane lets a reasoning model pick
   // among the labeled eligible set — expose the ranked pool after labels
   // and every hard gate have landed, before the code pick runs.
-  opts?.onRanked?.(ranked)
+  opts?.onRanked?.(ranked, pocketValues)
   const arvPool = clean.filter((r) => !asIsPriced(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !asIsPriced(r) && !isRenovated(r)).sort(rank)
   const medianFallback = arvPool.length === 0

@@ -98,6 +98,7 @@ export interface BComp {
   adjustedPrice?: number | null
   distanceMiles?: number | null
   sameBlockGroup?: boolean | null
+  censusBlockGroup?: string | null
   censusTract?: string | null
   subdivision?: string | null
   neighborhoodName?: string | null
