@@ -17,7 +17,7 @@
  */
 
 import { decisionsRun, isDecisionsAvailable } from '../decisions'
-import { RENOVATION_LEVEL_DEFINITIONS } from '../vision/renovation'
+import { RENOVATION_LEVEL_DEFINITIONS, renovationTierProbabilities } from '../vision/renovation'
 import { fetchImagesAsBase64, fetchImageAsBase64 } from '../llm/image-utils'
 import type { Env } from '../../types'
 
@@ -406,6 +406,8 @@ export interface SubjectObservables {
    *  vocabulary (LIPSTICK … FULL_GUT) — the model picked against the
    *  Evaluation Settings criteria. */
   renovationTier: string | null
+  /** Probability per renovation tier behind `renovationTier` */
+  renovationTierProbabilities?: Record<string, number> | null
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
@@ -438,6 +440,8 @@ export interface CompObservables {
   /** Comp condition in the product's rehab-tier vocabulary — the model
    *  picked against the Evaluation Settings criteria (photo+description). */
   conditionTier: string | null
+  /** Probability per renovation tier behind `conditionTier` */
+  conditionTierProbabilities?: Record<string, number> | null
   /** P(comp is a physical match to the subject) — street view lane. */
   physicalMatchP: number | null
   /** P(comp is a finished/renovated/move-in-ready version of the subject) —
@@ -451,11 +455,14 @@ export interface CompObservables {
   durationMs: number
 }
 
-type DecisionsAnswers = Record<string, { probability?: number; choice?: string | boolean | null; score?: number; confidence?: number }>
+type DecisionsAnswers = Record<string, { probability?: number; choice?: string | boolean | null; score?: number; confidence?: number; probabilities?: Record<string, number> }>
 const choiceOf = (a: DecisionsAnswers, k: string): string | null =>
   typeof a[k]?.choice === 'string' ? (a[k]!.choice as string) : null
 const probOf = (a: DecisionsAnswers, k: string): number | null =>
   typeof a[k]?.probability === 'number' ? a[k]!.probability! : null
+/** Probability per renovation tier behind a tier choice answer. */
+const tierProbsOf = (a: DecisionsAnswers, k: string): Record<string, number> | null =>
+  renovationTierProbabilities(a[k]?.probabilities)
 const confs = (a: DecisionsAnswers): Record<string, number> =>
   Object.fromEntries(Object.entries(a).filter(([, v]) => typeof v?.confidence === 'number').map(([k, v]) => [k, v.confidence!]))
 
@@ -725,6 +732,7 @@ export async function decisionsSubjectObservables(
       streetBearingDeg: orientation?.bearingDeg ?? null,
     },
     renovationTier: choiceOf(merged, 's10_renovation_tier'),
+    renovationTierProbabilities: tierProbsOf(merged, 's10_renovation_tier'),
     confidence: confs(merged),
     photosRead: imgs.length,
     photosTotal: urls.length,
@@ -830,6 +838,7 @@ export async function decisionsCompObservables(
     siteExposure: choiceOf(a, 'c9_site_exposure'),
     developmentVintage: choiceOf(a, 'c12_development_vintage'),
     conditionTier: choiceOf(a, 'c13_condition_tier'),
+    conditionTierProbabilities: tierProbsOf(a, 'c13_condition_tier'),
     physicalMatchP: probOf(a, 'c10_physical_match'),
     arvFitnessP: probOf(a, 'c11_arv_fitness'),
     confidence: confs(a),

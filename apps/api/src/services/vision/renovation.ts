@@ -63,6 +63,34 @@ export const RENOVATION_LEVEL_DEFINITIONS: Array<{ index: number; name: string; 
   },
 ]
 
+/**
+ * The renovation tiers as a choice set for a decision model: each tier's
+ * own definition sentence is the option description, so the model answers
+ * "which tier is this property most like" against the product's wording
+ * and returns a probability per tier. Shared by the subject and comp reads.
+ */
+export const RENOVATION_TIER_CHOICES: Record<string, string> = Object.fromEntries(
+  RENOVATION_LEVEL_DEFINITIONS.map((d) => [d.name, d.criteria]),
+)
+/** Fallback option — the evidence cannot support any tier. */
+export const RENOVATION_TIER_UNVERIFIED = 'Unverified'
+
+/** Keep only the five tiers from a model's probability map, keyed by tier
+ *  name and rounded. Null when the map carries no tier. */
+export function renovationTierProbabilities(
+  probabilities: Record<string, number> | null | undefined,
+): Record<string, number> | null {
+  if (!probabilities) return null
+  const out: Record<string, number> = {}
+  for (const [key, p] of Object.entries(probabilities)) {
+    const index = renovationLevelToIndex(key)
+    if (index === null || typeof p !== 'number' || !Number.isFinite(p)) continue
+    const name = RENOVATION_LEVEL_DEFINITIONS[index].name
+    out[name] = Math.round(((out[name] ?? 0) + p) * 1000) / 1000
+  }
+  return Object.keys(out).length ? out : null
+}
+
 /** Map a free-form level string to a REHAB_LEVELS index (0-4), else null */
 /**
  * Extract a JSON object from model output: strips markdown fences, then
@@ -138,6 +166,8 @@ export interface RenovationAssessment {
   limitations: string[]
   provider: string | null
   model: string | null
+  /** Probability per renovation tier from the decision-model read, when one ran */
+  tierProbabilities?: Record<string, number> | null
   /** Curb-appeal condition assessed in the same vision pass */
   curbAppeal?: CurbAppealCheck | null
   error?: string
@@ -205,6 +235,12 @@ const MAX_PHOTOS = 30
 // every photo via 4-image chunks instead, so nothing is skipped.
 const LLM_MAX_IMAGES = 12
 const LOW_CONFIDENCE = 40
+/** A decision-model tier read below this top-tier probability (0-100) is
+ *  not a majority call — the reasoning reader (haiku) takes the verdict. */
+const DECISIONS_BACKUP_BELOW = 50
+/** One photo is usually the exterior — the same ceiling the reasoning
+ *  prompt sets for single-photo reads. */
+const SINGLE_PHOTO_MAX_CONFIDENCE = 60
 /** Clef's image budget is 4 — the comp lane uses the same cap. */
 const CLEF_MAX_PHOTOS = 4
 
@@ -298,7 +334,7 @@ async function runClefChunkReads(
         'whole property. Weight majority-condition and the most expensive ' +
         'required work — a dated kitchen alone is not Heavy Rehab; partial ' +
         'demo is not Full Gut.',
-      criteria: Object.fromEntries(RENOVATION_LEVEL_DEFINITIONS.map((d) => [d.name, d.criteria])),
+      criteria: RENOVATION_TIER_CHOICES,
     },
     curb_appeal: {
       type: 'choice',
@@ -365,13 +401,32 @@ async function runClefChunkReads(
       yearBuilt: propertyContext.yearBuilt ?? null,
     },
   }
-  // Decisions lane — one request for ALL photos (≤128) instead of per-chunk calls.
+  // Decisions lane — one request for ALL photos (≤128) instead of per-chunk
+  // calls. The tier question carries each tier's definition as its option
+  // text plus an explicit "cannot tell" option, and the listing description
+  // rides along as evidence.
   if (useDecisions) {
+    const decisionsQuestions = {
+      ...questions,
+      renovation_level: {
+        ...questions.renovation_level,
+        instructions:
+          'Which renovation tier is this property most like? ' + questions.renovation_level.instructions +
+          ` Choose ${RENOVATION_TIER_UNVERIFIED} only when the photos and description cannot support any tier.`,
+        criteria: {
+          ...RENOVATION_TIER_CHOICES,
+          [RENOVATION_TIER_UNVERIFIED]: 'The photos and description do not show enough of the property to support a tier.',
+        },
+      },
+    }
     const res = await decisionsRun(env, {
-      state,
-      questions: questions as Parameters<typeof decisionsRun>[1]['questions'],
+      state: { ...state, listingDescription: propertyContext.description?.slice(0, 3000) ?? null },
+      questions: decisionsQuestions as Parameters<typeof decisionsRun>[1]['questions'],
       images: live.slice(0, 128).map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
-    }).catch(() => null)
+    }).catch((err) => {
+      console.warn(`[renovation] Decisions tier read failed: ${err instanceof Error ? err.message : String(err)}`)
+      return null
+    })
     const answers = res?.answers ? [res.answers as ClefAnswerMap] : []
     return { answers, chunksRead: chunks.length }
   }
@@ -418,6 +473,7 @@ function clefEvidenceBlock(clef: ClefChunkRead): string {
 function mergedClefAssessment(
   answers: ClefAnswerMap[],
   live: FetchedImage[],
+  reader: { provider: string; model: string; label: string } = { provider: 'workers-ai', model: 'clef-flash', label: 'Clef' },
 ): RenovationAssessment | null {
   if (!answers.length) return null
 
@@ -443,7 +499,23 @@ function mergedClefAssessment(
   const { pick, prob: pickProb } = mergeProbs('renovation_level')
   const levelIndex = renovationLevelToIndex(pick)
   if (levelIndex === null) return null
-  const confidence = Math.round(Math.min(1, Math.max(0, pickProb)) * 100)
+  const singlePhoto = live.length === 1
+  const rawConfidence = Math.round(Math.min(1, Math.max(0, pickProb)) * 100)
+  const confidence = singlePhoto ? Math.min(rawConfidence, SINGLE_PHOTO_MAX_CONFIDENCE) : rawConfidence
+  const tierProbabilities = renovationTierProbabilities(
+    Object.fromEntries(
+      RENOVATION_LEVEL_DEFINITIONS.map((d) => {
+        const perChunk = answers
+          .map((a) => a.renovation_level?.probabilities?.[d.name])
+          .filter((v): v is number => typeof v === 'number')
+        return [d.name, perChunk.length ? perChunk.reduce((sum, v) => sum + v, 0) / perChunk.length : 0]
+      }),
+    ),
+  )
+  const ranked = Object.entries(tierProbabilities ?? {})
+    .filter(([, p]) => p >= 0.01)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, p]) => `${name} ${Math.round(p * 100)}%`)
   const { pick: curbPick, prob: curbProb } = mergeProbs('curb_appeal')
 
   // Zone merge — a zone verdict comes only from chunks that saw it:
@@ -481,10 +553,10 @@ function mergedClefAssessment(
     return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
   }
   const systemConcerns = noulAvg('major_system_concern') >= 0.5
-    ? ['Clef zone read: visible major-system concern in photo set']
+    ? [`${reader.label} zone read: visible major-system concern in photo set`]
     : []
   const structuralConcerns = noulAvg('structural_concern') >= 0.5
-    ? ['Clef zone read: possible structural distress in photo set']
+    ? [`${reader.label} zone read: possible structural distress in photo set`]
     : []
 
   return {
@@ -501,13 +573,19 @@ function mergedClefAssessment(
     exteriorCondition: zones.exterior_condition,
     visibleMajorSystemConcerns: systemConcerns,
     structuralConcerns,
-    rationale: null,
+    rationale: ranked.length
+      ? `${reader.label} tier read over ${live.length} photo(s): ${ranked.join(', ')}.`
+      : null,
     evidenceForClassification: [],
     evidenceAgainstMoreSevereLevel: [],
     evidenceAgainstLessSevereLevel: [],
-    limitations: [`Clef chunked zone read — ${answers.length} call(s), zones not photographed report not_visible`],
-    provider: 'workers-ai',
-    model: 'clef-flash',
+    limitations: [
+      `${reader.label} zone read — ${answers.length} call(s), zones not photographed report not_visible`,
+      ...(singlePhoto ? [`Single photo — confidence capped at ${SINGLE_PHOTO_MAX_CONFIDENCE}`] : []),
+    ],
+    provider: reader.provider,
+    model: reader.model,
+    tierProbabilities,
     curbAppeal: curbPick && curbPick !== 'unknown'
       ? {
           condition: curbPick as CurbAppealCheck['condition'],
@@ -675,7 +753,12 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  if (!isReasoningProviderAvailable(env) && !env.AI && !providerOverride) {
+  // The decision model is the subject's primary reader when configured;
+  // the reasoning reader (haiku) is its backup. A caller-supplied provider
+  // is an explicit choice of reader and skips the decision model.
+  const decisionsOn = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY && !providerOverride
+
+  if (!isReasoningProviderAvailable(env) && !env.AI && !providerOverride && !decisionsOn) {
     return {
       ...base,
       status: 'unavailable',
@@ -712,12 +795,29 @@ export async function assessRenovationFromPhotos(
     }
   }
 
+  // Decision-model read — every photo plus the listing description in one
+  // call, answering "which tier is this most like" with a probability per
+  // tier. It stands as the verdict when one tier holds a majority; a split
+  // read, a heavy tier called from a single photo, or a failed call hands
+  // the verdict to the reasoning reader below.
+  let decisionsRead: RenovationAssessment | null = null
+  if (decisionsOn) {
+    const read = await runClefChunkReads(env, live, propertyContext ?? {})
+      .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
+    decisionsRead = mergedClefAssessment(read.answers, live, {
+      provider: 'openai',
+      model: env.DECISIONS_MODEL || 'gpt-6-luna',
+      label: 'Decisions',
+    })
+    if (decisionsRead && !decisionsReadNeedsBackup(decisionsRead, live.length)) return decisionsRead
+  }
+
   // Haiku reads the subject photos + description directly — the Clef
   // chunk layer is skipped entirely when a reasoning provider is bound
   // (haiku sees the images itself rather than reasoning over Clef votes).
   // Clef remains only as the fallback reader when no reasoning provider
   // is configured.
-  if (!provider) {
+  if (!provider && !decisionsOn) {
     const clef = await runClefChunkReads(env, live, propertyContext ?? {})
       .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
     const mergedClef = mergedClefAssessment(clef.answers, live)
@@ -725,6 +825,8 @@ export async function assessRenovationFromPhotos(
   }
 
   if (!provider) {
+    // No backup reader — an inconclusive decision-model read still beats none.
+    if (decisionsRead) return decisionsRead
     return {
       ...base,
       status: 'unavailable',
@@ -778,6 +880,13 @@ export async function assessRenovationFromPhotos(
   }
 
   if (!parsed) {
+    // Backup reader failed too — keep the decision-model read it was backing up.
+    if (decisionsRead) {
+      return {
+        ...decisionsRead,
+        limitations: [...decisionsRead.limitations, `Backup reader failed: ${lastProviderError ?? 'Vision analysis failed'}`],
+      }
+    }
     return {
       ...base,
       status: 'unavailable',
@@ -789,7 +898,26 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  return assessmentFromParsed(parsed, provider.name, provider.model, photos.length)
+  const assessment = assessmentFromParsed(parsed, provider.name, provider.model, photos.length)
+  if (decisionsOn) {
+    // The verdict is the backup reader's; the decision model's tier
+    // probabilities stay on the record as the evidence it was given.
+    assessment.tierProbabilities = decisionsRead?.tierProbabilities ?? null
+    assessment.limitations = [
+      ...assessment.limitations,
+      decisionsRead
+        ? `Decisions tier read was inconclusive (${decisionsRead.renovationLevel} at ${decisionsRead.confidence}%) — backup reader made the call`
+        : 'Decisions tier read returned no tier — backup reader made the call',
+    ]
+  }
+  return assessment
+}
+
+/** Whether a decision-model tier read should hand the verdict to the backup reader. */
+function decisionsReadNeedsBackup(read: RenovationAssessment, photoCount: number): boolean {
+  if (read.confidence === null || read.confidence < DECISIONS_BACKUP_BELOW) return true
+  // Heavy Rehab / Full Gut cannot be called from one (usually exterior) photo.
+  return photoCount === 1 && (read.renovationLevelIndex ?? 0) >= 3
 }
 
 /**

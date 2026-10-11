@@ -949,6 +949,20 @@ export async function performAnalysisPhase1(
           const classifyInputs = clefInputs
             .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
             .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
+          // Comp condition classify. With CONDITION_READER=decisions the
+          // decision model reads the pool (condition, sale tier, and the
+          // renovation tier with a probability per tier) and falls back to
+          // the reasoning reader (haiku) for any comp it cannot answer.
+          // Without it, haiku is the reader. The two are not chained: the
+          // haiku pool read re-reads every comp another model stamped.
+          const classifyCompPool = async () => {
+            const subjectRef = { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined }
+            if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+              await classifyCompBatchDecisions(env, classifyInputs, subjectRef).catch(() => null)
+            } else if (env.ANTHROPIC_API_KEY) {
+              await classifyCompPoolHaiku(env, classifyInputs, subjectRef).catch(() => null)
+            }
+          }
           if (observablesOn) {
             // C1-C7 per comp — cover photo + description + closed price vs
             // the code-computed pocket benchmark. Parallel lanes. Runs over
@@ -1021,28 +1035,10 @@ export async function performAnalysisPhase1(
             // classify path rather than appraising condition-blind.
             if (Object.keys(compObservables).length === 0 && classifyInputs.length) {
               console.warn('[observables] lane answered 0 comps — falling back to comp classify')
-              if (env.ANTHROPIC_API_KEY) {
-                await classifyCompPoolHaiku(
-                  env, classifyInputs,
-                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-                ).catch(() => null)
-              } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
-                await classifyCompBatchDecisions(
-                  env, classifyInputs,
-                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-                ).catch(() => null)
-              }
+              await classifyCompPool()
             }
-          } else if (env.ANTHROPIC_API_KEY) {
-            await classifyCompPoolHaiku(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
-          } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
-            await classifyCompBatchDecisions(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
+          } else {
+            await classifyCompPool()
           }
           console.log(`[observables] comp lane done — ${Object.keys(compObservables).length}/${clefInputs.length} answered`)
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
