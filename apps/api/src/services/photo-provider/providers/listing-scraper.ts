@@ -24,6 +24,8 @@ export interface ListingSiteAdapter {
   searchQuery(property: PropertyIdentifier): string
   /** Search/autocomplete endpoint URL that yields listing-page links */
   searchUrl(property: PropertyIdentifier): string
+  /** Direct site-API address lookup (no search engine) — tried first */
+  autocompleteUrl?(property: PropertyIdentifier): string
   /** Regex matching a listing page URL inside search-result text */
   listingUrlPattern: RegExp
   /** Extract the listing page URL from the search endpoint's response text */
@@ -65,7 +67,13 @@ export const redfinAdapter: ListingSiteAdapter = {
   },
 
   // The stingray autocomplete endpoint is CloudFront-blocked for datacenter
-  // IPs. Resolve via a Google site-search rendered through Firecrawl instead —
+  // IPs — Scrapfly proxies straight through, so it is the primary resolver.
+  autocompleteUrl(property) {
+    const q = `${property.address} ${property.city} ${property.state}`
+    return `https://www.redfin.com/stingray/do/location-autocomplete?location=${encodeURIComponent(q)}&v=2&al=1&iss=&ooa=true`
+  },
+
+  // Resolve via a Google site-search rendered through Firecrawl instead —
   // listing links carry /home/<id> which parseListingUrl extracts.
   searchUrl(property) {
     return `https://www.google.com/search?q=${encodeURIComponent(this.searchQuery(property))}`
@@ -424,7 +432,16 @@ export class ListingPhotoScraper {
     const valid = (url: string | null | undefined) =>
       url && this.listingUrlMatchesAddress(url, property) ? url : null
 
-    // 0. Scrapfly web search — direct listing-URL hits without a Google scrape
+    // 0. Site-API autocomplete — direct listing lookup, no search engine
+    if (adapter.autocompleteUrl) {
+      try {
+        const content = await this.scrape(adapter.autocompleteUrl(property))
+        const url = valid(adapter.parseListingUrl(content.html, property))
+        if (url) return url
+      } catch { /* fall through */ }
+    }
+
+    // 1. Scrapfly web search — direct listing-URL hits without a Google scrape
     const viaSearch = await this.searchResolveUrl(query, adapter.listingUrlPattern, valid)
     if (viaSearch) return viaSearch
 
