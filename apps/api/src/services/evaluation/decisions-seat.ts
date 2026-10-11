@@ -115,11 +115,19 @@ export async function runDecisionsSeat(
       block: (r.comp as { censusBlockGroup?: string | null }).censusBlockGroup ?? null,
       hood: r.comp.neighborhoodName ?? r.comp.subdivision ?? null,
       lbl: l ? `sqft:${l.sqft}|yr:${l.year}|lot:${l.lot}|style:${l.style}|feat:${l.feat}|sale:${l.saleAge}|${l.pricePosition}→${l.priceEvidence}|${l.sanity}|diffs:${l.diffs}` : '',
-      // Decisions prior — stamped by the observables lane.
+      // Decisions prior — stamped by the observables lane. Every probability
+      // the earlier passes produced lands on the row: condition reads, the
+      // premium/exposure reads, physical-match and ARV-fitness scores, and
+      // the per-attribute lot-premium odds (waterfront / corner-cul-de-sac
+      // / large lot / view / pool).
       prior: ob ? {
         pricePosition: ob.pricePosition, priceSupport: ob.priceSupport,
         descCondition: ob.descCondition, coverEvidence: ob.coverPhotoEvidence,
-        premium: ob.premiumAttributes, exposure: ob.siteExposure,
+        conditionTier: ob.conditionTier, renoClaimP: ob.renoClaimP,
+        premium: ob.premiumAttributes, premiumP: ob.premiumProbabilities ?? null,
+        exposure: ob.siteExposure, vintage: ob.developmentVintage,
+        physicalMatchP: ob.physicalMatchP, arvFitnessP: ob.arvFitnessP,
+        unexplainedPremiumP: ob.unexplainedPremiumP,
         tier: ob.finalTier,
       } : null,
     }
@@ -137,13 +145,26 @@ export async function runDecisionsSeat(
       'pool/construction/garage matches), a plausible non-distressed sale, ' +
       'and priced at or above the pocket median. Answer the probability ' +
       'the comp qualifies as ARV evidence for THIS subject.',
+    // The entire subject profile the candidates are judged against — the
+    // model answers 'how well does this comp represent THIS property'.
     subject: {
       address: subject.address, sqft: subject.squareFeet, beds: subject.bedrooms,
       baths: subject.bathrooms, yearBuilt: subject.yearBuilt, lotSqft: subject.lotSizeSquareFeet,
+      stories: subject.stories ?? null, propertyType: (subject as { propertyType?: string | null }).propertyType ?? null,
+      construction: subject.constructionType ?? null, foundation: (subject as { foundationType?: string | null }).foundationType ?? null,
+      pool: (subject as { poolType?: string | null }).poolType ?? null,
+      garage: (subject as { garageType?: string | null }).garageType ?? null,
       condition: subject.condition ?? null,
       renoTier: subjectObs?.renovationTier ?? null,
+      renoEvidenceP: subjectObs?.renoEvidenceP ?? null,
       lotPremium: subjectObs?.lotPremium ?? null,
+      lotPremiumP: subjectObs?.lotPremiumProbabilities ?? null,
       siteExposure: subjectObs?.siteExposure ?? null,
+      edgeNorthP: subjectObs?.siteEdges?.north ?? 0,
+      edgeEastP:  subjectObs?.siteEdges?.east  ?? 0,
+      edgeSouthP: subjectObs?.siteEdges?.south ?? 0,
+      edgeWestP:  subjectObs?.siteEdges?.west  ?? 0,
+      streetEdge: subjectObs?.siteEdges?.streetEdge ?? null,
     },
     pocket: pv ? { scope: pv.scope, medianPpsf: pv.pocketPpsf, n: pv.pocketN } : null,
     candidates: rows,
@@ -151,14 +172,27 @@ export async function runDecisionsSeat(
 
   const questions: Record<string, { type: 'noul'; instructions: string }> = {}
   for (const row of rows) {
+    // rep — does this comp REPRESENT the subject? Physical characteristics,
+    // location, classification — price blind.
+    questions[`rep_${row.id}`] = {
+      type: 'noul',
+      instructions:
+        `Comp ${row.id}: probability this property is a good representation ` +
+        `of the subject — same kind of house in a similar-value location. ` +
+        `Weigh sqft/year/lot/style/feature labels, stories/construction/` +
+        `foundation/pool/garage matches, physicalMatchP, development ` +
+        `vintage and geo tier. Ignore sale price entirely.`,
+    }
+    // fit — can this comp's PRICE evidence drive the subject's ARV? Above
+    // market or at market only; below-market labels are disqualifying.
     questions[`fit_${row.id}`] = {
       type: 'noul',
       instructions:
         `Comp ${row.id}: probability this is an apples-to-apples ARV ` +
         `comparable for the subject at above-market or at-market price. ` +
         `pricePoint=${row.pricePoint} — if below_market the answer is ~0. ` +
-        `Weigh its geo tier, physical labels, feature matches, sale age, ` +
-        `price sanity and condition evidence.`,
+        `Weigh its price evidence, sale age, price sanity, condition ` +
+        `evidence and ARV fitness prior.`,
     }
   }
   // The seat also answers one summary question — its probability the pick
@@ -180,16 +214,19 @@ export async function runDecisionsSeat(
       return typeof a?.probability === 'number' ? a.probability : null
     }
     const scored = eligible
-      .map((r) => ({ r, p: prob(`fit_${r.id}`) }))
-      .filter((x): x is { r: RankedComp; p: number } => x.p != null)
+      .map((r) => ({ r, fit: prob(`fit_${r.id}`), rep: prob(`rep_${r.id}`) }))
+      .filter((x): x is { r: RankedComp; fit: number; rep: number } => x.fit != null && x.rep != null)
     if (!scored.length) {
       base.debugNotes.push('decisions-seat: no probabilities returned — deterministic seat')
       return base
     }
     // Below-market labels are facts — a distressed/as-is sale can support
     // the floor but can never be an ARV pick regardless of probability.
+    // Rank on min(rep, fit): a pick must BOTH represent the subject AND
+    // price it — the weaker leg bounds the comp.
     const pickable = scored
       .filter((x) => pricePoint(x.r) !== 'below_market')
+      .map((x) => ({ ...x, p: Math.min(x.fit, x.rep) }))
       .sort((a, b) => b.p - a.p)
     const over = pickable.filter((x) => x.p >= PROB_FLOOR).slice(0, 3)
     const picks = over.length ? over : pickable.slice(0, 1)
@@ -222,7 +259,7 @@ export async function runDecisionsSeat(
     const conf: 'high' | 'medium' | 'low' =
       topP >= 0.7 && poolP >= 0.5 ? 'high' : topP >= 0.45 ? 'medium' : 'low'
     const note = picks
-      .map((x) => `${x.r.id} p=${x.p.toFixed(2)} ${pricePoint(x.r)}`)
+      .map((x) => `${x.r.id} rep=${x.rep.toFixed(2)} fit=${x.fit.toFixed(2)} ${pricePoint(x.r)}`)
       .join(' · ')
     base.debugNotes.push(`decisions-seat: picks ${note} → ARV $${arv} (conf ${conf}, pool p=${poolP.toFixed(2)})`)
     return {

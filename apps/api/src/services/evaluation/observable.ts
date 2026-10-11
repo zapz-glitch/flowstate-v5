@@ -200,6 +200,11 @@ const SUBJECT_QUESTIONS = {
     criteria: { WATERFRONT: 'waterfront or water-adjacent lot', OVERSIZED_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac premium lot', POOL: 'pool visible on property', NONE: 'no premium lot features evident', UNVERIFIED: 'imagery insufficient to tell' },
     instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile (second image) frames the parcel itself; judge that parcel, not the neighborhood. Check each label: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; (2) CORNER/CUL-DE-SAC — the center lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — the center parcel is clearly larger than its neighbors; (4) POOL visible on the center lot. Answer WATERFRONT whenever water borders the center parcel — do not answer NONE while a water body touches the lot.',
   },
+  // Per-attribute probabilities — same decomposition as the comp c8p lane.
+  s8p_waterfront: { type: 'noul' as const, instructions: 'Probability the SUBJECT parcel has a water premium — lakefront, riverfront, canal, bay, or a water body touching/adjacent to the parcel boundary. THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME. ~0 when no water touches the center parcel.' },
+  s8p_culdesac_corner: { type: 'noul' as const, instructions: 'Probability the SUBJECT sits on a cul-de-sac bulb or a corner lot — the parcel faces onto a circular dead-end bulb or fronts two intersecting streets. ~0 for a mid-block interior lot.' },
+  s8p_oversized: { type: 'noul' as const, instructions: 'Probability the SUBJECT parcel is notably larger than its immediate neighbors — a lot-size premium versus the surrounding block. ~0 for a typical parcel.' },
+  s8p_pool: { type: 'noul' as const, instructions: 'Probability the SUBJECT parcel has a pool — visible pool geometry in the aerial or photos. ~0 when none evident.' },
   s9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
@@ -256,6 +261,32 @@ const COMP_QUESTIONS = {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
     instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium? THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile frames the parcel itself; judge that parcel. Check each label: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the center lot.",
+  },
+  // Per-attribute lot-premium probabilities — the seat reads the odds, not
+  // just c8's winning label. Appraiser priors: waterfront/lake/river adjacency
+  // carries the largest lot premium; cul-de-sac position is a modest premium
+  // (privacy, low traffic, often larger pie-shaped lots); corner lots are
+  // mixed-to-slightly-positive in residential appraisals (more frontage but
+  // also more exposure and setback loss — the model weighs what it sees).
+  c8p_waterfront: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP parcel has a water premium — lakefront, riverfront, canal, bay, or a water body touching/adjacent to the parcel boundary. THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME. Score ~0 when no water touches the center parcel; a distant water body in frame is not waterfront.',
+  },
+  c8p_culdesac_corner: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP sits on a cul-de-sac bulb or a corner lot. Cul-de-sac: parcel faces onto the circular dead-end bulb of a street. Corner: parcel fronts two intersecting streets. Judge the aerial/street-view evidence; ~0 for a mid-block interior lot.',
+  },
+  c8p_large_lot: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP parcel is notably larger than its immediate neighbors — a lot-size premium versus the surrounding block, not merely an average lot. ~0 for a typical parcel.',
+  },
+  c8p_view: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP carries a view premium — golf course, water, skyline, or open-space frontage visible from the parcel. ~0 for a standard residential outlook.',
+  },
+  c8p_pool: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP parcel has a pool — visible pool geometry in the aerial or street view, or a pool noted in the description/property data. ~0 when none evident.',
   },
   c9_site_exposure: {
     type: 'choice' as const,
@@ -390,6 +421,9 @@ export interface SubjectObservables {
   priceConditionAgreement: string | null
   /** Premium lot attribute from satellite + photos (waterfront/pool/corner etc.). */
   lotPremium: string | null
+  /** Per-attribute lot-premium odds — P(waterfront) / P(corner-cul-de-sac)
+   *  / P(oversized) / P(pool). */
+  lotPremiumProbabilities: Record<string, number> | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
   /** Edge-wise exposure probabilities + computed street orientation —
@@ -429,6 +463,10 @@ export interface CompObservables {
   finalTier: string | null
   /** Non-condition premium driver (waterfront/lot/pool/view) — explains c6 flags. */
   premiumAttributes: string | null
+  /** Per-attribute probabilities for premiumAttributes — P(waterfront),
+   *  P(corner/cul-de-sac), P(large lot), P(view), P(pool) — the seat reads
+   *  the odds, not just the winning label. */
+  premiumProbabilities?: Record<string, number> | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
   /** Development-era comparison from both aerials — NEWER means the comp
@@ -451,11 +489,16 @@ export interface CompObservables {
   durationMs: number
 }
 
-type DecisionsAnswers = Record<string, { probability?: number; choice?: string | boolean | null; score?: number; confidence?: number }>
+type DecisionsAnswers = Record<string, { probability?: number; choice?: string | boolean | null; score?: number; confidence?: number; probabilities?: Array<{ value: string | number | boolean; probability: number }> }>
 const choiceOf = (a: DecisionsAnswers, k: string): string | null =>
   typeof a[k]?.choice === 'string' ? (a[k]!.choice as string) : null
 const probOf = (a: DecisionsAnswers, k: string): number | null =>
   typeof a[k]?.probability === 'number' ? a[k]!.probability! : null
+const choiceProbs = (a: DecisionsAnswers, k: string): Record<string, number> | null => {
+  const ps = a[k]?.probabilities
+  if (!Array.isArray(ps) || !ps.length) return null
+  return Object.fromEntries(ps.filter((p) => typeof p?.probability === 'number').map((p) => [String(p.value), p.probability]))
+}
 const confs = (a: DecisionsAnswers): Record<string, number> =>
   Object.fromEntries(Object.entries(a).filter(([, v]) => typeof v?.confidence === 'number').map(([k, v]) => [k, v.confidence!]))
 
@@ -700,6 +743,12 @@ export async function decisionsSubjectObservables(
     askPriceSupport: choiceOf(merged, 's6_ask_price_support'),
     priceConditionAgreement: choiceOf(merged, 's7_price_condition'),
     lotPremium: choiceOf(merged, 's8_lot_premium'),
+    lotPremiumProbabilities: {
+      WATERFRONT: probOf(merged, 's8p_waterfront') ?? 0,
+      CORNER_CULDESAC: probOf(merged, 's8p_culdesac_corner') ?? 0,
+      OVERSIZED_LOT: probOf(merged, 's8p_oversized') ?? 0,
+      POOL: probOf(merged, 's8p_pool') ?? 0,
+    },
     siteExposure: (() => {
       // Edge predicates + code-computed street orientation resolve the side
       // when they fire — the choice answer stays the fallback for the frames
@@ -827,6 +876,13 @@ export async function decisionsCompObservables(
     unexplainedPremiumP: probOf(a, 'c6_unexplained_premium'),
     finalTier: choiceOf(a, 'c7_final_tier'),
     premiumAttributes: choiceOf(a, 'c8_premium_attributes'),
+    premiumProbabilities: choiceProbs(a, 'c8_premium_attributes') ?? {
+      WATERFRONT: probOf(a, 'c8p_waterfront') ?? 0,
+      CORNER_CULDESAC: probOf(a, 'c8p_culdesac_corner') ?? 0,
+      LARGE_LOT: probOf(a, 'c8p_large_lot') ?? 0,
+      VIEW: probOf(a, 'c8p_view') ?? 0,
+      POOL: probOf(a, 'c8p_pool') ?? 0,
+    },
     siteExposure: choiceOf(a, 'c9_site_exposure'),
     developmentVintage: choiceOf(a, 'c12_development_vintage'),
     conditionTier: choiceOf(a, 'c13_condition_tier'),
