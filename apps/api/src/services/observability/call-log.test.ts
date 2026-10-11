@@ -198,6 +198,26 @@ describe('large bodies', () => {
     expect(network).not.toHaveBeenCalled()
   })
 
+  it('gives calls that start at the same instant their own number and their own stored body', async () => {
+    const store = memoryStore()
+    const log = newCallLog({ jobId: 'j1' })
+    const big = (tag: string) => `${tag}:` + tag.repeat(6000)
+    const network = vi.fn(async (input: RequestInfo | URL) =>
+      new Response(big(new URL(String(input)).searchParams.get('who')!), { headers: { 'content-type': 'text/plain' } })) as unknown as typeof fetch
+    await inScope(log, null, network, async (f) => {
+      await Promise.all(['a', 'b', 'c', 'd'].map((who) => f(`https://x.test/page?who=${who}`, { method: 'POST', body: big(who) })))
+    }, store)
+    await saveCallLog(store, log)
+
+    expect(log.entries.map((e) => e.seq).sort()).toEqual([1, 2, 3, 4])
+    for (const entry of log.entries) {
+      const who = new URL(entry.url).searchParams.get('who')!
+      const bodies = await loadCallBodies(store, entry)
+      expect(bodies.response).toBe(big(who))
+      expect(bodies.request).toBe(big(who))
+    }
+  })
+
   it('marks a large body as not stored when there is no store', async () => {
     const log = newCallLog({ jobId: 'j1' })
     await inScope(log, null, pageNetwork(), (f) => f('https://api.scrapfly.io/scrape?key=k&url=u'))

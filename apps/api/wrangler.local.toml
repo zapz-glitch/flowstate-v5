@@ -12,12 +12,23 @@ port = 8787
 ENVIRONMENT = "development"
 DASHBOARD_URL = "http://localhost:3000"
 PROPERTY_PROVIDER = "corelogic"
+# Local runs use "tester A": the appraiser model selects the comps and the
+# gate verifies them (agent harness); the Decisions model reads condition
+# and satellite evidence; claude-haiku-5-5 is the backup reader and the
+# appraiser's reasoning sub-agent.
+DEFAULT_HARNESS = "agent"
+REASONING_PROVIDER = "anthropic"
+REASONING_MODEL = "claude-haiku-5-5"
 # Condition reader: the OpenAI Decisions model reads the subject and comps
 # against the renovation tiers (probability per tier); haiku is the backup.
 CONDITION_READER = "decisions"
 # Record every outbound API call of every run to a per-job call log, kept
 # 90 days in local KV (.wrangler/state). Read it at /v1/analyze/jobs/:id/calls.
 CALL_LOG_ENABLED = "true"
+# Listing scrapes + per-comp reads cover the 30 best-ranked comps (enabled
+# first, then nearest) — the corelogic working-pool size. Unset, a 100-comp
+# pool sends ~1,000 scrape calls into Scrapfly's 5-at-once cap.
+CLEF_COMP_MAX = "30"
 # Devin org for offer-workflow session messages
 DEVIN_ORG_ID = "org-6c0122ecb67544ccb259ae9b1e9cc4dc"
 # Comp price classifier v2 in shadow mode locally (matches wrangler.toml):

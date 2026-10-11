@@ -100,6 +100,10 @@ interface Scope {
   replay: Map<string, CallEntry> | null
 }
 
+/** Set on a response answered from an earlier run's log. A caller that
+ *  backs off before retrying can skip the wait — nothing is rate limiting. */
+export const REPLAYED_HEADER = 'x-call-log-replayed'
+
 const scopes = new AsyncLocalStorage<Scope>()
 const SECRET_PARAMS = /^(key|api_key|apikey|token|access_token|client_secret|signature|sig)$/i
 
@@ -193,6 +197,9 @@ export function recordingFetch(original: FetchFn): FetchFn {
     const safeUrl = redactUrl(url)
     const started = Date.now()
     const entry: CallEntry = {
+      // Numbered and appended before anything is awaited: calls start in
+      // bursts, and two that shared a number would share (and overwrite)
+      // each other's stored bodies.
       seq: scope.log.entries.length + 1,
       at: new Date(started).toISOString(),
       ms: 0,
@@ -200,7 +207,7 @@ export function recordingFetch(original: FetchFn): FetchFn {
       method,
       url: safeUrl,
       status: null,
-      requestHash: await sha256(`${method}\n${safeUrl}\n${body ?? ''}`),
+      requestHash: '',
       request: null,
       response: null,
       responseType: null,
@@ -209,6 +216,7 @@ export function recordingFetch(original: FetchFn): FetchFn {
       replayed: false,
     }
     scope.log.entries.push(entry)
+    entry.requestHash = await sha256(`${method}\n${safeUrl}\n${body ?? ''}`)
     // Small bodies ride in the index; large ones are written out now under
     // their own key. A body that cannot be stored marks the entry truncated.
     const keep = (part: 'req' | 'res', text: string): void => {
@@ -245,7 +253,7 @@ export function recordingFetch(original: FetchFn): FetchFn {
         entry.ms = Date.now() - started
         return new Response(text, {
           status: logged.status,
-          headers: logged.responseType ? { 'content-type': logged.responseType } : undefined,
+          headers: { ...(logged.responseType ? { 'content-type': logged.responseType } : {}), [REPLAYED_HEADER]: '1' },
         })
       }
     }
