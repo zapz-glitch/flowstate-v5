@@ -317,7 +317,7 @@ pipelineReads.get('/queue', async (c) => {
 
 /** Resolve each item's pocket from its run_records payload → join
  *  pocket_scores → attach metro/pocketScore/pocketName. Misses get a
- *  provisional score now and a full Serper+Luna scoring job in waitUntil. */
+ *  provisional score now and a full web-search+Luna scoring job in waitUntil. */
 async function attachPockets(
   c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } },
   items: Array<Record<string, unknown>>,

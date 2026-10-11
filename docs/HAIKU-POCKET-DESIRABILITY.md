@@ -4,7 +4,7 @@
 
 ## Contract
 
-- **Gather (code, not the model):** a Serper search on the subject's neighborhood/city/state for real-estate demand signal — market activity, homes-for-sale character, neighborhood profile. Up to 6 result snippets feed the model. No Serper key → the call judges on location identity alone and must say so.
+- **Gather (code, not the model):** a Scrapfly web search on the subject's neighborhood/city/state for real-estate demand signal — market activity, homes-for-sale character, neighborhood profile. Up to 6 result snippets feed the model. No Serper key → the call judges on location identity alone and must say so.
 - **Input:** subject location identity (neighborhood/subdivision, city, state, zip, census tract, block group, address) + the gathered web evidence.
 - **Output:** `score` (0-10, one decimal allowed), `summary` (1-3 sentences citing what the evidence showed), `signals` (the concrete factors the score rests on).
 - **Judgment criteria:** demand depth, turnover speed, resale strength of the ARV product, buyer-pool depth (first-time, move-up, landlords), and the livability signals that drive them (schools, crime, employment access, amenities, price trend).

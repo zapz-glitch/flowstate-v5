@@ -13,6 +13,7 @@
 
 import { createOpenRouterProvider } from '../../llm'
 import type { PropertyIdentifier } from '../types'
+import { webSearch } from '../../web-search'
 
 // ─── Site Adapters ─────────────────────────────────────────────────────────────
 
@@ -142,8 +143,6 @@ export interface ListingScraperConfig {
   scrapflyApiKey?: string
   /** Scrapfly endpoint (default https://api.scrapfly.io/scrape) */
   scrapflyUrl?: string
-  /** Serper API key — listing-URL resolution before the legacy chains */
-  serperApiKey?: string
   /** OpenRouter API key for LLM fallback extraction */
   openrouterApiKey?: string
   openrouterModel?: string
@@ -175,7 +174,6 @@ export class ListingPhotoScraper {
   private apiKey?: string
   private scrapflyApiKey?: string
   private scrapflyUrl?: string
-  private serperApiKey?: string
   private openrouterApiKey?: string
   private openrouterModel: string
   private cache?: KVNamespace
@@ -185,7 +183,6 @@ export class ListingPhotoScraper {
     this.apiKey = config.apiKey
     this.scrapflyApiKey = config.scrapflyApiKey
     this.scrapflyUrl = config.scrapflyUrl
-    this.serperApiKey = config.serperApiKey
     this.openrouterApiKey = config.openrouterApiKey
     this.openrouterModel = config.openrouterModel ?? 'google/gemini-2.5-flash'
     this.cache = config.cache
@@ -266,23 +263,22 @@ export class ListingPhotoScraper {
     return { html: content, markdown: '' }
   }
 
-  /** Serper site-search → first organic link matching the adapter pattern. */
-  private async serperResolveUrl(query: string, pattern: RegExp): Promise<string | null> {
-    if (!this.serperApiKey) return null
-    try {
-      const resp = await fetch('https://google.serper.dev/search', {
-        method: 'POST',
-        headers: { 'X-API-KEY': this.serperApiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, gl: 'us', num: 5 }),
-        signal: AbortSignal.timeout(15_000),
-      })
-      if (!resp.ok) return null
-      const data = (await resp.json()) as { organic?: Array<{ link?: string }> }
-      for (const item of data.organic ?? []) {
-        const m = item.link?.match(pattern)
-        if (m) return m[0]
-      }
-    } catch { /* best-effort */ }
+  /** Scrapfly web search → first organic link that matches the adapter
+   *  pattern and passes the caller's address check. */
+  private async searchResolveUrl(
+    query: string,
+    pattern: RegExp,
+    accept: (url: string) => string | null,
+  ): Promise<string | null> {
+    const results = await webSearch(
+      { SCRAPFLY_API_KEY: this.scrapflyApiKey, SCRAPFLY_URL: this.scrapflyUrl },
+      query,
+      { limit: 5 },
+    )
+    for (const item of results) {
+      const url = accept(item.link.match(pattern)?.[0] ?? '')
+      if (url) return url
+    }
     return null
   }
 
@@ -406,8 +402,9 @@ export class ListingPhotoScraper {
 
   /**
    * Resolve a listing page URL. Google site-search returns a bot/consent wall
-   * to datacenter scrapers, so the chain is: Firecrawl /v1/search (reliable)
-   * → DuckDuckGo HTML direct (free, rate-limited) → legacy Google scrape.
+   * to datacenter scrapers, so the chain is: Scrapfly web search (primary)
+   * → Firecrawl /v1/search → DuckDuckGo HTML direct (free, rate-limited)
+   * → legacy Google scrape.
    * Every result is validated against the requested street number.
    */
   private async resolveListingUrl(property: PropertyIdentifier, adapter: ListingSiteAdapter): Promise<string | null> {
@@ -415,9 +412,9 @@ export class ListingPhotoScraper {
     const valid = (url: string | null | undefined) =>
       url && this.listingUrlMatchesAddress(url, property) ? url : null
 
-    // 0. Serper site-search — direct listing-URL hits without a Google scrape
-    const viaSerper = valid(await this.serperResolveUrl(query, adapter.listingUrlPattern))
-    if (viaSerper) return viaSerper
+    // 0. Scrapfly web search — direct listing-URL hits without a Google scrape
+    const viaSearch = await this.searchResolveUrl(query, adapter.listingUrlPattern, valid)
+    if (viaSearch) return viaSearch
 
     // 1. Firecrawl search API
     if (this.apiKey) try {
@@ -439,7 +436,7 @@ export class ListingPhotoScraper {
 
     // 2. DuckDuckGo HTML endpoint — outbound links are wrapped in uddg=
     //    params, so decode those before scanning for the listing URL.
-    //    (kept as the keyless fallback path when Serper is absent)
+    //    (kept as the keyless fallback path when Scrapfly is absent)
     try {
       const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
         headers: { 'User-Agent': UA, Accept: 'text/html' },

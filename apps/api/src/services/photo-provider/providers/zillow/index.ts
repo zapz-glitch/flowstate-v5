@@ -62,7 +62,7 @@ export function isZillowFetcherAvailable(env: Env): boolean {
 export function createZillowFetcher(env: Env): ZillowFetcher | null {
   // Owner-specified chain — Firecrawl only:
   //   Address → /v1/search → URL → /v1/scrape → photos+text → Clef.
-  // No Scrapfly, no Serper, no Stingray in the fetch path.
+  // No Scrapfly, no Stingray in the fetch path.
   if (env.FIRECRAWL_API_KEY) {
     return createScrapflyZillowFetcher({
       firecrawlApiKey: env.FIRECRAWL_API_KEY,

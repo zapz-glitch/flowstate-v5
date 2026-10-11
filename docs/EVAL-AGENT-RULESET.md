@@ -17,7 +17,7 @@ Target throughput: 1,000+ evaluations per week, production hardened.
     Rules-check gaps are ALSO merged deterministically — a comp missing sale
     price, square footage, or a usable sale date gets the gap notated by
     code even if the model missed it.
-  - Pocket desirability: one call per eval — Serper gathers web signal on
+  - Pocket desirability: one call per eval — a Scrapfly web search gathers web signal on
     the subject's location, haiku rates desirability 0-10 with rationale
     (`services/evaluation/pocket-desirability.ts`,
     `HAIKU-POCKET-DESIRABILITY.md`).
