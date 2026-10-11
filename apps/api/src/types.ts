@@ -117,6 +117,16 @@ export interface Env {
   REASONING_OPENROUTER_MODEL?: string // OpenRouter model for the reasoning lane (assist-model arm B)
   /** Keep only this many comps — the nearest to the subject — as the whole pool */
   COMP_POOL_NEAREST?: string
+  /** 'true' holds the reasoning model back until the appraiser stage — no reasoning-model calls during evidence gathering */
+  REASONING_STAGE_ONLY?: string
+  /** 'false' turns off Google Street View (no coverage check, no image, no street comparison) */
+  STREET_VIEW_ENABLED?: string
+  /** 'false' turns off every OpenStreetMap lookup (Overpass location risks, Nominatim street orientation) */
+  OSM_ENABLED?: string
+  /** 'true' = the appraiser gets one model call: no questions, no revision */
+  APPRAISER_SINGLE_PASS?: string
+  /** Pins the appraiser's reasoning effort for every pass: low | medium | high | xhigh | max */
+  APPRAISER_EFFORT?: string
   /** 'reasoning' seats the reasoning lane's model as the appraiser (comp selection); unset = Sonnet */
   APPRAISER_SEAT?: string
   /** 'true' records every outbound API call of every run to a 90-day per-job call log */

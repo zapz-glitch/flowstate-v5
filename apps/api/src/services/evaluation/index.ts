@@ -57,6 +57,7 @@ import type {
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
 import { pickFrontCoverImage } from './exterior-match'
+import { noCompPassesRules } from './rule-passers'
 import { applySubjectTierVerdict, computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
 import type { CompConditionResult } from '../clef'
@@ -2398,7 +2399,11 @@ export interface AgentSelection {
  *  outcome appeal. Returns the list of failures; empty = accepted. */
 export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComparable[]): string[] {
   const fails: string[] = []
-  const enabled = new Map(comps.filter((c) => c.isEnabled && c.id).map((c) => [c.id, c] as const))
+  // When no comp passes the filter rules, the selection's job is to pick
+  // the comps closest to those rules — so every priced comp is eligible.
+  // As soon as one comp passes, only rule-passers are.
+  const eligible = noCompPassesRules(comps) ? comps : comps.filter((c) => c.isEnabled)
+  const enabled = new Map(eligible.filter((c) => c.id).map((c) => [c.id, c] as const))
   const picks = sel.selectedCompIds ?? []
   if (picks.length === 0) fails.push('empty selection — at least one comp is required')
   for (const id of picks) {

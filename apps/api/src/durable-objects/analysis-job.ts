@@ -62,6 +62,8 @@ import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from 
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import { withAssistArm, type AssistArm } from '../services/llm/assist-arms'
+import { evidenceStageEnv } from '../services/llm/stage-env'
+import { isGeoGateActive } from '../services/geo/geo-gate'
 import { assistModel } from '../services/evaluation/assist'
 import { loadCallLog, newCallLog, runWithCallLog, saveCallLog, summarizeCallLog } from '../services/observability/call-log'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
@@ -189,8 +191,12 @@ export interface StartStreamingRequest {
 export class AnalysisJobDO {
   private state: DurableObjectState
   private env: Env
-  /** The deployment env as bound — `env` is this with a run's arm applied. */
+  /** The deployment env as bound. */
   private readonly baseEnv: Env
+  /** The run's full env (arm applied) — what the reasoning stage uses: the
+   *  appraiser and its sub-agent. `env` is the evidence-stage view of it,
+   *  which may hold the reasoning model back (REASONING_STAGE_ONLY). */
+  private reasoningEnv: Env
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
@@ -213,6 +219,7 @@ export class AnalysisJobDO {
     this.state = state
     this.env = env
     this.baseEnv = env
+    this.reasoningEnv = env
     this.persistence = new ChunkedJobState(state.storage)
     state.blockConcurrencyWhile(async () => {
       this.jobState = await this.persistence.read()
@@ -371,7 +378,8 @@ export class AnalysisJobDO {
     // SSE connection holding the object alive) lose the run mid-flight.
     this.runActive = true
     this.markEvalActive(body)
-    this.env = withAssistArm(this.baseEnv, body.arm)
+    this.reasoningEnv = withAssistArm(this.baseEnv, body.arm)
+    this.env = evidenceStageEnv(this.reasoningEnv)
     this.state.waitUntil(
       this.runRecorded(body, () => this.runStreamingAnalysis(body))
         .catch((err) => {
@@ -406,7 +414,7 @@ export class AnalysisJobDO {
       jobId: config.jobId,
       userId: config.userId,
       address: config.search.address ?? config.search.streetAddress ?? null,
-      meta: { harness: config.harness ?? null, arm: config.arm ?? null, assistModel: assistModel(this.env) },
+      meta: { harness: config.harness ?? null, arm: config.arm ?? null, assistModel: assistModel(this.reasoningEnv) },
       replayedFrom: replay ? replay.jobId : null,
     })
     try {
@@ -787,7 +795,7 @@ export class AnalysisJobDO {
       // Location risk (major roads, railroads, commercial) — fetched during
       // enrichment so it can deduct from valuation, not just flag post-hoc.
       // The street name lets detection classify fronting/backing/siding.
-      property.latitude && property.longitude
+      property.latitude && property.longitude && this.env.OSM_ENABLED !== 'false'
         ? detectOsmLocationRisks(property.latitude, property.longitude, 150, {
             streetName: property.address?.replace(/^\d+\s+/, '') ?? undefined,
           }).catch(() => null)
@@ -971,7 +979,7 @@ export class AnalysisJobDO {
     // stamp tract/BG/subdivision matches, enrich the in-pocket passers).
     // attom-only calls inside (market-context supplement, deed/bulk id
     // sets) degrade silently under other providers.
-    const geoGateActive = isAttomMcp || config.harness === 'corelogic'
+    const geoGateActive = isGeoGateActive({ isAttomMcp, harness: config.harness })
     const gateAndEnrich = async (
       comps: NormalizedComparable[],
     ): Promise<NormalizedComparable[]> => {
@@ -1443,6 +1451,9 @@ export class AnalysisJobDO {
       }
       const newById = new Map(newCandidates.map((c) => [c.id, c]))
       enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
+      // The nearest-comp cap holds through a widening too: the wider search
+      // may swap in closer comps, never grow the pool past the cap.
+      enrichedComps = nearestComparables(enrichedComps, nearestCap)
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
       if (monthsBack != null) retrieval.monthsBack = monthsBack
@@ -1689,12 +1700,12 @@ export class AnalysisJobDO {
         // A/B runs only: the arm's assist model makes its own selection on
         // the same evidence, beside the appraiser. Recorded, never applied.
         // Pointless when that model already holds the appraiser seat.
-        const shadowPromise = config.arm && this.env.APPRAISER_SEAT !== 'reasoning'
-          ? runAssistShadowSelection(this.env, ctx, evidence).catch(() => null)
+        const shadowPromise = config.arm && this.reasoningEnv.APPRAISER_SEAT !== 'reasoning'
+          ? runAssistShadowSelection(this.reasoningEnv, ctx, evidence).catch(() => null)
           : Promise.resolve(null)
         const appraisal = config.harness === 'corelogic'
           ? runDeterministicSelector(ctx, evidence)
-          : await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+          : await runOpusAppraiser(this.reasoningEnv, ctx, evidence).catch(() => null)
         const shadowSelection = await shadowPromise
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
@@ -1773,7 +1784,7 @@ export class AnalysisJobDO {
             },
             abTest: {
               arm: config.arm ?? null,
-              assistModel: assistModel(this.env),
+              assistModel: assistModel(this.reasoningEnv),
               assistCalls: (appraisal as { assistCalls?: number } | null)?.assistCalls ?? 0,
               replayedCallsFrom: config.replayCallsFrom ?? null,
               shadowSelection,
@@ -2521,7 +2532,7 @@ export class AnalysisJobDO {
         osmPromise = (async () => {
           try {
             const prop = config.bundle.property
-            if (prop.latitude && prop.longitude) {
+            if (prop.latitude && prop.longitude && this.env.OSM_ENABLED !== 'false') {
               const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
               if (osmResult.riskFlags.length > 0) {
                 const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []

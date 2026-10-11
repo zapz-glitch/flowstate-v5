@@ -39,6 +39,12 @@ describe('fetchStreetViewTile', () => {
     expect(await fetchStreetViewTile(ENV, here)).toMatchObject({ content_type: 'image/jpeg' })
   })
 
+  it('makes no call at all when street view is switched off', async () => {
+    const urls = stub('OK')
+    expect(await fetchStreetViewTile({ GOOGLE_MAPS_KEY: 'g', STREET_VIEW_ENABLED: 'false' } as Env, here)).toBeNull()
+    expect(urls).toHaveLength(0)
+  })
+
   it('makes no call without a key or coordinates', async () => {
     const urls = stub('OK')
     expect(await fetchStreetViewTile({} as Env, here)).toBeNull()

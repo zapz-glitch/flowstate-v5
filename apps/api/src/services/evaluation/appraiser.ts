@@ -35,13 +35,14 @@ import { gradeVerdict, type VerdictGrade } from './verdict-grade'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
 import { validateAgentSelection } from './index'
 import { assistModel, assistReason } from './assist'
+import { noCompPassesRules } from './rule-passers'
 
 const MAX_CLARIFICATIONS = 5
 /** Ceiling on the assist model's shadow selection (A/B runs only). */
 const SHADOW_SELECTION_TIMEOUT_MS = 240_000
 /** Ceiling on one selection call when the reasoning-lane model holds the
  *  appraiser seat — a full pool at high effort outruns the 60s default. */
-const APPRAISER_SEAT_TIMEOUT_MS = 240_000
+const APPRAISER_SEAT_TIMEOUT_MS = 480_000
 /** Reasoning requests the appraiser may send its assist sub-agent per review. */
 const MAX_REASONING_REQUESTS = 5
 const MAX_REVISIONS = 2
@@ -62,6 +63,8 @@ Your job, IN ORDER:
 3. GEOGRAPHY IS STRICT — never reach outside the pocket for a better-matching house. Order: same block group → same neighborhood → same census tract. If NO in-pocket comp qualifies, select the median comps of the subject's block group (median-of-BG fallback) — the pocket's own market, not a similar house across town.
 4. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence.
 5. STALENESS IS A CAUTION, NOT A VETO. When the market itself is stale, the pocket's renovated sales are the freshest ARV evidence that exists — a completed in-pocket flip IS the realized ARV and belongs in the drivers even past the preferred-sale-age line. Staleness lowers your confidence, not the comp's eligibility — note it in conf/dataQuality instead of excluding or demoting the sale to supporting-only.
+
+WHEN NO COMP PASSES THE FILTER RULES (state.noCompPassesFilterRules is true): every comp is stamped 'disabled by the filter rules', and that stamp is then NOT a disqualifier. Your job is to select the comps that come CLOSEST to the rules — judge each on three things, in this order: (a) location identity — same block group, then same neighborhood/subdivision, then same tract; (b) physical characteristics — living area, year built, beds/baths, lot, stories, construction, and the exterior match to the subject; (c) how narrowly it misses each filter (a comp 40 sqft over the size limit beats one 600 over; a sale 20 days past the age limit beats one a year past). Say in your notes which rules each pick misses and by how much, and set conf to "low". Non-market sales (nominal, package, bulk, data errors) stay disqualified.
 
 If anything is missing or ambiguous, you may ask the Decisions sub-agent to clarify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Decisions answers with probability + verdict; you decide.
 
@@ -399,11 +402,48 @@ async function gateFailClarify(
   return findings
 }
 
+/**
+ * How many extra rounds the appraiser gets. APPRAISER_SINGLE_PASS=true
+ * means one model call: it reads the whole bundle, posts its selection, and
+ * the gate grades that — no questions, no revision, no empty-answer retry.
+ * A gate rejection then completes on the deterministic engine.
+ */
+export function appraiserLimits(env: { APPRAISER_SINGLE_PASS?: string }) {
+  return env.APPRAISER_SINGLE_PASS === 'true'
+    ? { clarifications: 0, reasoning: 0, revisions: 0, emptyRetry: false }
+    : { clarifications: MAX_CLARIFICATIONS, reasoning: MAX_REASONING_REQUESTS, revisions: MAX_REVISIONS, emptyRetry: true }
+}
+
+const SINGLE_PASS_NOTE = 'This is a single-pass review: you get one answer. Decide from the evidence as given, and leave "clarifyRequests" and "reasoningRequests" empty.'
+
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+type EffortLevel = (typeof EFFORT_LEVELS)[number]
+
+/**
+ * Reasoning effort for one appraiser pass. APPRAISER_EFFORT pins every pass
+ * to that level (e.g. 'max'); unset keeps high on the first pass and xhigh
+ * on a retry.
+ */
+export function appraiserEffort(env: { APPRAISER_EFFORT?: string }, retry: boolean): EffortLevel {
+  const pinned = EFFORT_LEVELS.find((level) => level === env.APPRAISER_EFFORT)
+  return pinned ?? (retry ? 'xhigh' : 'high')
+}
+
+/**
+ * Output budget for one appraiser pass. Thinking shares this budget with
+ * the answer, and it grows with effort — at xhigh/max a 16K budget can be
+ * spent entirely on thinking, leaving no room to write the selection.
+ */
+export function appraiserMaxTokens(effort: EffortLevel): number {
+  return effort === 'max' ? 64000 : effort === 'xhigh' ? 32000 : 16384
+}
+
 /** The evidence state every selection seat reads — the appraiser, and the
  *  assist model's shadow selection, see exactly the same bundle. */
 function appraiserState(evidence: HarnessEvidence) {
   return {
     task: 'Review the complete dataset and post the final comp selection + ARV.',
+    noCompPassesFilterRules: noCompPassesRules(evidence.comps),
     subject: evidence.subject,
     renovationEvidence: evidence.renovationEvidence ?? null,
     pocketDesirability: evidence.pocketDesirability ?? null,
@@ -518,11 +558,13 @@ export async function runOpusAppraiser(
   let lastGrade: VerdictGrade | null = null
   let lastDebug: string | null = null
   let emptyResponseRetry = false
+  const limits = appraiserLimits(env as { APPRAISER_SINGLE_PASS?: string })
+  const singlePass = limits.revisions === 0 && limits.clarifications === 0 && limits.reasoning === 0
 
   // Decision loop — clarify rounds count against MAX_CLARIFICATIONS; gate
   // rejects consume revisions; a passing grade (or a plain-text answer we
   // can coerce) ends the loop.
-  for (let round = 0; round <= MAX_CLARIFICATIONS + MAX_REASONING_REQUESTS + MAX_REVISIONS + 1; round++) {
+  for (let round = 0; round <= limits.clarifications + limits.reasoning + limits.revisions + 1; round++) {
     const state = {
       ...baseState,
       ...(clarificationBlock.length ? { clarificationFindings: clarificationBlock } : {}),
@@ -530,19 +572,20 @@ export async function runOpusAppraiser(
     }
     const prompt = lastGrade
       ? `${REVISION_PROMPT}\n\n${APPRAISER_PROMPT}\n\nSTATE:\n${JSON.stringify(state)}`
-      : `${APPRAISER_PROMPT}\n\nSTATE:\n${JSON.stringify(state)}`
+      : `${APPRAISER_PROMPT}${singlePass ? `\n\n${SINGLE_PASS_NOTE}` : ''}\n\nSTATE:\n${JSON.stringify(state)}`
 
+    const effort = appraiserEffort(env as { APPRAISER_EFFORT?: string }, !!(lastGrade || emptyResponseRetry))
     const res = await provider.execute({
       prompt,
       responseFormat: 'json',
       jsonSchema: { name: 'appraiser_selection', schema: SELECTION_SCHEMA },
-      maxTokens: 16384, // thinking shares this budget — 4096 starves high/xhigh effort into empty responses
-      reasoning: { enabled: true, effort: (lastGrade || emptyResponseRetry) ? 'xhigh' : 'high' },
+      maxTokens: appraiserMaxTokens(effort),
+      reasoning: { enabled: true, effort },
     }).catch((e) => { console.warn('[appraiser] execute failed', e?.message ?? e); return null })
     const parsed = res?.data?.content ? parseSelection(res.data.content) : null
     if (!parsed) {
       console.warn('[appraiser] unparseable response', JSON.stringify({ hasData: !!res?.data, hasContent: !!res?.data?.content, preview: typeof res?.data?.content === 'string' ? res.data.content.slice(0, 300) : null, err: res?.error ?? null }))
-      if (!emptyResponseRetry) { emptyResponseRetry = true; continue } // one retry at xhigh before failing closed
+      if (!emptyResponseRetry && limits.emptyRetry) { emptyResponseRetry = true; continue } // one retry at xhigh before failing closed
       out.unavailable = out.attempts.length === 0; break
     }
 
@@ -557,9 +600,9 @@ export async function runOpusAppraiser(
         compId: typeof r.compId === 'string' && compIds.has(r.compId) ? r.compId : null,
         question: String(r.question),
       }))
-    const clarifyReqs = requestsOf(parsed.clarifyRequests).slice(0, MAX_CLARIFICATIONS - clarificationsUsed)
+    const clarifyReqs = requestsOf(parsed.clarifyRequests).slice(0, limits.clarifications - clarificationsUsed)
     const reasoningReqs = out.assistModel
-      ? requestsOf(parsed.reasoningRequests).slice(0, MAX_REASONING_REQUESTS - reasoningUsed)
+      ? requestsOf(parsed.reasoningRequests).slice(0, limits.reasoning - reasoningUsed)
       : []
     if (clarifyReqs.length > 0 || reasoningReqs.length > 0) {
       const rows = appraiserCompRows(evidence)
@@ -599,13 +642,13 @@ export async function runOpusAppraiser(
         out.attempts.push({ selection: sel, grade, decision: 'rejected', at: new Date().toISOString() })
         lastGrade = grade
         lastDebug = null
-        if (++revisionsUsed > MAX_REVISIONS) break
+        if (++revisionsUsed > limits.revisions) break
         continue
       }
     }
     if (!sel) {
       // Unusable selection shape — one more chance counts as a revision.
-      if (++revisionsUsed > MAX_REVISIONS) break
+      if (++revisionsUsed > limits.revisions) break
       lastGrade = {
         checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass' },
         score: 0, failures: ['malformed_selection'], warnings: [], scorePenalty: 0,
@@ -634,13 +677,14 @@ export async function runOpusAppraiser(
     // Gate fail → Decisions cross-examines each failed check on the picked
     // comps; findings ride the next attempt's clarificationFindings.
     lastGrade = grade
-    const xqFindings = await gateFailClarify(env, evidence, sel, grade)
+    // No revision left to use the findings — skip the cross-examination.
+    const xqFindings = revisionsUsed >= limits.revisions ? [] : await gateFailClarify(env, evidence, sel, grade)
     if (xqFindings.length > 0) {
       clarificationBlock = [...clarificationBlock, ...xqFindings]
       out.clarifications = clarificationBlock
     }
     lastDebug = null
-    if (++revisionsUsed > MAX_REVISIONS) {
+    if (++revisionsUsed > limits.revisions) {
       out.attempts[out.attempts.length - 1]!.decision = 'rejected'
       break
     }

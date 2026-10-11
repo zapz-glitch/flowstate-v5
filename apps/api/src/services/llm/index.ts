@@ -147,7 +147,7 @@ export function isLLMProviderAvailable(env: LLMEnv): boolean {
  */
 interface ReasoningEnv {
   ANTHROPIC_API_KEY?: string
-  /** 'anthropic' | 'openrouter' | unset → anthropic when ANTHROPIC_API_KEY is set */
+  /** 'anthropic' | 'openrouter' | 'off' | unset → anthropic when ANTHROPIC_API_KEY is set */
   REASONING_PROVIDER?: string
   /** Anthropic model — default claude-haiku-5-5 */
   REASONING_MODEL?: string
@@ -173,6 +173,9 @@ export function createReasoningProvider(
   opts?: { timeout?: number },
 ): LLMProvider | null {
   const mode = env.REASONING_PROVIDER ?? 'auto'
+  // 'off' — no reasoning model at all (the evidence stage of a run that
+  // keeps its reasoning model for the appraiser stage only).
+  if (mode === 'off') return null
   const useAnthropic = mode === 'anthropic' || (mode === 'auto' && !!env.ANTHROPIC_API_KEY)
   if (useAnthropic && env.ANTHROPIC_API_KEY) {
     return createAnthropicProvider({
@@ -192,6 +195,7 @@ export function createReasoningProvider(
 }
 
 export function isReasoningProviderAvailable(env: ReasoningEnv): boolean {
+  if (env.REASONING_PROVIDER === 'off') return false
   return !!(env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY)
 }
 

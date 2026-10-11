@@ -566,7 +566,8 @@ export async function fetchSatelliteTile(env: Env, subject: Record<string, unkno
 export type FrameEdge = 'north' | 'east' | 'south' | 'west'
 export interface StreetOrientation { streetEdge: FrameEdge; bearingDeg: number; streetName: string | null }
 
-export async function fetchStreetOrientation(subject: Record<string, unknown>): Promise<StreetOrientation | null> {
+export async function fetchStreetOrientation(subject: Record<string, unknown>, env?: { OSM_ENABLED?: string }): Promise<StreetOrientation | null> {
+  if (env?.OSM_ENABLED === 'false') return null
   const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
   const addr = String(subject.address ?? '')
@@ -647,6 +648,7 @@ export function deriveExposure(
 export async function fetchStreetViewTile(env: Env, loc: { latitude?: number | null; longitude?: number | null }) {
   const key = env.GOOGLE_MAPS_KEY
   const lat = loc.latitude, lng = loc.longitude
+  if (env.STREET_VIEW_ENABLED === 'false') return null
   if (!key || typeof lat !== 'number' || typeof lng !== 'number') return null
   // Where there is no coverage the image endpoint still answers 200 with a
   // grey "no imagery" placeholder. The (free) metadata endpoint says whether
@@ -688,7 +690,7 @@ export async function decisionsSubjectObservables(
     fetchSatelliteTile(env, input.subject).catch(() => null),
     fetchSatelliteTile(env, input.subject, 90).catch(() => null),
     fetchImagesAsBase64(urls, { concurrency: 10 }),
-    fetchStreetOrientation(input.subject).catch(() => null),
+    fetchStreetOrientation(input.subject, env).catch(() => null),
   ])
   const satImg = sat ?? input.satelliteImage ?? null
   const photos = urls.map((u) => images.get(u)).filter((i): i is NonNullable<typeof i> => !!i)

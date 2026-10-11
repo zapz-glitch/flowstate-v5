@@ -13,11 +13,20 @@ ENVIRONMENT = "development"
 DASHBOARD_URL = "http://localhost:3000"
 PROPERTY_PROVIDER = "corelogic"
 # Local runs use "tester A": claude-haiku-5-5 holds the appraiser seat — it
-# selects the comps and the gate verifies them (agent harness) — and is also
-# the backup reader and the reasoning sub-agent it may call. The Decisions
-# model reads condition and satellite evidence.
+# selects the comps and the gate verifies them (agent harness) — and is the
+# reasoning sub-agent it may call. Haiku is held back until that stage and
+# runs at high effort; everything before it (condition and satellite reads)
+# is the Decisions model alone.
 DEFAULT_HARNESS = "agent"
 APPRAISER_SEAT = "reasoning"
+APPRAISER_EFFORT = "high"
+# One reasoning pass: haiku reads everything, selects the comps, and the
+# gate grades that single answer — no questions, no revision rounds.
+APPRAISER_SINGLE_PASS = "true"
+# No OpenStreetMap lookups and no Google Street View.
+OSM_ENABLED = "false"
+STREET_VIEW_ENABLED = "false"
+REASONING_STAGE_ONLY = "true"
 REASONING_PROVIDER = "anthropic"
 REASONING_MODEL = "claude-haiku-5-5"
 # Condition reader: the OpenAI Decisions model reads the subject and comps
