@@ -615,6 +615,14 @@ export async function fetchStreetViewTile(env: Env, loc: { latitude?: number | n
   const key = env.GOOGLE_MAPS_KEY
   const lat = loc.latitude, lng = loc.longitude
   if (!key || typeof lat !== 'number' || typeof lng !== 'number') return null
+  // Where there is no coverage the image endpoint still answers 200 with a
+  // grey "no imagery" placeholder. The (free) metadata endpoint says whether
+  // a real panorama exists — never hand the placeholder to a reader.
+  const meta = await fetch(
+    `https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat},${lng}&key=${key}`,
+    { signal: AbortSignal.timeout(10000) },
+  )
+  if (!meta.ok || ((await meta.json()) as { status?: string }).status !== 'OK') return null
   const url = `https://maps.googleapis.com/maps/api/streetview?size=640x640&location=${lat},${lng}&key=${key}`
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
   if (!res.ok) return null
