@@ -38,6 +38,7 @@ import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
+import { assessRenovationFromPhotos, unavailableAssessment } from '../services/vision/renovation'
 import { createPropertyApi } from '../services/property-api'
 import { mergeComparablePools } from '../services/property-api/comparable-pool'
 import {
@@ -791,6 +792,27 @@ export class AnalysisJobDO {
         } catch { /* retry is best-effort */ }
       }
     }
+
+    // Subject condition is the FIRST derived signal — the reno tier drives
+    // the buybox, so the vision call fires the moment the photo bundle
+    // resolves and overlaps the entire comp pipeline below.
+    const prefetchedRenovation = prefetchedPhotoBundle?.subject?.photos?.length
+      ? (async () => {
+          try {
+            return await assessRenovationFromPhotos(this.env, [...prefetchedPhotoBundle.subject!.photos], {
+              address: property.address,
+              squareFeet: property.squareFeet,
+              yearBuilt: property.yearBuilt,
+              description: prefetchedPhotoBundle.subject!.description ?? null,
+            })
+          } catch (e) {
+            return unavailableAssessment({
+              error: e instanceof Error ? e.message : 'Vision assessment failed',
+              limitations: ['Assessment call threw — no level invented'],
+            })
+          }
+        })()
+      : null
 
     // Zoning — county GIS point-in-polygon on the subject. ATTOM carries
     // no zoning dataset; the county layers populate the fields
@@ -1622,6 +1644,9 @@ export class AnalysisJobDO {
       // attom-mcp comp enrichment happens in the census gate above —
       // passers only, 1 provider call each.
       prefetchedPhotoBundle,
+      // Subject renovation assessment — fired the moment the photo bundle
+      // resolved; vision overlaps the entire comp pipeline.
+      prefetchedRenovation,
       // Comp evidence started the moment comps landed — a Map promise the
       // pipeline awaits instead of launching its own batch late.
       prefetchedCompEvidence,

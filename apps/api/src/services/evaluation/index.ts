@@ -173,6 +173,12 @@ export interface EvaluationParams {
    */
   prefetchedPhotoBundle?: PhotoBundle | null
   /**
+   * Subject renovation assessment started by the caller the moment the
+   * photo bundle resolved — vision overlaps the entire appraisal path
+   * instead of starting when evaluate() first runs.
+   */
+  prefetchedRenovation?: Promise<RenovationAssessment> | null
+  /**
    * Comp-evidence batch started by the caller the moment comps landed —
    * evidence lanes run beside geo/enrich instead of waiting for the sorted
    * pool. Comps absent from the map (pool-expansion refetches) get a top-up
@@ -621,7 +627,7 @@ export async function performAnalysisPhase1(
     // The subject condition fetch is required for eval completion — a thrown
     // error still resolves as an explicit 'unavailable' verdict so the run
     // records the outcome instead of silently completing without it.
-    const renovationPromise = (async (): Promise<RenovationAssessment> => {
+    const renovationPromise = params.prefetchedRenovation ?? (async (): Promise<RenovationAssessment> => {
       try {
         return await assessRenovationFromPhotos(env, subjectPhotos, {
           address: bundle.property.address,
