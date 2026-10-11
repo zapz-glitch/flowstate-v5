@@ -2220,6 +2220,9 @@ function compGeoPriority(subject: NormalizedProperty, comp: AppraisedComparable)
   return null
 }
 
+const featStr = (v: string[] | string | null | undefined): string | null =>
+  Array.isArray(v) ? (v[0] ?? null) : (v ?? null)
+
 function buildBSubjectFields(
   bundle: PropertyBundle,
   valuation: ValuationResult | null,
@@ -2239,6 +2242,8 @@ function buildBSubjectFields(
     constructionType: bundle.property.construction?.type ?? null,
     exteriorWalls: bundle.property.construction?.exteriorWalls ?? null,
     roofType: bundle.property.construction?.roofType ?? null,
+    poolType: featStr(bundle.property.features?.poolType),
+    garageType: featStr(bundle.property.features?.garageType),
     landAssessedValue: bundle.property.landAssessedValue ?? null,
     taxAssessment: bundle.property.assessedValue ?? null,
     assessedValue: bundle.property.assessedValue ?? null,
@@ -2281,6 +2286,8 @@ export function toBCompsOf(
     constructionType: comp.construction?.type ?? null,
     exteriorWalls: comp.construction?.exteriorWalls ?? null,
     roofType: comp.construction?.roofType ?? null,
+    poolType: featStr((comp as { features?: { poolType?: string[] | string | null } }).features?.poolType ?? (comp as { pool?: string | null }).pool),
+    garageType: featStr((comp as { features?: { garageType?: string[] | string | null } }).features?.garageType),
     landAssessedValue: comp.landAssessedValue ?? null,
     propertyType: comp.propertyType ?? null,
     crossesMajorRoad: comp.crossesMajorRoad ?? null,

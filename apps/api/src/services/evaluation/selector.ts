@@ -93,6 +93,9 @@ interface CompLabels {
   year: MatchDim
   lot: MatchDim
   style: 'match' | 'differs' | 'unknown'
+  /** Feature matches vs the subject — m=match d=differs u=unknown.
+   *  pool (presence), construction type (block/frame), foundation, garage. */
+  feat: string
   saleAge: 'fresh' | 'stale' | 'aged_out' | 'unknown'
   pricePosition: 'top' | 'median' | 'bottom' | 'outlier' | 'unknown'
   priceEvidence: 'arv' | 'median' | 'as_is' | 'none'
@@ -401,8 +404,32 @@ export function runDeterministicSelector(
     // difference — it can never exclude on its own.
     const styleDiffs = r.audit.recoverable.filter((x) =>
       /style|stories|foundation|construction|exterior|roof|beds|baths/i.test(x)).length
+    // Feature matches vs the subject — appraisers twin on the big items:
+    // pool, construction (block vs frame), foundation, garage. Absent data
+    // (unenriched comp) reads unknown, never a penalty; each differs counts
+    // as one recoverable diff.
+    const present = (v: unknown): boolean | null => {
+      const s = Array.isArray(v) ? v[0] : v
+      if (s == null || s === '') return null
+      const t = String(s).toLowerCase()
+      return !(t === 'no' || t === 'none' || t === '0' || t === 'false')
+    }
+    const strDim = (a: string | null | undefined, b: string | null | undefined): 'm' | 'd' | 'u' =>
+      !a || !b ? 'u' : a.trim().toLowerCase() === b.trim().toLowerCase() ? 'm' : 'd'
+    const flagDim = (a: boolean | null, b: boolean | null): 'm' | 'd' | 'u' =>
+      a == null || b == null ? 'u' : a === b ? 'm' : 'd'
+    const compAny = r.comp as { poolType?: string | null; garageType?: string | null; constructionType?: string | null; foundationType?: string | null }
+    const subjAny = subject as { poolType?: string | null; garageType?: string | null; constructionType?: string | null; foundationType?: string | null }
+    const poolD = flagDim(present(subjAny.poolType), present(compAny.poolType))
+    const conD = strDim(subjAny.constructionType, compAny.constructionType)
+    const fndD = strDim(subjAny.foundationType, compAny.foundationType)
+    const garD = flagDim(present(subjAny.garageType), present(compAny.garageType))
+    // con/fnd mismatches already land in audit.recoverable via the match
+    // profile — only the new signals (pool, garage) count as extra diffs.
+    const featDiffs = [poolD, garD].filter((d) => d === 'd').length
     r.labels = {
       geo: r.profile.geoTier,
+      feat: `pool:${poolD}|con:${conD}|fnd:${fndD}|gar:${garD}`,
       sqft: physDim(r.profile.sqftDeltaPct, 10, 15, mod(PHYS.sqftDeltaPct.recoverable)),
       year: physDim(r.profile.yearBuiltDelta, 5, 10, mod(PHYS.yearBuiltDelta.recoverable)),
       lot: physDim(r.profile.lotDeltaPct, 25, 50, mod(PHYS.lotDeltaPct.recoverable)),
@@ -415,7 +442,7 @@ export function runDeterministicSelector(
       priceEvidence: r.audit.verdict === 'excluded' || r.audit.verdict === 'unpriceable' ? 'none'
         : asIsPriced(r) ? 'as_is' : isRenovated(r) ? 'arv' : 'median',
       sanity: r.audit.rules.includes('R4') ? 'anomalous' : 'clean',
-      diffs: r.audit.recoverable.length,
+      diffs: r.audit.recoverable.length + featDiffs,
     }
   }
   // type-selector seat: the typescript lane lets a reasoning model pick

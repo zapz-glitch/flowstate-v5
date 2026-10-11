@@ -142,10 +142,15 @@ export async function runTypeSelector(
       if (r.audit.verdict === 'excluded' && r.comp.isEnabled !== false) r.comp.isEnabled = false
     }
   }
+  // Evidence priority: ARV-priced sales outrank median sales, and as-is
+  // (distressed) sales sit last — they bound the floor, not the ARV.
+  const evidenceRank = (r: RankedComp) =>
+    r.labels?.priceEvidence === 'arv' ? 0 : r.labels?.priceEvidence === 'median' ? 1 : 2
   const eligible = ranked
     .filter((r) => r.audit.verdict === 'eligible' || r.audit.verdict === 'picked')
     .sort((a, b) =>
-      tierOf(a, subject.squareFeet ?? null, subject.yearBuilt ?? null) - tierOf(b, subject.squareFeet ?? null, subject.yearBuilt ?? null)
+      evidenceRank(a) - evidenceRank(b)
+      || tierOf(a, subject.squareFeet ?? null, subject.yearBuilt ?? null) - tierOf(b, subject.squareFeet ?? null, subject.yearBuilt ?? null)
       || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
       || (GEO_RANK[a.profile.geoTier] ?? 9) - (GEO_RANK[b.profile.geoTier] ?? 9)
       || String(b.comp.saleDate ?? '').localeCompare(String(a.comp.saleDate ?? '')))
@@ -172,7 +177,7 @@ export async function runTypeSelector(
       saleDate: r.comp.saleDate,
       distMi: r.comp.distanceMiles != null ? Math.round(r.comp.distanceMiles * 10) / 10 : null,
       geo: l?.geo ?? r.profile.geoTier,
-      lbl: l ? `sqft:${l.sqft}|yr:${l.year}|lot:${l.lot}|style:${l.style}|sale:${l.saleAge}|${l.pricePosition}→${l.priceEvidence}|${l.sanity}|diffs:${l.diffs}` : '',
+      lbl: l ? `sqft:${l.sqft}|yr:${l.year}|lot:${l.lot}|style:${l.style}|feat:${l.feat}|sale:${l.saleAge}|${l.pricePosition}→${l.priceEvidence}|${l.sanity}|diffs:${l.diffs}` : '',
       group: r.group,
     }
   })
@@ -192,8 +197,11 @@ export async function runTypeSelector(
       'should be priced on each pick\'s "implied" value — its sale repriced ' +
       'at the subject\'s size with the appraiser marginal-rate taper (excess ' +
       'or missing sqft contributes only a percent of value: 50%/40%/30% of ' +
-      '$/sf by gap size). ARV-priced picks weight most; the pocket median ' +
-      'bounds you.',
+      '$/sf by gap size). ARV-priced picks weight most; median-priced sales ' +
+      'support; as-is sales are floor evidence only. The "feat" field is ' +
+      'pool|con(struction)|fnd(oundation)|gar(age) vs the subject: m=match, ' +
+      'd=differs, u=unknown — prefer feature matches (pool subject needs pool ' +
+      'comps, block construction needs block comps); the pocket median bounds you.',
     tiers: {
       '1': 'in-pocket geo, sqft within ±250, era year built, fresh sale, ARV price — identical data set',
       '2': 'in-pocket geo, sqft within 20%, year within ±20 — closest data set',
