@@ -177,7 +177,7 @@ export async function runTypeSelector(
   const compEvidence = opts?.compEvidence
     ? await Promise.race([
         opts.compEvidence,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 45_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 90_000)),
       ]).catch(() => null)
     : null
   if (compEvidence) {

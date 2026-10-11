@@ -1203,13 +1203,12 @@ export class AnalysisJobDO {
             || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
             || Math.abs((a.squareFeet ?? 0) - subjSqftFast) - Math.abs((b.squareFeet ?? 0) - subjSqftFast))
           .slice(0, FAST_ENRICH)
-        const enriched = await propertyApi.enrichComparables(shortlist, { concurrency: FAST_ENRICH })
         // Comp condition evidence: stingray + listing scrape + classify on
-        // the same 12-comp shortlist, overlapped with the label/gate math —
-        // the pick seat sees 'renovated'/'as-is'/investor truth from the
-        // listings, not just price badges.
-        apiLedger.record('scrape:comp-evidence', enriched.length)
-        typeCompEvidence = startCompEvidenceBatch(this.env, enriched.map((c) => ({
+        // the same 12-comp shortlist — fires BEFORE the enrich await so it
+        // overlaps enrich + labeling + gates; the pick seat sees
+        // 'renovated'/'as-is'/investor truth, not just price badges.
+        apiLedger.record('scrape:comp-evidence', shortlist.length)
+        typeCompEvidence = startCompEvidenceBatch(this.env, shortlist.map((c) => ({
           propertyId: c.id, address: c.address, city: c.city, state: c.state,
           zipCode: c.zipCode, latitude: c.latitude ?? null, longitude: c.longitude ?? null,
           salePrice: c.salePrice ?? undefined, saleDate: c.saleDate ? String(c.saleDate) : undefined,
@@ -1218,6 +1217,7 @@ export class AnalysisJobDO {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
           gatherOnly: false, lanes: FAST_ENRICH, perCompTimeoutMs: 25_000, globalDeadlineMs: 75_000,
         }).catch(() => null)
+        const enriched = await propertyApi.enrichComparables(shortlist, { concurrency: FAST_ENRICH })
         const enrichedByIdFast = new Map(enriched.map((e) => [e.id, e]))
         candidatesEnriched += enriched.filter((c) => c.isEnriched).length
         // Geocodio-stamped geography must survive the merge — a CoreLogic
