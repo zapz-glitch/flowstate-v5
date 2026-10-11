@@ -295,7 +295,7 @@ const COMP_QUESTIONS = {
   },
   c10_physical_match: {
     type: 'noul' as const,
-    instructions: 'When street-view images are supplied (the SUBJECT street view comes second-to-last, before the SUBJECT aerial), score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when images are absent or the styles clearly differ.',
+    instructions: 'Score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, footprint. Compare the COMP listing cover photo (plus any description cues: story count, garage, style words) against the SUBJECT images supplied — the SUBJECT cover photo when present, otherwise the SUBJECT street view or aerial. Judge physical similarity ONLY, never condition. Score low when no usable subject exterior image is present or the styles clearly differ.',
   },
   c11_arv_fitness: {
     type: 'noul' as const,
@@ -476,7 +476,8 @@ export interface CompObservables {
   /** Comp condition in the product's rehab-tier vocabulary — the model
    *  picked against the Evaluation Settings criteria (photo+description). */
   conditionTier: string | null
-  /** P(comp is a physical match to the subject) — street view lane. */
+  /** P(comp is a physical match to the subject) — cover-photo lane
+   *  (comp cover vs subject cover/street-view/aerial + description cues). */
   physicalMatchP: number | null
   /** P(comp is a finished/renovated/move-in-ready version of the subject) —
    *  ARV-fitness ladder: flipper-complete highest, maintained ~70-80s,
@@ -798,8 +799,11 @@ export async function decisionsCompObservables(
     /** Comp coordinates for the satellite tile feeding c9. */
     latitude?: number | null
     longitude?: number | null
-    /** Subject street-view image for the c10 physical-similarity lane —
-     *  fetched once per eval and shared across every comp call. */
+    /** Subject cover photo for the c10 physical-similarity lane — fetched
+     *  once per eval and shared across every comp call. */
+    subjectCoverImage?: { base64: string; content_type?: string } | null
+    /** Subject street-view image — c10 fallback when no subject cover photo
+     *  exists. Fetched once per eval, shared across every comp call. */
     subjectStreetViewImage?: { base64: string; content_type?: string } | null
     /** Subject wide satellite aerial for the c12 development-vintage lane —
      *  fetched once per eval and shared across every comp call. */
@@ -817,11 +821,13 @@ export async function decisionsCompObservables(
     const fetched = await fetchImageAsBase64(input.coverPhotoUrl).catch(() => null)
     if (fetched) img = { base64: fetched.base64, content_type: fetched.mimeType }
   }
-  const [satImg, satCloseImg, streetImg] = await Promise.all([
+  const [satImg, satCloseImg] = await Promise.all([
     fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
     fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }, 90).catch(() => null),
-    fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null),
   ])
+  // Physical-match reference for the SUBJECT side: cover photo preferred,
+  // curb-level street view when no cover exists.
+  const subjectRefImg = input.subjectCoverImage ?? input.subjectStreetViewImage ?? null
 
   const state = {
     role: 'COMPARABLE closed sale — evaluate ONLY this property.',
@@ -836,8 +842,8 @@ export async function decisionsCompObservables(
       ...(img ? ['comp listing cover photo'] : []),
       ...(satImg ? ['comp satellite aerial (wide ~600m)'] : []),
       ...(satCloseImg ? ['comp satellite close-up (~180m — comp parcel centered)'] : []),
-      ...(streetImg ? ['comp street view'] : []),
-      ...(input.subjectStreetViewImage ? ['SUBJECT street view'] : []),
+      ...(input.subjectCoverImage ? ['SUBJECT listing cover photo']
+          : input.subjectStreetViewImage ? ['SUBJECT street view'] : []),
       ...(input.subjectSatelliteImage ? ['SUBJECT satellite aerial (wide ~600m — subject parcel centered)'] : []),
     ],
     doctrine: DECISIONS_DOCTRINE,
@@ -846,7 +852,7 @@ export async function decisionsCompObservables(
       'A price outlier must be flagged when its premium cannot be explained.',
       'Do not automatically remove a comp because its price and condition disagree.',
       'Preserve disagreements between price position and condition evidence.',
-      'Street view judges physical similarity only — never condition.',
+      'Physical-similarity reads judge style and footprint only — never condition.',
       'Decisions classifies evidence. The appraiser selects comps and determines ARV.',
     ],
   }
@@ -857,8 +863,7 @@ export async function decisionsCompObservables(
       ...(img ? [{ content_type: img.content_type, base64: img.base64 }] : []),
       ...(satImg ? [{ content_type: satImg.content_type, base64: satImg.base64 }] : []),
       ...(satCloseImg ? [{ content_type: satCloseImg.content_type, base64: satCloseImg.base64 }] : []),
-      ...(streetImg ? [{ content_type: streetImg.content_type, base64: streetImg.base64 }] : []),
-      ...(input.subjectStreetViewImage ? [{ content_type: input.subjectStreetViewImage.content_type, base64: input.subjectStreetViewImage.base64 }] : []),
+      ...(subjectRefImg ? [{ content_type: subjectRefImg.content_type, base64: subjectRefImg.base64 }] : []),
       ...(input.subjectSatelliteImage ? [{ content_type: input.subjectSatelliteImage.content_type, base64: input.subjectSatelliteImage.base64 }] : []),
     ],
   }).catch(() => null)

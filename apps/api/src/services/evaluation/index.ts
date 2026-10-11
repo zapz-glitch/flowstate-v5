@@ -58,6 +58,7 @@ import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type Pro
 import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
 import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
+import { fetchImageAsBase64 } from '../llm/image-utils'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
@@ -917,8 +918,15 @@ export async function performAnalysisPhase1(
         })
       }).catch((err) => { console.warn('[observables] subject call failed', err?.message ?? err); return null })
     : Promise.resolve(null)
-  // Subject street view — fetched once per eval, shared by every comp
-  // call's c10 physical-similarity read (its image is the reference pair).
+  // Subject cover photo — fetched once per eval, shared by every comp
+  // call's c10 physical-similarity read (comp cover vs subject cover).
+  const subjectCoverPromise = observablesOn
+    ? photoBundlePromise.then((pb) => {
+        const url = pb?.subject?.photos?.[0]
+        return url ? fetchImageAsBase64(url).catch(() => null) : null
+      }).catch(() => null)
+    : Promise.resolve(null)
+  // Subject street view — c10 fallback when no subject cover photo exists.
   const subjectStreetViewPromise = observablesOn
     ? fetchStreetViewTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
@@ -994,6 +1002,7 @@ export async function performAnalysisPhase1(
                   coverPhotoUrl: ev?.listing?.coverPhotoUrl ?? null,
                   latitude: comp.latitude ?? null,
                   longitude: comp.longitude ?? null,
+                  subjectCoverImage: await subjectCoverPromise,
                   subjectStreetViewImage: await subjectStreetViewPromise,
                   subjectSatelliteImage: await subjectSatellitePromise,
                   subjectRef: {
