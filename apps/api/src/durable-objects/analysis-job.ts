@@ -1215,7 +1215,11 @@ export class AnalysisJobDO {
           yearBuilt: c.yearBuilt ?? undefined, squareFeet: c.squareFeet ?? undefined,
         })), {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
-          gatherOnly: false, lanes: FAST_ENRICH, perCompTimeoutMs: 25_000, globalDeadlineMs: 75_000,
+          // Scrapfly concurrency: 12 lanes × 2 calls tripped the plan's
+          // concurrent-request cap — every comp raced out at 25s. 4 lanes
+          // stays under the cap; the batch is ~3 waves and still overlaps
+          // enrich + labels + gates before the seat waits on it.
+          gatherOnly: false, lanes: 4, perCompTimeoutMs: 30_000, globalDeadlineMs: 95_000,
         }).catch(() => null)
         const enriched = await propertyApi.enrichComparables(shortlist, { concurrency: FAST_ENRICH })
         const enrichedByIdFast = new Map(enriched.map((e) => [e.id, e]))
