@@ -749,10 +749,9 @@ export class AnalysisJobDO {
       // Subject photos — subject-only scrape; the bundle feeds the Zillow
       // field merge, the flood signal, vision, and R2 persistence inside
       // performAnalysis. Prefetching here overlaps it with the comps fetch.
-      // typescript lane: strictly provider math — zero listing fetches.
-      config.harness === 'typescript'
-        ? Promise.resolve(null)
-        : (async () => {
+      // typescript lane keeps subject photos (vision condition is a product
+      // requirement); only the comp listing fan-out stays cut.
+      (async () => {
         try {
           const photoService = createPhotoService(this.env)
           if (!photoService.isAvailable()) return null
