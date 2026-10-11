@@ -45,7 +45,6 @@ export class ListingPhotoProvider implements PhotoProvider {
         apiKey: this.env.FIRECRAWL_API_KEY,
         scrapflyApiKey: this.env.SCRAPFLY_API_KEY,
         scrapflyUrl: this.env.SCRAPFLY_URL,
-        serperApiKey: this.env.SERPER_API_KEY,
         openrouterApiKey: this.env.OPENROUTER_API_KEY,
         openrouterModel: this.env.OPENROUTER_MODEL,
         cache: this.env.API_CACHE,
