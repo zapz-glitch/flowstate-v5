@@ -173,6 +173,12 @@ export interface EvaluationParams {
    */
   prefetchedPhotoBundle?: PhotoBundle | null
   /**
+   * Subject renovation assessment started by the caller the moment the
+   * photo bundle resolved — vision overlaps the entire appraisal path
+   * instead of starting when evaluate() first runs.
+   */
+  prefetchedRenovation?: Promise<RenovationAssessment> | null
+  /**
    * Comp-evidence batch started by the caller the moment comps landed —
    * evidence lanes run beside geo/enrich instead of waiting for the sorted
    * pool. Comps absent from the map (pool-expansion refetches) get a top-up
@@ -204,7 +210,7 @@ export interface EvaluationParams {
    *  caller's appraisal overrides are verbatim — no DEFAULT_FILTERS /
    *  DEFAULT_ADJUSTMENTS injection — so enablement reflects only the hard
    *  data gates; the agent weighs the doctrine's geo/age/size preferences. */
-  harness?: 'agent' | 'corelogic'
+  harness?: 'agent' | 'corelogic' | 'typescript' | 'finale'
 }
 
 export interface GroupBResult {
@@ -496,7 +502,7 @@ export async function performAnalysisPhase1(
   let filters: AppraisalFilter[]
   let adjustments: AppraisalAdjustment[]
 
-  if (params.harness === 'agent' || params.harness === 'corelogic') {
+  if (params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript' || params.harness === 'finale') {
     // Ruleset-governed run — the caller's overrides are the whole grid.
     // No default injection: an empty override means "no filters", so comps
     // stay enabled unless a hard data gate fails. The agent weighs geo /
@@ -537,8 +543,11 @@ export async function performAnalysisPhase1(
   // appraisal path below. Resolved at the points the pipeline actually
   // consumes them (photo stamps near comp selection, renovation level at
   // deriveBuybox).
+  // typescript lane: subject listing fetch + vision condition stay on (the
+  // comp listing fan-out stays off — compEvidenceOn keeps its harness gate).
+  const photoLaneOn = true
   const photoService = createPhotoService(env)
-  const photoBundlePromise: Promise<PhotoBundle | null> = (async () => {
+  const photoBundlePromise: Promise<PhotoBundle | null> = photoLaneOn ? (async () => {
     let photoBundle: PhotoBundle | null = null
     try {
       if (params.prefetchedPhotoBundle !== undefined) {
@@ -609,7 +618,7 @@ export async function performAnalysisPhase1(
       }
     }
     return photoBundle
-  })()
+  })() : Promise.resolve(null)
 
   // Vision + photo persistence chain — begins the moment subject photos
   // land, long before the appraisal path finishes.
@@ -618,7 +627,7 @@ export async function performAnalysisPhase1(
     // The subject condition fetch is required for eval completion — a thrown
     // error still resolves as an explicit 'unavailable' verdict so the run
     // records the outcome instead of silently completing without it.
-    const renovationPromise = (async (): Promise<RenovationAssessment> => {
+    const renovationPromise = params.prefetchedRenovation ?? (async (): Promise<RenovationAssessment> => {
       try {
         return await assessRenovationFromPhotos(env, subjectPhotos, {
           address: bundle.property.address,
@@ -805,7 +814,7 @@ export async function performAnalysisPhase1(
   )
   const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
 
-  const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
+  const redfinDetailsEnabled = photoLaneOn && !!(env.FIRECRAWL_API_KEY && isReasoningProviderAvailable(env))
   if (redfinDetailsEnabled) params.apiLedger?.record('redfin:property-details', redfinTargetsById.size + 1)
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
@@ -831,10 +840,16 @@ export async function performAnalysisPhase1(
     .filter(inWorkingPool)
     .slice()
     .sort((a, b) =>
-      Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
-      || Number(b.isEnabled) - Number(a.isEnabled)
-      || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-    .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
+      params.harness === 'finale'
+        // Finale spec: the 15 closest-by-proximity comps go to Decisions —
+        // pure distance order, enabled hard-gates already ran.
+        ? (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+        : Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
+          || Number(b.isEnabled) - Number(a.isEnabled)
+          || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    .slice(0, params.harness === 'finale'
+      ? Math.min(Number(env.CLEF_COMP_MAX) || 15, 15)
+      : Number(env.CLEF_COMP_MAX) || Infinity)
   const compGeoById = new Map(bundle.comparables.map((c) => [c.id, c]))
   const clefInputs = clefCompsSorted.map((comp) => ({
     propertyId: comp.id,
@@ -863,7 +878,7 @@ export async function performAnalysisPhase1(
   // (S1-S7 subject / C1-C7 per comp) replace the whole-condition classify.
   // Price boundaries are code-computed; Decisions classifies, Sonnet
   // appraises. Falls back to the classify pool when Decisions is absent.
-  const observablesOn = (params.harness === 'agent' || params.harness === 'corelogic') && isDecisionsAvailable(env)
+  const observablesOn = (params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'finale') && isDecisionsAvailable(env)
   const marketBenchmark = observablesOn
     ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
     : null
@@ -913,9 +928,9 @@ export async function performAnalysisPhase1(
   const subjectSatellitePromise = observablesOn
     ? fetchSatelliteTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
-  const compEvidenceOn =
+  const compEvidenceOn = photoLaneOn && (
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
-    ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env)))
+    ((params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'finale') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env))))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
@@ -2036,7 +2051,7 @@ export async function performAnalysisPhase2(
       // verdict; a deterministic-fallback run synthesizes the equivalent
       // selection from its own B result so it is graded the same way
       // (spec §4). Never blocks the response.
-      ...((params.harness === 'agent' || params.harness === 'corelogic') && pipelineBResult != null
+      ...((params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript' || params.harness === 'finale') && pipelineBResult != null
         ? {
             verdictGrade: gradeVerdict(
               buildHarnessEvidence(ctx),
@@ -2218,6 +2233,9 @@ function compGeoPriority(subject: NormalizedProperty, comp: AppraisedComparable)
   return null
 }
 
+const featStr = (v: string[] | string | null | undefined): string | null =>
+  Array.isArray(v) ? (v[0] ?? null) : (v ?? null)
+
 function buildBSubjectFields(
   bundle: PropertyBundle,
   valuation: ValuationResult | null,
@@ -2237,6 +2255,8 @@ function buildBSubjectFields(
     constructionType: bundle.property.construction?.type ?? null,
     exteriorWalls: bundle.property.construction?.exteriorWalls ?? null,
     roofType: bundle.property.construction?.roofType ?? null,
+    poolType: featStr(bundle.property.features?.poolType),
+    garageType: featStr(bundle.property.features?.garageType),
     landAssessedValue: bundle.property.landAssessedValue ?? null,
     taxAssessment: bundle.property.assessedValue ?? null,
     assessedValue: bundle.property.assessedValue ?? null,
@@ -2266,6 +2286,7 @@ export function toBCompsOf(
     adjustedPrice: comp.adjustedSalePrice ?? null,
     distanceMiles: comp.distanceMiles ?? null,
     sameBlockGroup: comp.sameBlockGroup ?? null,
+    censusBlockGroup: comp.censusBlockGroup ?? null,
     censusTract: comp.censusTract ?? null,
     neighborhoodName: comp.neighborhoodName ?? null,
     subdivision: comp.subdivision ?? null,
@@ -2279,6 +2300,8 @@ export function toBCompsOf(
     constructionType: comp.construction?.type ?? null,
     exteriorWalls: comp.construction?.exteriorWalls ?? null,
     roofType: comp.construction?.roofType ?? null,
+    poolType: featStr((comp as { features?: { poolType?: string[] | string | null } }).features?.poolType ?? (comp as { pool?: string | null }).pool),
+    garageType: featStr((comp as { features?: { garageType?: string[] | string | null } }).features?.garageType),
     landAssessedValue: comp.landAssessedValue ?? null,
     propertyType: comp.propertyType ?? null,
     crossesMajorRoad: comp.crossesMajorRoad ?? null,

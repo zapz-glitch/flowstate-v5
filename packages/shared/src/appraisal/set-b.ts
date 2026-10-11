@@ -76,6 +76,8 @@ export interface BSubject {
   constructionType?: string | null
   exteriorWalls?: string | null
   roofType?: string | null
+  poolType?: string | null
+  garageType?: string | null
   landAssessedValue?: number | null
   taxAssessment?: number | null
   assessedValue?: number | null
@@ -96,6 +98,7 @@ export interface BComp {
   adjustedPrice?: number | null
   distanceMiles?: number | null
   sameBlockGroup?: boolean | null
+  censusBlockGroup?: string | null
   censusTract?: string | null
   subdivision?: string | null
   neighborhoodName?: string | null
@@ -109,6 +112,8 @@ export interface BComp {
   constructionType?: string | null
   exteriorWalls?: string | null
   roofType?: string | null
+  poolType?: string | null
+  garageType?: string | null
   landAssessedValue?: number | null
   propertyType?: string | null
   crossesMajorRoad?: boolean | null

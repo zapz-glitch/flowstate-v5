@@ -58,6 +58,21 @@ const MIN_PICKS = 1
  *  twin-or-close AND the comp can carry at most 2 recoverable
  *  exceptions. Below the bar the evidence is context, not a pick. */
 const TRUE_COMP_MAX_DIFFS = 2
+/** R9 pocket-value band — a comp outside the subject pocket (block group
+ *  AND neighborhood) is evidence only when its own group's median $/sf
+ *  sits within this ratio of the subject pocket's median. */
+const POCKET_VALUE_BAND = { lo: 0.75, hi: 1.33 }
+
+/** Quantified pocket values — the subject pocket's median plus every block
+ *  group and neighborhood group's median in the pool. */
+export interface PocketValues {
+  /** Median $/sf of the subject pocket and how it was measured. */
+  pocketPpsf: number
+  scope: 'block+neighborhood' | 'block' | 'neighborhood' | 'tract'
+  pocketN: number
+  blocks: Array<{ key: string; n: number; medianPpsf: number; ratio: number; subject: boolean }>
+  neighborhoods: Array<{ key: string; n: number; medianPpsf: number; ratio: number; subject: boolean }>
+}
 /** Extreme-variance anomaly threshold — a comp this likely to carry an
  *  unexplained premium never makes the ARV pool. */
 const ANOMALY_P = 0.7
@@ -93,6 +108,9 @@ interface CompLabels {
   year: MatchDim
   lot: MatchDim
   style: 'match' | 'differs' | 'unknown'
+  /** Feature matches vs the subject — m=match d=differs u=unknown.
+   *  pool (presence), construction type (block/frame), foundation, garage. */
+  feat: string
   saleAge: 'fresh' | 'stale' | 'aged_out' | 'unknown'
   pricePosition: 'top' | 'median' | 'bottom' | 'outlier' | 'unknown'
   priceEvidence: 'arv' | 'median' | 'as_is' | 'none'
@@ -101,7 +119,7 @@ interface CompLabels {
   diffs: number
 }
 
-interface RankedComp {
+export interface RankedComp {
   id: string
   comp: HarnessEvidence['comps'][number]
   profile: CompMatchProfile
@@ -175,6 +193,13 @@ function physicalEligibility(p: CompMatchProfile, bg = false): { excludes: strin
 export function runDeterministicSelector(
   ctx: Phase1Context,
   evidence: HarnessEvidence,
+  opts?: {
+    priceBand?: { upper: number; lower: number }
+    /** R9: pocket = block group AND neighborhood; foreign groups must
+     *  prove a similar median value before their comps can price. */
+    pocketValueGate?: boolean
+    onRanked?: (ranked: RankedComp[], pocket: PocketValues | null) => void
+  },
 ): AppraiserResult {
   const subject = evidence.subject
   // The preset filter ladder (±10yr, 210-day, style-match) belongs to the
@@ -317,6 +342,96 @@ export function runDeterministicSelector(
       r.audit.reasons.push(`R4 outsized-premium — $${Math.round(r.ppsf)}/sf is ${(r.ppsf / pocketMedian).toFixed(1)}x the pocket median`)
     }
   }
+  // R8 price segmentation (typescript lane) — pocket-relative band; both
+  // tails are outliers. Too high can never be evidence for this pocket,
+  // too low is distress/as-is priced and can't drive the verdict.
+  const band = opts?.priceBand
+  if (band && pocketMedian > 0) {
+    for (const r of ranked) {
+      if (r.audit.verdict !== 'eligible') continue
+      const ratio = r.ppsf / pocketMedian
+      if (ratio > band.upper || ratio < band.lower) {
+        r.audit.verdict = 'excluded'
+        r.audit.rules.push('R8')
+        r.audit.reasons.push(
+          `R8 price-segment — $${Math.round(r.ppsf)}/sf is ${ratio.toFixed(2)}x the pocket median (band ${band.lower}x–${band.upper}x)`)
+      }
+    }
+  }
+  // R9 pocket-value gate (typescript lane) — pocket = block group AND
+  // neighborhood match. Every block group and neighborhood in the pool
+  // gets its own median $/sf. A comp outside the subject pocket on either
+  // dimension is ARV evidence only when that group's median sits inside
+  // the subject pocket's band — a similar pocket, not a pricier/cheaper
+  // one. Singletons have no group to measure, so their own $/sf must fit.
+  // Unknown geography is not a mismatch.
+  let pocketValues: PocketValues | null = null
+  if (opts?.pocketValueGate) {
+    const norm = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+    const med = (xs: number[]) => {
+      const s = [...xs].sort((a, b) => a - b)
+      return s.length ? s[Math.floor((s.length - 1) / 2)] : 0
+    }
+    const subjBg = (subject.censusBlockGroup as string | null | undefined) ?? null
+    // One hood field for both sides — mixing neighborhoodName with
+    // subdivision would mark every comp foreign.
+    const hoodField = subject.neighborhoodName ? 'neighborhoodName' : subject.subdivision ? 'subdivision' : null
+    const subjHood = hoodField ? norm(subject[hoodField] as string | null) : null
+    const bgOf = (r: RankedComp) =>
+      (r.comp as { censusBlockGroup?: string | null }).censusBlockGroup ??
+      (r.comp.sameBlockGroup === true ? subjBg : null)
+    const hoodOf = (r: RankedComp) => hoodField ? norm(r.comp[hoodField] as string | null | undefined) : null
+    const pool = ranked.filter((r) => r.audit.verdict === 'eligible' && r.ppsf > 0)
+    const group = (keyOf: (r: RankedComp) => string | null) => {
+      const m = new Map<string, number[]>()
+      for (const r of pool) {
+        const k = keyOf(r)
+        if (k) m.set(k, [...(m.get(k) ?? []), r.ppsf])
+      }
+      return m
+    }
+    const bgGroups = group(bgOf)
+    const hoodGroups = group(hoodOf)
+    const both = pool.filter((r) => subjBg && bgOf(r) === subjBg && subjHood && hoodOf(r) === subjHood)
+    const bgOnly = subjBg ? bgGroups.get(subjBg) ?? [] : []
+    const hoodOnly = subjHood ? hoodGroups.get(subjHood) ?? [] : []
+    const [pocketPpsf, scope, pocketN] =
+      both.length >= 2 ? [med(both.map((r) => r.ppsf)), 'block+neighborhood' as const, both.length]
+      : bgOnly.length >= 2 ? [med(bgOnly), 'block' as const, bgOnly.length]
+      : hoodOnly.length >= 2 ? [med(hoodOnly), 'neighborhood' as const, hoodOnly.length]
+      : [pocketMedian, 'tract' as const, pocketClean.length]
+    const table = (m: Map<string, number[]>, subjKey: string | null) =>
+      [...m.entries()].map(([key, xs]) => {
+        const medianPpsf = med(xs)
+        return { key, n: xs.length, medianPpsf: Math.round(medianPpsf), ratio: pocketPpsf > 0 ? Math.round((medianPpsf / pocketPpsf) * 100) / 100 : 0, subject: key === subjKey }
+      }).sort((a, b) => b.n - a.n)
+    pocketValues = {
+      pocketPpsf: Math.round(pocketPpsf), scope, pocketN,
+      blocks: table(bgGroups, subjBg), neighborhoods: table(hoodGroups, subjHood),
+    }
+    const inBand = (v: number) => v >= pocketPpsf * POCKET_VALUE_BAND.lo && v <= pocketPpsf * POCKET_VALUE_BAND.hi
+    if (pocketPpsf > 0) {
+      for (const r of pool) {
+        const fails: string[] = []
+        const check = (dim: string, key: string | null, subjKey: string | null, groups: Map<string, number[]>) => {
+          if (!key || !subjKey || key === subjKey) return
+          const xs = groups.get(key) ?? []
+          const v = xs.length >= 2 ? med(xs) : r.ppsf
+          if (!inBand(v)) {
+            fails.push(`${dim} ${key} ${xs.length >= 2 ? `median $${Math.round(v)}/sf (n=${xs.length})` : `singleton $${Math.round(v)}/sf`} = ${(v / pocketPpsf).toFixed(2)}x pocket`)
+          }
+        }
+        check('block', bgOf(r), subjBg, bgGroups)
+        check('neighborhood', hoodOf(r), subjHood, hoodGroups)
+        if (fails.length) {
+          r.audit.verdict = 'excluded'
+          r.audit.rules.push('R9')
+          r.audit.reasons.push(
+            `R9 pocket-value — ${fails.join('; ')} vs subject pocket $${Math.round(pocketPpsf)}/sf (${scope}, band ${POCKET_VALUE_BAND.lo}x–${POCKET_VALUE_BAND.hi}x)`)
+        }
+      }
+    }
+  }
   // clean is re-derived below after the outlier pass.
   const cleanSet = new Set(ranked.filter((r) => r.audit.verdict === 'eligible').map((r) => r.id))
   clean.length = 0
@@ -381,8 +496,32 @@ export function runDeterministicSelector(
     // difference — it can never exclude on its own.
     const styleDiffs = r.audit.recoverable.filter((x) =>
       /style|stories|foundation|construction|exterior|roof|beds|baths/i.test(x)).length
+    // Feature matches vs the subject — appraisers twin on the big items:
+    // pool, construction (block vs frame), foundation, garage. Absent data
+    // (unenriched comp) reads unknown, never a penalty; each differs counts
+    // as one recoverable diff.
+    const present = (v: unknown): boolean | null => {
+      const s = Array.isArray(v) ? v[0] : v
+      if (s == null || s === '') return null
+      const t = String(s).toLowerCase()
+      return !(t === 'no' || t === 'none' || t === '0' || t === 'false')
+    }
+    const strDim = (a: string | null | undefined, b: string | null | undefined): 'm' | 'd' | 'u' =>
+      !a || !b ? 'u' : a.trim().toLowerCase() === b.trim().toLowerCase() ? 'm' : 'd'
+    const flagDim = (a: boolean | null, b: boolean | null): 'm' | 'd' | 'u' =>
+      a == null || b == null ? 'u' : a === b ? 'm' : 'd'
+    const compAny = r.comp as { poolType?: string | null; garageType?: string | null; constructionType?: string | null; foundationType?: string | null }
+    const subjAny = subject as { poolType?: string | null; garageType?: string | null; constructionType?: string | null; foundationType?: string | null }
+    const poolD = flagDim(present(subjAny.poolType), present(compAny.poolType))
+    const conD = strDim(subjAny.constructionType, compAny.constructionType)
+    const fndD = strDim(subjAny.foundationType, compAny.foundationType)
+    const garD = flagDim(present(subjAny.garageType), present(compAny.garageType))
+    // con/fnd mismatches already land in audit.recoverable via the match
+    // profile — only the new signals (pool, garage) count as extra diffs.
+    const featDiffs = [poolD, garD].filter((d) => d === 'd').length
     r.labels = {
       geo: r.profile.geoTier,
+      feat: `pool:${poolD}|con:${conD}|fnd:${fndD}|gar:${garD}`,
       sqft: physDim(r.profile.sqftDeltaPct, 10, 15, mod(PHYS.sqftDeltaPct.recoverable)),
       year: physDim(r.profile.yearBuiltDelta, 5, 10, mod(PHYS.yearBuiltDelta.recoverable)),
       lot: physDim(r.profile.lotDeltaPct, 25, 50, mod(PHYS.lotDeltaPct.recoverable)),
@@ -395,9 +534,13 @@ export function runDeterministicSelector(
       priceEvidence: r.audit.verdict === 'excluded' || r.audit.verdict === 'unpriceable' ? 'none'
         : asIsPriced(r) ? 'as_is' : isRenovated(r) ? 'arv' : 'median',
       sanity: r.audit.rules.includes('R4') ? 'anomalous' : 'clean',
-      diffs: r.audit.recoverable.length,
+      diffs: r.audit.recoverable.length + featDiffs,
     }
   }
+  // type-selector seat: the typescript lane lets a reasoning model pick
+  // among the labeled eligible set — expose the ranked pool after labels
+  // and every hard gate have landed, before the code pick runs.
+  opts?.onRanked?.(ranked, pocketValues)
   const arvPool = clean.filter((r) => !asIsPriced(r) && isRenovated(r)).sort(rank)
   const medianPool = clean.filter((r) => !asIsPriced(r) && !isRenovated(r)).sort(rank)
   const medianFallback = arvPool.length === 0
@@ -827,7 +970,13 @@ function remedySelection(
     if (/outside the selected-evidence envelope/i.test(f)) {
       const prices = pickPrices()
       if (prices.length) {
-        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices) * 0.75), Math.max(...prices) * 1.25) / 500) * 500
+        // $500 rounding can push the value back over the bound it was
+        // just clamped to (e.g. cap 531250 -> 531500) — re-clamp hard so
+        // the repair never emits a still-outside ARV.
+        const lo = Math.min(...prices) * 0.75
+        const hi = Math.max(...prices) * 1.25
+        const rounded = Math.round(Math.min(Math.max(arv, lo), hi) / 500) * 500
+        const clamped = Math.min(Math.max(rounded, Math.ceil(lo)), Math.floor(hi))
         if (clamped !== arv) { arv = clamped; changed = true }
       }
       continue
@@ -843,7 +992,10 @@ function remedySelection(
     if (/extrapolat|above the (envelope|top)|beyond the/i.test(f)) {
       const prices = pickPrices()
       if (prices.length) {
-        const clamped = Math.round(Math.min(Math.max(arv, Math.min(...prices)), Math.max(...prices)) / 500) * 500
+        const lo2 = Math.min(...prices)
+        const hi2 = Math.max(...prices)
+        const rounded = Math.round(Math.min(Math.max(arv, lo2), hi2) / 500) * 500
+        const clamped = Math.min(Math.max(rounded, Math.ceil(lo2)), Math.floor(hi2))
         if (clamped !== arv) { arv = clamped; changed = true }
       }
     }

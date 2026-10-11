@@ -32,6 +32,7 @@ import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
 import { runOpusAppraiser } from '../services/evaluation/appraiser'
 import { runDeterministicSelector } from '../services/evaluation/selector'
+import { runDecisionsSeat } from '../services/evaluation/decisions-seat'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
 import { priceAgentRenovation } from '../services/evaluation/renovation'
@@ -174,7 +175,7 @@ export interface StartStreamingRequest {
   }
   /** 'agent' pauses the run at the evidence-complete boundary and waits for
    *  the Evaluation Agent's comp-selection verdict instead of evaluateB. */
-  harness?: 'agent' | 'corelogic'
+  harness?: 'agent' | 'corelogic' | 'typescript' | 'finale'
 }
 
 export class AnalysisJobDO {
@@ -654,7 +655,7 @@ export class AnalysisJobDO {
     const compEvidenceOn =
       clefDigestsOn ||
       config.harness === 'corelogic' ||
-      (config.harness === 'agent' && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
+      ((config.harness === 'agent' || config.harness === 'finale') && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
 
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
     // search→scrape→Clef runs beside geo/enrich instead of behind it.
@@ -666,7 +667,11 @@ export class AnalysisJobDO {
         // no downstream lane can use.
         const prefetchCap = config.harness === 'corelogic'
           ? Math.min(Number(this.env.CLEF_COMP_MAX) || Infinity, Number(this.env.CORE_WORKING_POOL) || 30)
-          : (Number(this.env.CLEF_COMP_MAX) || Infinity)
+          // Finale: the spec's evidence set is the 15 closest comps —
+          // prefetching beyond it spends listing calls the seat never sees.
+          : config.harness === 'finale'
+            ? 15
+            : (Number(this.env.CLEF_COMP_MAX) || Infinity)
         const inputs = res.data.comparables.slice(0, prefetchCap).map((c) => ({
           propertyId: c.id,
           address: c.address,
@@ -1601,7 +1606,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      if (config.harness === 'agent' || config.harness === 'corelogic') {
+      if (config.harness === 'agent' || config.harness === 'corelogic' || config.harness === 'finale') {
         // Self-completing harness: phase 1 freezes the evidence bundle,
         // then the Opus appraiser reviews the complete dataset and posts
         // the final selection — verified by the deterministic gate, with
@@ -1612,7 +1617,7 @@ export class AnalysisJobDO {
         // of serially after it.
         // Pocket desirability is a haiku read only the model seat consumed —
         // the deterministic selector doesn't read it; skip the ~15s call.
-        const pocketDesirabilityPromise = config.harness === 'corelogic'
+        const pocketDesirabilityPromise = config.harness === 'corelogic' || config.harness === 'finale'
           ? Promise.resolve(null)
           : ratePocketDesirability(this.env, bundle.property).catch(() => null)
         const ctx = await performAnalysisPhase1({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
@@ -1637,10 +1642,18 @@ export class AnalysisJobDO {
         // engine below. Agent harness keeps the Sonnet appraiser.
         const appraisal = config.harness === 'corelogic'
           ? runDeterministicSelector(ctx, evidence)
-          : await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+          : config.harness === 'finale'
+            // Finale lane: TypeScript labels every comp (geo/physical/
+            // price/pocket-value/feat), Decisions scores each candidate's
+            // apples-to-apples fit, highest-probability picks drive the
+            // deterministic ARV.
+            ? await runDecisionsSeat(this.env, ctx, evidence).catch(() => null)
+            : await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
-        const seat = config.harness === 'corelogic' ? 'Selector' : `Opus (${appraisal?.model ?? 'unavailable'})`
+        const seat = config.harness === 'corelogic' ? 'Selector'
+          : config.harness === 'finale' ? `Decisions (${appraisal?.model ?? 'unavailable'})`
+          : `Opus (${appraisal?.model ?? 'unavailable'})`
         const appraiserNote = appraisal == null
           ? 'appraiser unavailable — deterministic engine completes'
           : decision
