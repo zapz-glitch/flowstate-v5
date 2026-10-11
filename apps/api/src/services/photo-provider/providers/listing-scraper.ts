@@ -170,6 +170,9 @@ RULES:
 3. Prefer full-resolution CDN URLs
 4. Return ONLY valid JSON, no markdown fences or explanation`
 
+/** Waits between retries when Scrapfly reports its concurrency cap (429). */
+const SCRAPFLY_CONCURRENCY_RETRY_MS = [2000, 4000, 8000]
+
 export class ListingPhotoScraper {
   private apiKey?: string
   private scrapflyApiKey?: string
@@ -249,9 +252,18 @@ export class ListingPhotoScraper {
       render_js: 'true',
     })
     if (residential) params.set('proxy_pool', 'public_residential_pool')
-    const resp = await fetch(`${endpoint}?${params}`, {
-      signal: AbortSignal.timeout(60_000),
-    })
+    // Scrapfly plans cap concurrent scrapes (429 while the cap is full).
+    // Wait for a slot instead of failing over to the next listing site,
+    // which would spend another search plus another full page scrape.
+    let resp: Response
+    for (let attempt = 0; ; attempt++) {
+      resp = await fetch(`${endpoint}?${params}`, {
+        signal: AbortSignal.timeout(60_000),
+      })
+      const wait = SCRAPFLY_CONCURRENCY_RETRY_MS[attempt]
+      if (resp.status !== 429 || wait == null) break
+      await new Promise((r) => setTimeout(r, wait))
+    }
     if (!resp.ok) throw new Error(`Scrapfly failed: ${resp.status}`)
     const data = (await resp.json()) as { result?: { status_code?: number; content?: string } }
     const content = data.result?.content

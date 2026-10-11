@@ -24,7 +24,7 @@ export interface WebSearchResult {
 
 const SCRAPFLY_SCRAPE_URL = 'https://api.scrapfly.io/scrape'
 /** Waits between retries when Scrapfly reports its concurrency cap (429). */
-const CONCURRENCY_RETRY_MS = [1000, 2000, 3000]
+const CONCURRENCY_RETRY_MS = [1000, 2000, 4000, 6000]
 
 export function isWebSearchAvailable(env: WebSearchEnv): boolean {
   return !!env.SCRAPFLY_API_KEY
