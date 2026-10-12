@@ -38,7 +38,8 @@ function mergeObservables(prev: CompObservables | null | undefined, next: CompOb
   return out as unknown as CompObservables
 }
 
-const SEAT_CAP = 10
+/** Imaging depth for the site pass — the top of the sorted candidate set. */
+const SITE_CAP = 15
 /** A pick needs real support — below the floor the deterministic seat keeps the pick. */
 const PROB_FLOOR = 0.4
 const GEO_RANK: Record<string, number> = { BLOCK_GROUP: 0, NEIGHBORHOOD: 1, SUBDIVISION: 2, TRACT: 3, OFF_POCKET: 4 }
@@ -98,25 +99,21 @@ export async function runDecisionsSeat(
   const subjectYear = subject.yearBuilt ?? null
   const evidenceRank = (r: RankedComp) =>
     r.labels?.priceEvidence === 'arv' ? 0 : r.labels?.priceEvidence === 'median' ? 1 : 2
-  const eligible = ranked
-    .filter((r) => r.audit.verdict === 'eligible' || r.audit.verdict === 'picked')
-    .sort((a, b) =>
-      evidenceRank(a) - evidenceRank(b)
-      || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
-      || (GEO_RANK[a.profile.geoTier] ?? 9) - (GEO_RANK[b.profile.geoTier] ?? 9)
-      || String(b.comp.saleDate ?? '').localeCompare(String(a.comp.saleDate ?? '')))
-    .slice(0, SEAT_CAP)
-  if (eligible.length === 0 && ranked.length > 0) {
-    // Never decline outright — the ruleset disqualified everyone, so seat
-    // the least-bad ranked comp and let the pick carry its own warning.
-    eligible.push(ranked[0]!)
-    base.debugNotes.push(`decisions-seat: 0 eligible — forced candidate ${ranked[0]!.id} (${ranked[0]!.audit.verdict})`)
-  }
-  if (eligible.length === 0) {
+  // The COMPLETE labeled candidate set — every ranked comp, best-evidence
+  // first, each carrying its audit verdict and exclusion reason. Code stages
+  // the evidence; the model decides. An excluded comp can still pick when
+  // its row's evidence beats the exclusion (below_market stays hard-vetoed —
+  // price labels are facts).
+  const candidates = ranked.slice().sort((a, b) =>
+    evidenceRank(a) - evidenceRank(b)
+    || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
+    || (GEO_RANK[a.profile.geoTier] ?? 9) - (GEO_RANK[b.profile.geoTier] ?? 9)
+    || String(b.comp.saleDate ?? '').localeCompare(String(a.comp.saleDate ?? '')))
+  if (candidates.length === 0) {
     base.debugNotes.push('decisions-seat: 0 comps in pool — deterministic seat')
     return base
   }
-  base.debugNotes.push(`decisions-seat: seat call → ${eligible.length} candidates (ranked=${ranked.length})`)
+  base.debugNotes.push(`decisions-seat: seat call → ${candidates.length} candidates (ranked=${ranked.length}, complete set)`)
 
   // Spec order step 5 — the imaging reads run only now, AFTER the TypeScript
   // labels (step 4) exist: satellite lot-premium/exposure reads, street-view
@@ -133,7 +130,10 @@ export async function runDecisionsSeat(
       fetchSatelliteTile(env, { latitude: subjLat ?? undefined, longitude: subjLng ?? undefined }).catch(() => null),
     ])
     let siteRead = 0
-    await Promise.all(eligible.map(async (r) => {
+    // Imaging depth: the top of the sorted set — where picks actually come
+    // from. The seat still SEES every candidate; the far tail doesn't burn
+    // tile fetches it will never need.
+    await Promise.all(candidates.slice(0, SITE_CAP).map(async (r) => {
       const ac = ctx.appraisalResult?.comparables?.find((c) => c.id === r.id) as
         { latitude?: number | null; longitude?: number | null; coverPhotoUrl?: string | null } | undefined
       const site = await decisionsCompObservables(env, {
@@ -160,7 +160,7 @@ export async function runDecisionsSeat(
         siteRead++
       }
     }))
-    base.debugNotes.push(`decisions-seat: site pass → ${siteRead}/${eligible.length} candidates imaged (labels first)`)
+    base.debugNotes.push(`decisions-seat: site pass → ${siteRead}/${Math.min(candidates.length, SITE_CAP)} candidates imaged (labels first)`)
   }
 
   // Every fact the model needs already lives in the row: the TS labels,
@@ -168,12 +168,14 @@ export async function runDecisionsSeat(
   // position, premium/exposure), and the pocket proof. The seat reads the
   // totality of each comp's dataset, not a hand-picked field.
   const subjectObs = evidence.subjectObservables ?? null
-  const rows = eligible.map((r) => {
+  const rows = candidates.map((r) => {
     const l = r.labels
     const ob = r.comp.observables ?? null
     const pp = pricePoint(r)
     return {
       id: r.id,
+      verdict: r.audit.verdict,
+      why: r.audit.reasons[0] ?? null,
       pricePoint: pp,
       salePrice: r.comp.salePrice,
       implied: impliedValue(r, subjSqft),
@@ -209,15 +211,17 @@ export async function runDecisionsSeat(
 
   const state = {
     task:
-      'Each question names a comparable sale and asks whether it is an ' +
-      'apples-to-apples ARV comparable for the subject at above-market or ' +
-      'at-market pricing. The labeled facts are the dataset — price labels ' +
-      'are facts (pricePoint below_market can NEVER price ARV), condition ' +
-      'fields are evidence you weigh. An apples-to-apples comp is: in the ' +
-      'subject pocket (or a pocket whose value proved similar — the row ' +
-      'passed R9), physically close on the big items (size, era, style, ' +
-      'pool/construction/garage matches), a plausible non-distressed sale, ' +
-      'and priced at or above the pocket median. Answer the probability ' +
+      'Each question names a comparable sale. A QUALIFIED comp for this ' +
+      'subject is: (1) in the subject pocket or a pocket with proven similar ' +
+      'value, (2) physically similar on the big items — size, era, style, ' +
+      'lot, pool/construction/foundation/garage matches, (3) a plausible ' +
+      'non-distressed sale — not investor-grade, not a flip acquisition, ' +
+      '(4) priced at or above the pocket median — above-market (renovated ' +
+      'evidence) or at-market. Every row is labeled: price labels are facts ' +
+      '(pricePoint below_market can NEVER price ARV), condition fields are ' +
+      'evidence you weigh. Rows marked verdict=excluded carry the code\'s ' +
+      'exclusion reason in `why` — override it only when the row\'s own ' +
+      'evidence proves the comp qualified anyway. Answer the probability ' +
       'the comp qualifies as ARV evidence for THIS subject.',
     // The entire subject profile the candidates are judged against — the
     // model answers 'how well does this comp represent THIS property'.
@@ -287,13 +291,13 @@ export async function runDecisionsSeat(
       const a = answers[name] as { probability?: number } | undefined
       return typeof a?.probability === 'number' ? a.probability : null
     }
-    const scored = eligible
+    const scored = candidates
       .map((r) => ({ r, fit: prob(`fit_${r.id}`), rep: prob(`rep_${r.id}`) }))
       .filter((x): x is { r: RankedComp; fit: number; rep: number } => x.fit != null && x.rep != null)
     if (!scored.length) {
       // Malformed/absent probabilities — still pick the best-ranked
       // candidate; a seat answer must exist, honestly labeled.
-      const r = eligible[0]!
+      const r = candidates[0]!
       scored.push({ r, fit: 0, rep: 0 })
       base.debugNotes.push(`decisions-seat: no probabilities returned — forced pick ${r.id}`)
     }
@@ -349,7 +353,7 @@ export async function runDecisionsSeat(
       .filter((v) => v > 0).sort((a, b) => a - b)
     let arv = implieds.length ? Math.round(implieds[Math.floor((implieds.length - 1) / 2)]) : 0
     const salePrices = ids
-      .map((id) => eligible.find((x) => x.id === id)!.comp.salePrice)
+      .map((id) => candidates.find((x) => x.id === id)!.comp.salePrice)
       .filter((p): p is number => p != null && p > 0)
     if (arv > 0 && salePrices.length) {
       const lo = Math.round(Math.min(...salePrices) * 0.75)
