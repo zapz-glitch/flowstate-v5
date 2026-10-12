@@ -362,6 +362,7 @@ export async function runDecisionsSeat(
       base.debugNotes.push(`decisions-seat: no answers returned — forced pick ${r.id}`)
     }
     if (modelBest === 'NONE_QUALIFIED') base.debugNotes.push('decisions-seat: model judged no candidate qualified — forcing least-bad pick')
+    else base.debugNotes.push(`decisions-seat: model preference → ${modelBest ?? '?'} (pref dist: ${Object.entries(pref).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([id, p]) => `${id}:${p.toFixed(2)}`).join(' ')})`)
     // Selection = Luna's relative preference over the qualified set, not a
     // TS blend: order by best_comp preference, keep comps the final call
     // passed (q_final >= 0.5) or that the model itself ranked first, and
