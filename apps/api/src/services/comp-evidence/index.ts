@@ -353,14 +353,14 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
-  // Owner-specified chain: the Redfin listing provider (Scrapfly scrape of
-  // the redfin.com listing page) is primary; the stingray fast-fetch is the
-  // fallback — its direct calls break under concurrency, so it only starts
-  // when the scrape misses or stalls. When the scrape stalls past 5s,
-  // stingray launches in parallel so a slow scrape can't starve the comp
-  // past the 30s batch deadline — the scrape's result still wins if it
-  // lands first. No Zillow in the lookup chain.
-  const scrapePromise = (async (): Promise<PropertyPhotos | null> => {
+  // Owner-specified chain: stingray (Redfin's JSON API — photos + details,
+  // no page render, ~1s) is primary; the Scrapfly page scrape only runs
+  // when stingray misses or stalls past 5s (hedged race — earlier runs
+  // showed stingray calls can break under 15-wide concurrency, so a slow
+  // stingray can't starve the comp past the 30s batch deadline either).
+  // No Zillow in the lookup chain.
+  let scrapePromise: Promise<PropertyPhotos | null> | null = null
+  const startScrape = () => (scrapePromise ??= (async (): Promise<PropertyPhotos | null> => {
     try {
       const photoService = createPhotoService(env, { provider: 'redfin', fallbacks: ['realtor'] })
       if (!photoService.isAvailable()) return null
@@ -371,18 +371,21 @@ export async function gatherCompConditionEvidence(
       })
       return result.success && result.data.photos.length > 0 ? result.data : null
     } catch { return null }
-  })()
-  let photos: PropertyPhotos | null = null
+  })())
+  const stingrayPromise = fetchRedfinListing(env, comp)
+    .then((p) => { if (p) p.source = 'redfin-stingray'; return p })
+    .catch(() => null)
   const first = await Promise.race([
-    scrapePromise.then(() => 'scrape' as const),
+    stingrayPromise.then(() => 'stingray' as const),
     new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 5000)),
   ])
-  if (first === 'scrape') {
-    photos = (await scrapePromise) ?? (await fetchRedfinListing(env, comp).catch(() => null))
-  } else {
-    const stingrayPromise = fetchRedfinListing(env, comp).catch(() => null)
-    photos = (await scrapePromise) ?? (await stingrayPromise)
-  }
+  if (first === 'stalled') startScrape()
+  const good = (p: Promise<PropertyPhotos | null>) =>
+    p.then((v) => v ?? Promise.reject<PropertyPhotos>(new Error('no listing')))
+  const candidates: Promise<PropertyPhotos | null>[] = [good(stingrayPromise)]
+  if (scrapePromise) candidates.push(good(scrapePromise))
+  let photos = await Promise.any(candidates).catch(() => null)
+  if (!photos && !scrapePromise) photos = await startScrape()
 
   if (!photos) {
     evidence.skippedReason = 'no_listing'
