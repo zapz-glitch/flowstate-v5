@@ -355,7 +355,7 @@ export async function gatherCompConditionEvidence(
   // Scrape-only chain: Scrapfly ASP page render is the single listing
   // source (stingray removed — its 3-ASP-call chain starved under the
   // same session pool it was meant to relieve). On a miss the lane
-  // settles 10s and retries once — transient ASP congestion clears
+  // settles 5s and retries once — transient ASP congestion clears
   // between attempts. No Zillow in the lookup chain.
   const scrape = async (): Promise<PropertyPhotos | null> => {
     try {
@@ -371,7 +371,7 @@ export async function gatherCompConditionEvidence(
   }
   let photos = await scrape()
   if (!photos) {
-    await new Promise((r) => setTimeout(r, 10_000))
+    await new Promise((r) => setTimeout(r, 5_000))
     photos = await scrape()
   }
 
@@ -760,8 +760,8 @@ export async function startCompEvidenceBatch(
   opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean; onEach?: (propertyId: string, ev: CompConditionEvidence | null) => void },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
-  const perComp = opts?.perCompTimeoutMs ?? 45_000
-  const deadline = opts?.globalDeadlineMs ?? 150_000
+  const perComp = opts?.perCompTimeoutMs ?? 30_000
+  const deadline = opts?.globalDeadlineMs ?? 60_000
   const laneCount = Math.min(opts?.lanes ?? 20, comps.length)
   // Decisions lane: gather every comp's listing + photos first, then run
   // the pool-level batch classify — the model sees all the data at the
