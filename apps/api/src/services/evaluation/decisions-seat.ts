@@ -83,8 +83,14 @@ export async function runDecisionsSeat(
       || (GEO_RANK[a.profile.geoTier] ?? 9) - (GEO_RANK[b.profile.geoTier] ?? 9)
       || String(b.comp.saleDate ?? '').localeCompare(String(a.comp.saleDate ?? '')))
     .slice(0, SEAT_CAP)
+  if (eligible.length === 0 && ranked.length > 0) {
+    // Never decline outright — the ruleset disqualified everyone, so seat
+    // the least-bad ranked comp and let the pick carry its own warning.
+    eligible.push(ranked[0]!)
+    base.debugNotes.push(`decisions-seat: 0 eligible — forced candidate ${ranked[0]!.id} (${ranked[0]!.audit.verdict})`)
+  }
   if (eligible.length === 0) {
-    base.debugNotes.push('decisions-seat: 0 eligible comps — deterministic seat')
+    base.debugNotes.push('decisions-seat: 0 comps in pool — deterministic seat')
     return base
   }
   base.debugNotes.push(`decisions-seat: seat call → ${eligible.length} candidates (ranked=${ranked.length})`)
@@ -217,8 +223,11 @@ export async function runDecisionsSeat(
       .map((r) => ({ r, fit: prob(`fit_${r.id}`), rep: prob(`rep_${r.id}`) }))
       .filter((x): x is { r: RankedComp; fit: number; rep: number } => x.fit != null && x.rep != null)
     if (!scored.length) {
-      base.debugNotes.push('decisions-seat: no probabilities returned — deterministic seat')
-      return base
+      // Malformed/absent probabilities — still pick the best-ranked
+      // candidate; a seat answer must exist, honestly labeled.
+      const r = eligible[0]!
+      scored.push({ r, fit: 0, rep: 0 })
+      base.debugNotes.push(`decisions-seat: no probabilities returned — forced pick ${r.id}`)
     }
     // Below-market labels are facts — a distressed/as-is sale can support
     // the floor but can never be an ARV pick regardless of probability.
@@ -229,9 +238,21 @@ export async function runDecisionsSeat(
       .map((x) => ({ ...x, p: Math.min(x.fit, x.rep) }))
       .sort((a, b) => b.p - a.p)
     const over = pickable.filter((x) => x.p >= PROB_FLOOR).slice(0, 3)
-    const picks = over.length ? over : pickable.slice(0, 1)
+    let forcedBelowMarket = false
+    let picks = over.length ? over : pickable.slice(0, 1)
+    if (!picks.length && scored.length) {
+      // Every candidate is below-market — the seat still must answer.
+      // Least-bad is the highest min(rep,fit) distressed comp; it prices
+      // the floor, flagged so the card and the gate see what it is.
+      forcedBelowMarket = true
+      const top = scored
+        .map((x) => ({ ...x, p: Math.min(x.fit, x.rep) }))
+        .sort((a, b) => b.p - a.p)[0]!
+      picks = [top]
+      base.debugNotes.push(`decisions-seat: all candidates below-market — forced floor pick ${top.r.id} (p=${top.p.toFixed(2)})`)
+    }
     if (!picks.length) {
-      base.debugNotes.push('decisions-seat: every candidate below-market — deterministic seat')
+      base.debugNotes.push('decisions-seat: no candidates at all — deterministic seat')
       return base
     }
     const ids = picks.map((x) => x.r.id)
@@ -269,8 +290,15 @@ export async function runDecisionsSeat(
       else if (arv < lo) arv = lo
     }
     if (arv <= 0) {
-      base.debugNotes.push('decisions-seat: no priceable implied value — deterministic seat')
-      return base
+      // No priceable implied value (missing sqft/salePrice) — the pick
+      // still stands; price falls back to the deterministic engine's ARV.
+      const baseArv = base.selection?.arv ?? base.selection?.arvEvidence ?? 0
+      if (baseArv <= 0) {
+        base.debugNotes.push('decisions-seat: no priceable value anywhere — deterministic seat')
+        return base
+      }
+      arv = baseArv
+      base.debugNotes.push(`decisions-seat: pick unpriced by implied value — ARV falls back to deterministic $${arv}`)
     }
     const poolP = prob('pool_quality') ?? 0
     const topP = picks[0]!.p
@@ -291,7 +319,7 @@ export async function runDecisionsSeat(
         arvEvidence: arv,
         conf,
         notes: `Decisions seat: ${note} — ARV $${arv.toLocaleString()}`,
-        flags: [...(base.selection?.flags ?? []), 'decisions_seat'],
+        flags: [...(base.selection?.flags ?? []), 'decisions_seat', ...(forcedBelowMarket ? ['below_market_pick'] : [])],
       },
     }
   } catch (e) {
