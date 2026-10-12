@@ -55,7 +55,7 @@ import type {
   RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
+import { gatherCompConditionEvidence, startCompEvidenceSource, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence, type CompEvidenceSource } from '../comp-evidence'
 import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
 import { fetchImageAsBase64 } from '../llm/image-utils'
@@ -185,7 +185,7 @@ export interface EvaluationParams {
    * pool. Comps absent from the map (pool-expansion refetches) get a top-up
    * batch inside evaluate.
    */
-  prefetchedCompEvidence?: Promise<Map<string, CompConditionEvidence | null> | null> | null
+  prefetchedCompEvidence?: Promise<CompEvidenceSource | null> | null
   /** corelogic-alpha working pool — comp ids the expensive lanes (evidence
    *  scrape, observables, Redfin details) may touch. Every geo/name match
    *  is kept by construction; capped-out comps are flagged, not removed,
@@ -942,7 +942,7 @@ export async function performAnalysisPhase1(
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
-          const early = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
+          const src = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
           // Scrape budget: cover-photo/description evidence is gathered
           // only for the best-ranked working comps (where picks actually
           // come from) — zero-yield markets (no live listings on sold
@@ -952,26 +952,33 @@ export async function performAnalysisPhase1(
           const scrapeCap = params.workingCompIds != null
             ? Math.min(Number(env.CORE_SCRAPE_MAX) || 15, clefInputs.length)
             : clefInputs.length
-          const missing = (early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs)
+          const missing = (src ? clefInputs.filter((c) => !src.covers(c.propertyId)) : clefInputs)
             .slice(0, scrapeCap)
           params.apiLedger?.record('scrape:comp-evidence', missing.length)
-          const filled = missing.length
-            ? await startCompEvidenceBatch(env, missing, {
+          // Streaming sources: each observable call starts the moment ITS
+          // comp's scrape lands — the slowest Redfin fetch no longer gates
+          // every Decisions read. `src` is the prefetch started at
+          // comp-land (already mid-flight); `src2` covers comps the
+          // prefetch missed, capped by the scrape budget.
+          const src2 = missing.length
+            ? startCompEvidenceSource(env, missing, {
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
                 // Post-geo classify runs just below — don't let the fallback
                 // gather pin geo-less per-comp reads the pool classify skips.
                 gatherOnly: !!env.ANTHROPIC_API_KEY ||
                   (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY),
               })
-            : new Map<string, CompConditionEvidence | null>()
-          // Classification runs after geo-stamps land — the classifier reads
-          // the GATED pool's geo fields (BG / neighborhood / tract), which
-          // didn't exist when the scrape started. Haiku is the comp
-          // classifier (no decision authority); Decisions is the fallback
-          // lane when the Anthropic key isn't configured.
-          const classifyInputs = clefInputs
-            .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
-            .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
+            : null
+          const evGet = (propertyId: string): Promise<CompConditionEvidence | null> =>
+            (src?.covers(propertyId) ? src.get(propertyId) : src2?.get(propertyId)) ?? Promise.resolve(null)
+          const evidenceMaps = () => Promise.all([
+            src?.done ?? Promise.resolve(null),
+            src2?.done ?? Promise.resolve(new Map<string, CompConditionEvidence | null>()),
+          ])
+          const classifyInputsFor = (early: Map<string, CompConditionEvidence | null> | null, filled: Map<string, CompConditionEvidence | null>) =>
+            clefInputs
+              .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
+              .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
           if (observablesOn) {
             // C1-C7 per comp — cover photo + description + closed price vs
             // the code-computed pocket benchmark. Parallel lanes. Runs over
@@ -982,7 +989,7 @@ export async function performAnalysisPhase1(
             const lane = async () => {
               while (oi < clefInputs.length) {
                 const comp = clefInputs[oi++]!
-                const ev = early?.get(comp.propertyId) ?? filled.get(comp.propertyId) ?? null
+                const ev = await evGet(comp.propertyId)
                 const ppsf = comp.salePrice && comp.squareFeet ? comp.salePrice / comp.squareFeet : null
                 params.apiLedger?.record('decisions:comp-observables')
                 const ob = await decisionsCompObservables(env, {
@@ -1043,6 +1050,8 @@ export async function performAnalysisPhase1(
             // Decisions-outage rescue: the batch ran gatherOnly, so a dead
             // lane leaves every comp unclassified. Fall back to the legacy
             // classify path rather than appraising condition-blind.
+            const [early, filled] = await evidenceMaps()
+            const classifyInputs = classifyInputsFor(early, filled)
             if (Object.keys(compObservables).length === 0 && classifyInputs.length) {
               console.warn('[observables] lane answered 0 comps — falling back to comp classify')
               if (env.ANTHROPIC_API_KEY) {
@@ -1057,18 +1066,23 @@ export async function performAnalysisPhase1(
                 ).catch(() => null)
               }
             }
-          } else if (env.ANTHROPIC_API_KEY) {
-            await classifyCompPoolHaiku(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
-          } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
-            await classifyCompBatchDecisions(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
+          } else {
+            const [early, filled] = await evidenceMaps()
+            const classifyInputs = classifyInputsFor(early, filled)
+            if (env.ANTHROPIC_API_KEY) {
+              await classifyCompPoolHaiku(
+                env, classifyInputs,
+                { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+              ).catch(() => null)
+            } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+              await classifyCompBatchDecisions(
+                env, classifyInputs,
+                { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
+              ).catch(() => null)
+            }
           }
           console.log(`[observables] comp lane done — ${Object.keys(compObservables).length}/${clefInputs.length} answered`)
+          const [early, filled] = await evidenceMaps()
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null

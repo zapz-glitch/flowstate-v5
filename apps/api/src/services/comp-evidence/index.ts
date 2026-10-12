@@ -766,7 +766,7 @@ export async function classifyCompBatchDecisions(
 export async function startCompEvidenceBatch(
   env: Env,
   comps: CompEvidenceInput[],
-  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean },
+  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean; onEach?: (propertyId: string, ev: CompConditionEvidence | null) => void },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
   const perComp = opts?.perCompTimeoutMs ?? 30_000
@@ -792,6 +792,9 @@ export async function startCompEvidenceBatch(
         new Promise<null>((r) => setTimeout(() => r(null), perComp)),
       ]).catch(() => null)
       out.set(comp.propertyId, ev)
+      // Streaming hook: downstream lanes (comp observables) start on this
+      // comp's evidence now instead of waiting on the whole batch tail.
+      opts?.onEach?.(comp.propertyId, ev)
     }
   }
   await Promise.race([
@@ -808,4 +811,44 @@ export async function startCompEvidenceBatch(
     ).catch(() => null)
   }
   return out
+}
+
+export interface CompEvidenceSource {
+  /** Resolves the moment THIS comp's gather lands (null on miss/timeout). */
+  get(propertyId: string): Promise<CompConditionEvidence | null>
+  /** True when the comp is in this batch's coverage set (regardless of outcome). */
+  covers(propertyId: string): boolean
+  /** The full batch — resolves to the complete map when the batch ends. */
+  done: Promise<Map<string, CompConditionEvidence | null>>
+}
+
+/**
+ * Streaming wrapper over startCompEvidenceBatch: downstream lanes (comp
+ * observables) consume each comp's evidence as it lands instead of
+ * waiting on the slowest scrape in the batch.
+ */
+export function startCompEvidenceSource(
+  env: Env,
+  comps: CompEvidenceInput[],
+  opts?: Omit<Parameters<typeof startCompEvidenceBatch>[2], 'onEach'>,
+): CompEvidenceSource {
+  const resolvers = new Map<string, (ev: CompConditionEvidence | null) => void>()
+  const deferreds = new Map<string, Promise<CompConditionEvidence | null>>()
+  for (const comp of comps) {
+    deferreds.set(comp.propertyId, new Promise((r) => resolvers.set(comp.propertyId, r)))
+  }
+  const done = startCompEvidenceBatch(env, comps, {
+    ...opts,
+    onEach: (propertyId, ev) => resolvers.get(propertyId)?.(ev),
+  }).catch(() => new Map<string, CompConditionEvidence | null>()).then((filled) => {
+    // Global-deadline exits can leave comps never visited — settle their
+    // deferreds (data-only) so no consumer stalls on the batch tail.
+    for (const comp of comps) resolvers.get(comp.propertyId)?.(filled.get(comp.propertyId) ?? null)
+    return filled
+  })
+  return {
+    get: (id) => deferreds.get(id) ?? Promise.resolve(null),
+    covers: (id) => deferreds.has(id),
+    done,
+  }
 }

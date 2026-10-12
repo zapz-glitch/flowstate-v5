@@ -55,7 +55,7 @@ import {
   describeLadderConcessions, filtersForLadder, geoLevelForScope, ladderFactorAt, ladderLimitsAt, lastUsefulLadderStep,
 } from '../services/appraisal/filter-ladder'
 import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
-import { startCompEvidenceBatch } from '../services/comp-evidence'
+import { startCompEvidenceSource, type CompEvidenceSource } from '../services/comp-evidence'
 import { startCompDigestBatch, type CompDigest, type DigestComp, type DigestSubject } from '../services/comp-evidence/digest'
 import { isClefAvailable } from '../services/clef'
 import { isReasoningProviderAvailable } from '../services/llm'
@@ -659,7 +659,7 @@ export class AnalysisJobDO {
 
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
     // search→scrape→Clef runs beside geo/enrich instead of behind it.
-    const prefetchedCompEvidence = compsPromise.then(async (res) => {
+    const prefetchedCompEvidence = compsPromise.then(async (res): Promise<CompEvidenceSource | null> => {
       try {
         if (!res.success || !compEvidenceOn) return null
         // corelogic caps the working pool at CORE_WORKING_POOL distance-
@@ -686,7 +686,9 @@ export class AnalysisJobDO {
           squareFeet: c.squareFeet ?? undefined,
         }))
         apiLedger.record('scrape:comp-evidence', inputs.length)
-        const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
+        // Streaming source: evaluation's per-comp observable calls start
+        // on each scrape as it lands instead of the whole batch tail.
+        const evidenceSource = startCompEvidenceSource(this.env, inputs, {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
           // Defer classification whenever a post-geo classifier will run —
           // this prefetch fires before census geo-stamps land, and the
@@ -705,7 +707,7 @@ export class AnalysisJobDO {
               .catch(() => new Map()),
           )
         }
-        return await evidenceBatch
+        return evidenceSource
       } catch { return null }
     }).catch(() => null)
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
