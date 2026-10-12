@@ -710,7 +710,42 @@ export class AnalysisJobDO {
         return evidenceSource
       } catch { return null }
     }).catch(() => null)
-    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
+    // Subject photos — scrape + canonical-address retry ride as one promise
+    // handed to the eval; the pipeline awaits it where vision needs it, so
+    // a slow listing scrape never gates eval start.
+    const prefetchedPhotoBundlePromise: Promise<import('../services/photo-provider').PhotoBundle | null> = (async () => {
+      try {
+        const photoService = createPhotoService(this.env)
+        if (!photoService.isAvailable()) return null
+        let bundle = await photoService.fetchPhotoBundle({
+          propertyId: property.id,
+          address: property.address,
+          city: property.city,
+          state: property.state,
+          zipCode: property.zipCode,
+        }, [], { maxComps: 0, skipCache: !!config.skipCache })
+        // Photo retry — the listing scrape keys on the address string and
+        // misses on odd spellings. The county's canonical site address often
+        // matches what the listing sites index; retry once with it.
+        if (!bundle?.subject?.photos?.length && propertyApi.providerName === 'attom-mcp') {
+          const parcel = await resolveParcelApn(
+            `${property.address}, ${property.city}, ${property.state} ${property.zipCode ?? ''}`.trim(),
+          ).catch(() => null)
+          if (parcel?.siteAddress && !property.address.toUpperCase().startsWith(parcel.siteAddress.slice(0, 12))) {
+            console.log('[AnalysisJobDO] subject photos empty — retrying scrape with county canonical address', parcel.siteAddress)
+            bundle = await photoService.fetchPhotoBundle({
+              propertyId: property.id,
+              address: parcel.siteAddress,
+              city: property.city,
+              state: property.state,
+              zipCode: property.zipCode,
+            }, [], { maxComps: 0, skipCache: true })
+          }
+        }
+        return bundle
+      } catch { return null }
+    })()
+    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult] = await Promise.all([
       compsPromise,
       // Permits: fetched on every run (KV-cached) — the permit-age
       // thresholds drive major-item additions in the buybox derivation.
@@ -748,49 +783,7 @@ export class AnalysisJobDO {
             streetName: property.address?.replace(/^\d+\s+/, '') ?? undefined,
           }).catch(() => null)
         : Promise.resolve(null),
-      // Subject photos — subject-only scrape; the bundle feeds the Zillow
-      // field merge, the flood signal, vision, and R2 persistence inside
-      // performAnalysis. Prefetching here overlaps it with the comps fetch.
-      (async () => {
-        try {
-          const photoService = createPhotoService(this.env)
-          if (!photoService.isAvailable()) return null
-          return await photoService.fetchPhotoBundle({
-            propertyId: property.id,
-            address: property.address,
-            city: property.city,
-            state: property.state,
-            zipCode: property.zipCode,
-          }, [], { maxComps: 0, skipCache: !!config.skipCache })
-        } catch { return null }
-      })(),
     ])
-
-    // Photo retry — the listing scrape keys on the address string and
-    // misses on odd spellings (same class of gap as the ATTOM address
-    // matcher). The county's canonical site address often matches what
-    // the listing sites index; retry once with it.
-    let prefetchedPhotoBundle = prefetchedPhotoBundleRaw
-    if (!prefetchedPhotoBundle?.subject?.photos?.length && propertyApi.providerName === 'attom-mcp') {
-      const parcel = await resolveParcelApn(
-        `${property.address}, ${property.city}, ${property.state} ${property.zipCode ?? ''}`.trim(),
-      ).catch(() => null)
-      if (parcel?.siteAddress && !property.address.toUpperCase().startsWith(parcel.siteAddress.slice(0, 12))) {
-        console.log('[AnalysisJobDO] subject photos empty — retrying scrape with county canonical address', parcel.siteAddress)
-        try {
-          const photoService = createPhotoService(this.env)
-          if (photoService.isAvailable()) {
-            prefetchedPhotoBundle = await photoService.fetchPhotoBundle({
-              propertyId: property.id,
-              address: parcel.siteAddress,
-              city: property.city,
-              state: property.state,
-              zipCode: property.zipCode,
-            }, [], { maxComps: 0, skipCache: true })
-          }
-        } catch { /* retry is best-effort */ }
-      }
-    }
 
     // Zoning — county GIS point-in-polygon on the subject. ATTOM carries
     // no zoning dataset; the county layers populate the fields
@@ -1556,14 +1549,11 @@ export class AnalysisJobDO {
       // B retry attempt 3 — per-comp valuation/tax-history fetch for pool
       // members lacking AVM/land evidence.
       enrichComparables: (comps: NormalizedComparable[]) => { apiLedger.record('provider:comp-detail-enrich', comps.length); return propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null) },
-      // Sqft-conflict permit verification — ATTOM permits dataset per comp.
-      getCompPermits: (compId: string) =>
-        (apiLedger.record('provider:comp-permits'), propertyApi.getBuildingPermits(compId))
-          .then((r) => (r.success ? r.data.permits : null))
-          .catch(() => null),
+      // Comp permits dropped — permits are subject-only evidence now; the
+      // sqft-conflict verify path degrades to "unverified" without a fetch.
       // attom-mcp comp enrichment happens in the census gate above —
       // passers only, 1 provider call each.
-      prefetchedPhotoBundle,
+      prefetchedPhotoBundle: prefetchedPhotoBundlePromise,
       // Comp evidence started the moment comps landed — a Map promise the
       // pipeline awaits instead of launching its own batch late.
       prefetchedCompEvidence,

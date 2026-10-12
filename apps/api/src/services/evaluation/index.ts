@@ -172,7 +172,9 @@ export interface EvaluationParams {
    * `null` = prefetch ran and found nothing / provider unavailable — don't
    * refetch.
    */
-  prefetchedPhotoBundle?: PhotoBundle | null
+  // Resolved bundle or in-flight promise — the caller may hand back the
+  // scrape still running so the eval starts without waiting for it.
+  prefetchedPhotoBundle?: PhotoBundle | Promise<PhotoBundle | null> | null
   /**
    * Subject renovation assessment started by the caller the moment the
    * photo bundle resolved — vision overlaps the entire appraisal path
@@ -552,8 +554,9 @@ export async function performAnalysisPhase1(
     let photoBundle: PhotoBundle | null = null
     try {
       if (params.prefetchedPhotoBundle !== undefined) {
-        // Caller overlapped the scrape with the comps fetch — use it as-is.
-        photoBundle = params.prefetchedPhotoBundle
+        // Caller overlapped the scrape with the comps fetch — it may still
+        // be in flight; await it only here, where vision actually needs it.
+        photoBundle = await params.prefetchedPhotoBundle
       } else if (photoService.isAvailable()) {
         const subjectIdent: PropertyIdentifier = {
           propertyId: bundle.property.id,
