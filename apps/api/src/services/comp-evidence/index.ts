@@ -20,7 +20,6 @@
 
 import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { fetchRedfinListing } from '../photo-provider/providers/redfin-stingray'
 import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, CONDITION_QUESTIONS, buildConditionResult, type ClefImage, type CompConditionResult } from '../clef'
 import { createReasoningProvider, createSpecialistProvider } from '../llm'
 import { decisionsRun } from '../decisions'
@@ -353,14 +352,12 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
-  // Owner-specified chain: stingray (Redfin's JSON API — photos + details,
-  // no page render, ~1s) is primary; the Scrapfly page scrape only runs
-  // when stingray misses or stalls past 5s (hedged race — earlier runs
-  // showed stingray calls can break under 15-wide concurrency, so a slow
-  // stingray can't starve the comp past the 30s batch deadline either).
-  // No Zillow in the lookup chain.
-  let scrapePromise: Promise<PropertyPhotos | null> | null = null
-  const startScrape = () => (scrapePromise ??= (async (): Promise<PropertyPhotos | null> => {
+  // Scrape-only chain: Scrapfly ASP page render is the single listing
+  // source (stingray removed — its 3-ASP-call chain starved under the
+  // same session pool it was meant to relieve). On a miss the lane
+  // settles 10s and retries once — transient ASP congestion clears
+  // between attempts. No Zillow in the lookup chain.
+  const scrape = async (): Promise<PropertyPhotos | null> => {
     try {
       const photoService = createPhotoService(env, { provider: 'redfin', fallbacks: ['realtor'] })
       if (!photoService.isAvailable()) return null
@@ -371,21 +368,12 @@ export async function gatherCompConditionEvidence(
       })
       return result.success && result.data.photos.length > 0 ? result.data : null
     } catch { return null }
-  })())
-  const stingrayPromise = fetchRedfinListing(env, comp)
-    .then((p) => { if (p) p.source = 'redfin-stingray'; return p })
-    .catch(() => null)
-  const first = await Promise.race([
-    stingrayPromise.then(() => 'stingray' as const),
-    new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 5000)),
-  ])
-  if (first === 'stalled') startScrape()
-  const good = (p: Promise<PropertyPhotos | null>) =>
-    p.then((v) => v ?? Promise.reject<PropertyPhotos>(new Error('no listing')))
-  const candidates: Promise<PropertyPhotos | null>[] = [good(stingrayPromise)]
-  if (scrapePromise) candidates.push(good(scrapePromise))
-  let photos = await Promise.any(candidates).catch(() => null)
-  if (!photos && !scrapePromise) photos = await startScrape()
+  }
+  let photos = await scrape()
+  if (!photos) {
+    await new Promise((r) => setTimeout(r, 10_000))
+    photos = await scrape()
+  }
 
   if (!photos) {
     evidence.skippedReason = 'no_listing'
@@ -772,7 +760,7 @@ export async function startCompEvidenceBatch(
   opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean; onEach?: (propertyId: string, ev: CompConditionEvidence | null) => void },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
-  const perComp = opts?.perCompTimeoutMs ?? 30_000
+  const perComp = opts?.perCompTimeoutMs ?? 45_000
   const deadline = opts?.globalDeadlineMs ?? 150_000
   const laneCount = Math.min(opts?.lanes ?? 20, comps.length)
   // Decisions lane: gather every comp's listing + photos first, then run
