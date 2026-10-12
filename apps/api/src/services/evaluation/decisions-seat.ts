@@ -10,10 +10,33 @@
  * prices. A missing/malformed answer keeps the deterministic selection —
  * honest degrade, never invented data.
  */
-import { decisionsRun, isDecisionsAvailable, type DecisionsEnv } from '../decisions'
+import { decisionsRun, isDecisionsAvailable } from '../decisions'
+import type { Env } from '../../types'
 import type { Phase1Context, HarnessEvidence } from './index'
 import type { AppraiserResult } from './appraiser'
 import { runDeterministicSelector, type PocketValues, type RankedComp } from './selector'
+import {
+  decisionsCompObservables, fetchSatelliteTile, fetchStreetViewTile,
+  type CompObservables,
+} from './observable'
+import { pickFrontCoverImage } from './exterior-match'
+
+/** Merge a later partial observable read into the stamped one — defined
+ *  fields win, arrays concat; a null field never erases prior evidence. */
+function mergeObservables(prev: CompObservables | null | undefined, next: CompObservables | null): CompObservables | null {
+  if (!next) return prev ?? null
+  if (!prev) return next
+  const out = { ...prev } as Record<string, unknown>
+  for (const [k, v] of Object.entries(next)) {
+    if (v == null) continue
+    if (k === 'imagesRead' && Array.isArray(v)) {
+      out[k] = [...(prev.imagesRead ?? []), ...(v as string[])]
+      continue
+    }
+    out[k] = v
+  }
+  return out as unknown as CompObservables
+}
 
 const SEAT_CAP = 10
 /** A pick needs real support — below the floor the deterministic seat keeps the pick. */
@@ -41,7 +64,7 @@ function impliedValue(r: RankedComp, subjectSqft: number | null): number | null 
 }
 
 export async function runDecisionsSeat(
-  env: DecisionsEnv,
+  env: Env,
   ctx: Phase1Context,
   evidence: HarnessEvidence,
 ): Promise<AppraiserResult> {
@@ -94,6 +117,50 @@ export async function runDecisionsSeat(
     return base
   }
   base.debugNotes.push(`decisions-seat: seat call → ${eligible.length} candidates (ranked=${ranked.length})`)
+
+  // Spec order step 5 — the imaging reads run only now, AFTER the TypeScript
+  // labels (step 4) exist: satellite lot-premium/exposure reads, street-view
+  // physical match, cover-vs-cover exterior match. They stamp onto the same
+  // observable record so the seat row carries the totality when judged.
+  {
+    const subjLat = ctx.bundle?.property?.latitude ?? null
+    const subjLng = ctx.bundle?.property?.longitude ?? null
+    const subjectPhotos = ctx.photoBundle?.subject?.photos ?? []
+    const [subjectCoverImage, subjectStreetViewImage, subjectSatelliteImage] = await Promise.all([
+      pickFrontCoverImage(env, subjectPhotos).catch(() => null),
+      fetchStreetViewTile(env, { latitude: subjLat, longitude: subjLng }).catch(() => null),
+      fetchSatelliteTile(env, { latitude: subjLat ?? undefined, longitude: subjLng ?? undefined }).catch(() => null),
+    ])
+    let siteRead = 0
+    await Promise.all(eligible.map(async (r) => {
+      const ac = ctx.appraisalResult?.comparables?.find((c) => c.id === r.id) as
+        { latitude?: number | null; longitude?: number | null; coverPhotoUrl?: string | null } | undefined
+      const site = await decisionsCompObservables(env, {
+        comp: {
+          propertyId: r.id, address: r.comp.address, salePrice: r.comp.salePrice,
+          squareFeet: r.comp.squareFeet, yearBuilt: r.comp.yearBuilt, saleDate: r.comp.saleDate,
+          neighborhoodName: r.comp.neighborhoodName, censusTract: r.comp.censusTract,
+          sameBlockGroup: r.comp.sameBlockGroup, lotSizeAcres: r.comp.lotSizeAcres ?? null,
+          pool: r.comp.poolType ?? null,
+        },
+        salePrice: r.comp.salePrice ?? null,
+        ppsf: r.ppsf,
+        coverPhotoUrl: r.comp.coverPhotoUrl ?? ac?.coverPhotoUrl ?? null,
+        latitude: ac?.latitude ?? null,
+        longitude: ac?.longitude ?? null,
+        subjectCoverImage, subjectStreetViewImage, subjectSatelliteImage,
+        subjectAddress: evidence.subject.address ?? null,
+        subjectRef: evidence.subject,
+        benchmark: evidence.marketBenchmark ?? null,
+      }, { condition: false }).catch(() => null)
+      if (site) {
+        r.comp.observables = mergeObservables(r.comp.observables, site)
+        if (ctx.compObservables && r.comp.observables) ctx.compObservables[r.id] = r.comp.observables
+        siteRead++
+      }
+    }))
+    base.debugNotes.push(`decisions-seat: site pass → ${siteRead}/${eligible.length} candidates imaged (labels first)`)
+  }
 
   // Every fact the model needs already lives in the row: the TS labels,
   // the observables prior (proto's Decisions reads — condition, price

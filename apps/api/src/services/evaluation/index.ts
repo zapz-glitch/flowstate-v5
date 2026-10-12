@@ -184,12 +184,6 @@ export interface EvaluationParams {
    */
   prefetchedRenovation?: Promise<RenovationAssessment> | null
   /**
-   * Subject renovation assessment started by the caller the moment the
-   * photo bundle resolved — vision overlaps the entire appraisal path
-   * instead of starting when evaluate() first runs.
-   */
-  prefetchedRenovation?: Promise<RenovationAssessment> | null
-  /**
    * Comp-evidence batch started by the caller the moment comps landed —
    * evidence lanes run beside geo/enrich instead of waiting for the sorted
    * pool. Comps absent from the map (pool-expansion refetches) get a top-up
@@ -1058,7 +1052,7 @@ export async function performAnalysisPhase1(
                     subdivision: bundle.property.subdivision,
                   },
                   benchmark: marketBenchmark,
-                }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
+                }, { site: false }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
                 if (ob) compObservables[comp.propertyId] = ob
                 else console.warn('[observables] no observables for', comp.propertyId)
                 // Satellite site-exposure → siteInfluence: feeds the preset's
@@ -1133,9 +1127,15 @@ export async function performAnalysisPhase1(
   // with valuation null so the subject, the evaluated comp pool, and the
   // geo stamps are saved and viewable instead of erroring the search.
   const insufficient = appraisalResult.insufficientComps === true || enabledComps.length === 0
-  if (insufficient) {
+  // Finale spec order: the appraiser seat IS the rules check — a thin
+  // pre-seat pool is staged evidence, never a verdict. Only the legacy
+  // lanes stamp 'failed' here; the seat's own outcome is the verdict.
+  const seatWillDecide = params.harness === 'finale'
+  if (insufficient && !seatWillDecide) {
     step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
     fallbacksUsed.push('insufficient_comps')
+  } else if (insufficient) {
+    step('appraisal_rules', 'fallback', 'evidence pool thin pre-seat — verdict deferred to the appraiser seat')
   } else {
     step(
       'appraisal_rules',

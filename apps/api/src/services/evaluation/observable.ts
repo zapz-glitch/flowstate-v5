@@ -328,11 +328,14 @@ const SUBJECT_CONDITION_QUESTIONS = questionsWhere(SUBJECT_QUESTIONS, (name) => 
 
 const COMP_SATELLITE_NAMES = ['c8_premium_attributes', 'c9_site_exposure', 'c12_development_vintage']
 const COMP_STREET_NAMES = ['c10_physical_match']
-const COMP_SATELLITE_QUESTIONS = questionsWhere(COMP_QUESTIONS, (name) => COMP_SATELLITE_NAMES.includes(name))
+// c8p_* premium-probability reads judge the aerial — they ride the
+// satellite call (spec step 5), not the listing-condition call.
+const isCompSatellite = (name: string) => COMP_SATELLITE_NAMES.includes(name) || name.startsWith('c8p_')
+const COMP_SATELLITE_QUESTIONS = questionsWhere(COMP_QUESTIONS, isCompSatellite)
 const COMP_STREET_QUESTIONS = questionsWhere(COMP_QUESTIONS, (name) => COMP_STREET_NAMES.includes(name))
 const COMP_CONDITION_QUESTIONS = questionsWhere(
   COMP_QUESTIONS,
-  (name) => !COMP_SATELLITE_NAMES.includes(name) && !COMP_STREET_NAMES.includes(name),
+  (name) => !isCompSatellite(name) && !COMP_STREET_NAMES.includes(name),
 )
 
 // ─── Deterministic match profile (code, not model) ──────────────────────
@@ -892,8 +895,16 @@ export async function decisionsCompObservables(
     subjectRef?: MatchLike
     benchmark: PocketBenchmark | null
   },
+  /** Spec order split — the lane runs { site: false } (condition/cover/
+   *  description, spec step 2); the seat runs { condition: false } (satellite
+   *  premiums, street-view physical match, exterior match, spec step 5) after
+   *  the TypeScript labels exist. Omit to run every phase. */
+  phases?: { condition?: boolean; site?: boolean },
 ): Promise<CompObservables | null> {
   if (!isDecisionsAvailable(env)) return null
+  const wantCondition = phases?.condition !== false
+  const wantSite = phases?.site !== false
+  if (!wantCondition && !wantSite) return null
   const started = Date.now()
   const pos = input.ppsf != null && input.benchmark ? positionFor(input.ppsf, input.benchmark) : { tier: 'UNVERIFIED' as PriceTier, vsMedianPct: null }
   let img = input.listingImages?.[0] ?? input.coverImage ?? null
@@ -902,11 +913,13 @@ export async function decisionsCompObservables(
     if (fetched) img = { base64: fetched.base64, content_type: fetched.mimeType }
   }
   const listingImages = input.listingImages?.length ? input.listingImages : img ? [img] : []
-  const [satImg, satCloseImg, streetImg] = await Promise.all([
-    fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
-    fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }, 90).catch(() => null),
-    fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null),
-  ])
+  const [satImg, satCloseImg, streetImg] = wantSite
+    ? await Promise.all([
+        fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
+        fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }, 90).catch(() => null),
+        fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null),
+      ])
+    : [null, null, null]
   type Labeled = { label: string; content_type?: string; base64: string }
   const listingSet: Labeled[] = listingImages.map((im, i) => ({
     label: i === 0 ? 'comp listing cover photo' : `comp listing photo ${i + 1}`,
@@ -964,18 +977,22 @@ export async function decisionsCompObservables(
   }
 
   // Cover photo vs cover photo — its own two-image call.
-  const exteriorPromise = decisionsExteriorMatch(env, {
-    subjectCover: input.subjectCoverImage,
-    compCover: img,
-    subjectAddress: input.subjectAddress ?? null,
-    compAddress: (input.comp.address as string | undefined) ?? null,
-  }).catch(() => null)
+  const exteriorPromise = wantSite
+    ? decisionsExteriorMatch(env, {
+        subjectCover: input.subjectCoverImage,
+        compCover: img,
+        subjectAddress: input.subjectAddress ?? null,
+        compAddress: (input.comp.address as string | undefined) ?? null,
+      }).catch(() => null)
+    : Promise.resolve(null)
   const [conditionRes, satelliteRes, streetRes, exterior] = await Promise.all([
-    decisionsRun(env, { state: conditionState, questions: COMP_CONDITION_QUESTIONS, images: payload(listingSet) }).catch(() => null),
-    satelliteSet.length
+    wantCondition
+      ? decisionsRun(env, { state: conditionState, questions: COMP_CONDITION_QUESTIONS, images: payload(listingSet) }).catch(() => null)
+      : null,
+    wantSite && satelliteSet.length
       ? decisionsRun(env, { state: satelliteState, questions: COMP_SATELLITE_QUESTIONS, images: payload(satelliteSet) }).catch(() => null)
       : null,
-    streetSet.length
+    wantSite && streetSet.length
       ? decisionsRun(env, { state: streetState, questions: COMP_STREET_QUESTIONS, images: payload(streetSet) }).catch(() => null)
       : null,
     exteriorPromise,
