@@ -55,9 +55,12 @@ import type {
   RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { gatherCompConditionEvidence, startCompEvidenceBatch, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence } from '../comp-evidence'
-import { computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
+import { gatherCompConditionEvidence, startCompEvidenceSource, classifyCompBatchDecisions, classifyCompPoolHaiku, type CompConditionEvidence, type CompEvidenceSource } from '../comp-evidence'
+import { pickFrontCoverImage } from './exterior-match'
+import { noCompPassesRules } from './rule-passers'
+import { applySubjectTierVerdict, computePocketBenchmark, decisionsCompObservables, decisionsSubjectObservables, fetchStreetViewTile, fetchSatelliteTile, type CompObservables, type SubjectObservables, type PocketBenchmark } from './observable'
 import { isDecisionsAvailable } from '../decisions'
+import { fetchImageAsBase64 } from '../llm/image-utils'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
@@ -171,7 +174,9 @@ export interface EvaluationParams {
    * `null` = prefetch ran and found nothing / provider unavailable — don't
    * refetch.
    */
-  prefetchedPhotoBundle?: PhotoBundle | null
+  // Resolved bundle or in-flight promise — the caller may hand back the
+  // scrape still running so the eval starts without waiting for it.
+  prefetchedPhotoBundle?: PhotoBundle | Promise<PhotoBundle | null> | null
   /**
    * Subject renovation assessment started by the caller the moment the
    * photo bundle resolved — vision overlaps the entire appraisal path
@@ -184,7 +189,7 @@ export interface EvaluationParams {
    * pool. Comps absent from the map (pool-expansion refetches) get a top-up
    * batch inside evaluate.
    */
-  prefetchedCompEvidence?: Promise<Map<string, CompConditionEvidence | null> | null> | null
+  prefetchedCompEvidence?: Promise<CompEvidenceSource | null> | null
   /** corelogic-alpha working pool — comp ids the expensive lanes (evidence
    *  scrape, observables, Redfin details) may touch. Every geo/name match
    *  is kept by construction; capped-out comps are flagged, not removed,
@@ -210,7 +215,7 @@ export interface EvaluationParams {
    *  caller's appraisal overrides are verbatim — no DEFAULT_FILTERS /
    *  DEFAULT_ADJUSTMENTS injection — so enablement reflects only the hard
    *  data gates; the agent weighs the doctrine's geo/age/size preferences. */
-  harness?: 'agent' | 'corelogic' | 'typescript'
+  harness?: 'agent' | 'corelogic' | 'typescript' | 'finale'
 }
 
 export interface GroupBResult {
@@ -502,7 +507,7 @@ export async function performAnalysisPhase1(
   let filters: AppraisalFilter[]
   let adjustments: AppraisalAdjustment[]
 
-  if (params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript') {
+  if (params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript' || params.harness === 'finale') {
     // Ruleset-governed run — the caller's overrides are the whole grid.
     // No default injection: an empty override means "no filters", so comps
     // stay enabled unless a hard data gate fails. The agent weighs geo /
@@ -551,8 +556,9 @@ export async function performAnalysisPhase1(
     let photoBundle: PhotoBundle | null = null
     try {
       if (params.prefetchedPhotoBundle !== undefined) {
-        // Caller overlapped the scrape with the comps fetch — use it as-is.
-        photoBundle = params.prefetchedPhotoBundle
+        // Caller overlapped the scrape with the comps fetch — it may still
+        // be in flight; await it only here, where vision actually needs it.
+        photoBundle = await params.prefetchedPhotoBundle
       } else if (photoService.isAvailable()) {
         const subjectIdent: PropertyIdentifier = {
           propertyId: bundle.property.id,
@@ -840,10 +846,16 @@ export async function performAnalysisPhase1(
     .filter(inWorkingPool)
     .slice()
     .sort((a, b) =>
-      Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
-      || Number(b.isEnabled) - Number(a.isEnabled)
-      || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-    .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
+      params.harness === 'finale'
+        // Finale spec: the 15 closest-by-proximity comps go to Decisions —
+        // pure distance order, enabled hard-gates already ran.
+        ? (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+        : Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
+          || Number(b.isEnabled) - Number(a.isEnabled)
+          || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    .slice(0, params.harness === 'finale'
+      ? Math.min(Number(env.CLEF_COMP_MAX) || 15, 15)
+      : Number(env.CLEF_COMP_MAX) || Infinity)
   const compGeoById = new Map(bundle.comparables.map((c) => [c.id, c]))
   const clefInputs = clefCompsSorted.map((comp) => ({
     propertyId: comp.id,
@@ -872,7 +884,7 @@ export async function performAnalysisPhase1(
   // (S1-S7 subject / C1-C7 per comp) replace the whole-condition classify.
   // Price boundaries are code-computed; Decisions classifies, Sonnet
   // appraises. Falls back to the classify pool when Decisions is absent.
-  const observablesOn = (params.harness === 'agent' || params.harness === 'corelogic') && isDecisionsAvailable(env)
+  const observablesOn = (params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'finale') && isDecisionsAvailable(env)
   const marketBenchmark = observablesOn
     ? computePocketBenchmark(bundle.property, appraisalResult.comparables)
     : null
@@ -911,8 +923,7 @@ export async function performAnalysisPhase1(
         })
       }).catch((err) => { console.warn('[observables] subject call failed', err?.message ?? err); return null })
     : Promise.resolve(null)
-  // Subject street view — fetched once per eval, shared by every comp
-  // call's c10 physical-similarity read (its image is the reference pair).
+  // Subject street view — c10 fallback when no subject cover photo exists.
   const subjectStreetViewPromise = observablesOn
     ? fetchStreetViewTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
@@ -922,13 +933,19 @@ export async function performAnalysisPhase1(
   const subjectSatellitePromise = observablesOn
     ? fetchSatelliteTile(env, { latitude: bundle.property.latitude ?? null, longitude: bundle.property.longitude ?? null }).catch(() => null)
     : Promise.resolve(null)
+  // Subject cover photo — the listing photo that best shows the front of
+  // the house, saved once per eval as the reference image every comp's
+  // exterior match compares against.
+  const subjectCoverPromise = observablesOn
+    ? photoBundlePromise.then((pb) => pickFrontCoverImage(env, pb?.subject?.photos ?? [])).catch(() => null)
+    : Promise.resolve(null)
   const compEvidenceOn = photoLaneOn && (
     (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) ||
-    ((params.harness === 'agent' || params.harness === 'corelogic') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env))))
+    ((params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'finale') && (isReasoningProviderAvailable(env) || isClefAvailable(env) || isDecisionsAvailable(env))))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     compEvidenceOn
       ? (async () => {
-          const early = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
+          const src = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
           // Scrape budget: cover-photo/description evidence is gathered
           // only for the best-ranked working comps (where picks actually
           // come from) — zero-yield markets (no live listings on sold
@@ -938,26 +955,54 @@ export async function performAnalysisPhase1(
           const scrapeCap = params.workingCompIds != null
             ? Math.min(Number(env.CORE_SCRAPE_MAX) || 15, clefInputs.length)
             : clefInputs.length
-          const missing = (early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs)
+          const missing = (src ? clefInputs.filter((c) => !src.covers(c.propertyId)) : clefInputs)
             .slice(0, scrapeCap)
           params.apiLedger?.record('scrape:comp-evidence', missing.length)
-          const filled = missing.length
-            ? await startCompEvidenceBatch(env, missing, {
+          // Streaming sources: each observable call starts the moment ITS
+          // comp's scrape lands — the slowest Redfin fetch no longer gates
+          // every Decisions read. `src` is the prefetch started at
+          // comp-land (already mid-flight); `src2` covers comps the
+          // prefetch missed, capped by the scrape budget.
+          const src2 = missing.length
+            ? startCompEvidenceSource(env, missing, {
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
                 // Post-geo classify runs just below — don't let the fallback
                 // gather pin geo-less per-comp reads the pool classify skips.
                 gatherOnly: !!env.ANTHROPIC_API_KEY ||
                   (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY),
               })
-            : new Map<string, CompConditionEvidence | null>()
+            : null
+          const evGet = (propertyId: string): Promise<CompConditionEvidence | null> =>
+            (src?.covers(propertyId) ? src.get(propertyId) : src2?.get(propertyId)) ?? Promise.resolve(null)
+          const evidenceMaps = () => Promise.all([
+            src?.done ?? Promise.resolve(null),
+            src2?.done ?? Promise.resolve(new Map<string, CompConditionEvidence | null>()),
+          ])
+          const classifyInputsFor = (early: Map<string, CompConditionEvidence | null> | null, filled: Map<string, CompConditionEvidence | null>) =>
+            clefInputs
+              .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
+              .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
           // Classification runs after geo-stamps land — the classifier reads
           // the GATED pool's geo fields (BG / neighborhood / tract), which
           // didn't exist when the scrape started. Haiku is the comp
           // classifier (no decision authority); Decisions is the fallback
           // lane when the Anthropic key isn't configured.
-          const classifyInputs = clefInputs
-            .map((comp) => ({ evidence: early?.get(comp.propertyId) ?? filled.get(comp.propertyId), comp }))
-            .filter((e): e is { evidence: CompConditionEvidence; comp: (typeof clefInputs)[number] } => e.evidence != null)
+          // Comp condition classify. With CONDITION_READER=decisions the
+          // decision model reads the pool (condition, sale tier, and the
+          // renovation tier with a probability per tier) and falls back to
+          // the reasoning reader (haiku) for any comp it cannot answer.
+          // Without it, haiku is the reader. The two are not chained: the
+          // haiku pool read re-reads every comp another model stamped.
+          const classifyCompPool = async () => {
+            const subjectRef = { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined }
+            const [early, filled] = await evidenceMaps()
+            const classifyInputs = classifyInputsFor(early, filled)
+            if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+              await classifyCompBatchDecisions(env, classifyInputs, subjectRef).catch(() => null)
+            } else if (env.ANTHROPIC_API_KEY) {
+              await classifyCompPoolHaiku(env, classifyInputs, subjectRef).catch(() => null)
+            }
+          }
           if (observablesOn) {
             // C1-C7 per comp — cover photo + description + closed price vs
             // the code-computed pocket benchmark. Parallel lanes. Runs over
@@ -968,7 +1013,7 @@ export async function performAnalysisPhase1(
             const lane = async () => {
               while (oi < clefInputs.length) {
                 const comp = clefInputs[oi++]!
-                const ev = early?.get(comp.propertyId) ?? filled.get(comp.propertyId) ?? null
+                const ev = await evGet(comp.propertyId)
                 const ppsf = comp.salePrice && comp.squareFeet ? comp.salePrice / comp.squareFeet : null
                 params.apiLedger?.record('decisions:comp-observables')
                 const ob = await decisionsCompObservables(env, {
@@ -985,11 +1030,14 @@ export async function performAnalysisPhase1(
                   ppsf,
                   description: ev?.listing?.description ?? null,
                   coverImage: ev?._images?.[0] ?? null,
+                  listingImages: ev?._images ?? null,
                   coverPhotoUrl: ev?.listing?.coverPhotoUrl ?? null,
                   latitude: comp.latitude ?? null,
                   longitude: comp.longitude ?? null,
+                  subjectCoverImage: await subjectCoverPromise,
                   subjectStreetViewImage: await subjectStreetViewPromise,
                   subjectSatelliteImage: await subjectSatellitePromise,
+                  subjectAddress: bundle.property.address ?? null,
                   subjectRef: {
                     squareFeet: bundle.property.squareFeet, yearBuilt: bundle.property.yearBuilt,
                     lotSizeAcres: bundle.property.lotSizeAcres,
@@ -1004,7 +1052,7 @@ export async function performAnalysisPhase1(
                     subdivision: bundle.property.subdivision,
                   },
                   benchmark: marketBenchmark,
-                }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
+                }, { site: false }).catch((err) => { console.warn('[observables] comp call failed', err?.message ?? err); return null })
                 if (ob) compObservables[comp.propertyId] = ob
                 else console.warn('[observables] no observables for', comp.propertyId)
                 // Satellite site-exposure → siteInfluence: feeds the preset's
@@ -1028,35 +1076,40 @@ export async function performAnalysisPhase1(
             // Decisions-outage rescue: the batch ran gatherOnly, so a dead
             // lane leaves every comp unclassified. Fall back to the legacy
             // classify path rather than appraising condition-blind.
+            const [early, filled] = await evidenceMaps()
+            const classifyInputs = classifyInputsFor(early, filled)
             if (Object.keys(compObservables).length === 0 && classifyInputs.length) {
               console.warn('[observables] lane answered 0 comps — falling back to comp classify')
-              if (env.ANTHROPIC_API_KEY) {
-                await classifyCompPoolHaiku(
-                  env, classifyInputs,
-                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-                ).catch(() => null)
-              } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
-                await classifyCompBatchDecisions(
-                  env, classifyInputs,
-                  { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-                ).catch(() => null)
-              }
+              await classifyCompPool()
             }
-          } else if (env.ANTHROPIC_API_KEY) {
-            await classifyCompPoolHaiku(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
-          } else if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
-            await classifyCompBatchDecisions(
-              env, classifyInputs,
-              { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
-            ).catch(() => null)
+          } else {
+            await classifyCompPool()
           }
           console.log(`[observables] comp lane done — ${Object.keys(compObservables).length}/${clefInputs.length} answered`)
+          const [early, filled] = await evidenceMaps()
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null
+
+  // Subject condition FIRST — the renovation/curb-appeal verdict must land
+  // before the appraisal-rules pass stamps any evidence verdict on the run.
+  const renovation: RenovationAssessment = await visionAndPersist
+  step(
+    'renovation_assessment',
+    renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
+    renovation.renovationLevelIndex != null
+      ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
+      : `condition fetch completed — ${renovation.status}${renovation.error ? ` (${renovation.error})` : ''}`
+  )
+  if (renovation.status !== 'ok') {
+    fallbacksUsed.push(`vision:${renovation.status}`)
+  }
+  onProgress?.('Renovation level assessed')
+
+  // Subject curb appeal comes from the merged vision pass (one LLM call for
+  // both renovation level + curb-appeal condition).
+  const subjectCurbAppeal: CurbAppealCheck | null = renovation.curbAppeal ?? null
+
   if (arvComps.length > 0) {
     appraisalResult.insufficientComps = false
     step('appraisal_rules', 'completed',
@@ -1074,9 +1127,15 @@ export async function performAnalysisPhase1(
   // with valuation null so the subject, the evaluated comp pool, and the
   // geo stamps are saved and viewable instead of erroring the search.
   const insufficient = appraisalResult.insufficientComps === true || enabledComps.length === 0
-  if (insufficient) {
+  // Finale spec order: the appraiser seat IS the rules check — a thin
+  // pre-seat pool is staged evidence, never a verdict. Only the legacy
+  // lanes stamp 'failed' here; the seat's own outcome is the verdict.
+  const seatWillDecide = params.harness === 'finale'
+  if (insufficient && !seatWillDecide) {
     step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
     fallbacksUsed.push('insufficient_comps')
+  } else if (insufficient) {
+    step('appraisal_rules', 'fallback', 'evidence pool thin pre-seat — verdict deferred to the appraiser seat')
   } else {
     step(
       'appraisal_rules',
@@ -1088,30 +1147,6 @@ export async function performAnalysisPhase1(
   // Set-B is the only ARV path — it fills finalArv below; there is no
   // legacy blend.
   let finalArv: number | null = null
-
-  // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
-  // Subject-only — comps are never photo-scraped, so there is no per-comp
-  // vision pass. The renovation level drives the rehab tier; the curb-appeal
-  // condition is the subject's detected condition.
-  // Required step — the fetch always resolves a verdict object. Non-ok
-  // statuses are recorded in fallbacksUsed so the report exposes that the
-  // subject condition could not be verified from photos.
-  const renovation: RenovationAssessment = await visionAndPersist
-  step(
-    'renovation_assessment',
-    renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
-    renovation.renovationLevelIndex != null
-      ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
-      : `condition fetch completed — ${renovation.status}${renovation.error ? ` (${renovation.error})` : ''}`
-  )
-  if (renovation.status !== 'ok') {
-    fallbacksUsed.push(`vision:${renovation.status}`)
-  }
-  onProgress?.('Renovation level assessed')
-
-  // Subject curb appeal comes from the merged vision pass (one LLM call for
-  // both renovation level + curb-appeal condition).
-  const subjectCurbAppeal: CurbAppealCheck | null = renovation.curbAppeal ?? null
 
   // ── 4. Classifications — transaction evidence, not condition guessing ────
   // flip resale → after_renovation; distressed sale → as_is; ordinary sale
@@ -1557,6 +1592,10 @@ export async function performAnalysisPhase1(
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
   const subjectObservables = await subjectObservablesPromise.catch(() => null)
+  if (subjectObservables) {
+    subjectObservables.coverPhotoUrl = (await subjectCoverPromise)?.url ?? null
+    applySubjectTierVerdict(subjectObservables, renovation)
+  }
   // Clef digests settle inside the same window — stage A/B/C advisory
   // reads merged per comp for the harness evidence bundle.
   const compDigestMap = params.compDigests ? await params.compDigests.catch(() => null) : null
@@ -1693,9 +1732,15 @@ export async function performAnalysisPhase2(
         ...(detail ? { detail } : {}),
       })
     }
-    let bResult = agentSelection
-      ? adaptAgentSelection(agentSelection, toBComps(), appraisalResult.comparables)
-      : evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
+    // Model selects, code prices — the seat names WHICH comps drive
+    // (driverIds); evaluateB prices them with the full tricks engine:
+    // marginal sqft slope, land ladder, URAR cap, verification gating,
+    // anchor/self-heal, subject-units ceiling, bracket + confidence.
+    const seatDriverIds = agentSelection?.drivers ?? agentSelection?.selectedCompIds ?? null
+    let bResult = evaluateB(bSubjectFields, toBComps(), {
+      rehabCost: valuation?.totalRehabCost ?? null,
+      driverIds: seatDriverIds ?? undefined,
+    })
     let fails = verifyB(bResult)
     recordBAttempt(agentSelection ? 'agent selection' : 'attempt 1', bResult, fails,
       agentSelection ? { source: 'agent', notes: agentSelection.notes ?? null } : undefined)
@@ -2045,7 +2090,7 @@ export async function performAnalysisPhase2(
       // verdict; a deterministic-fallback run synthesizes the equivalent
       // selection from its own B result so it is graded the same way
       // (spec §4). Never blocks the response.
-      ...((params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript') && pipelineBResult != null
+      ...((params.harness === 'agent' || params.harness === 'corelogic' || params.harness === 'typescript' || params.harness === 'finale') && pipelineBResult != null
         ? {
             verdictGrade: gradeVerdict(
               buildHarnessEvidence(ctx),
@@ -2271,6 +2316,7 @@ export function toBCompsOf(
   compEvidenceCoverage?: Record<string, 'photo+desc' | 'photo' | 'desc'>,
 ): BComp[] {
   return comparables.map((comp) => ({
+    id: comp.id,
     address: comp.address ?? null,
     isEnabled: comp.isEnabled,
     salePrice: comp.salePrice ?? null,
@@ -2362,7 +2408,9 @@ function stampPoolVerification(
       bandRefPpsf: topBandRefPpsf,
     })
     const noise = TRANSACTION_NOISE_REASON[comp.evidenceVerification?.transactionCheck ?? '']
-    if (noise && comp.isEnabled) {
+    // A Decisions-seat pick is the run's ARV evidence — noise flags land
+    // on the card but never re-disable it.
+    if (noise && comp.isEnabled && !(comp as { seatPick?: boolean }).seatPick) {
       comp.isEnabled = false
       if (comp.evaluation) comp.evaluation.disableReasons = [...(comp.evaluation.disableReasons ?? []), noise]
     }
@@ -2405,7 +2453,11 @@ export interface AgentSelection {
  *  outcome appeal. Returns the list of failures; empty = accepted. */
 export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComparable[]): string[] {
   const fails: string[] = []
-  const enabled = new Map(comps.filter((c) => c.isEnabled && c.id).map((c) => [c.id, c] as const))
+  // When no comp passes the filter rules, the selection's job is to pick
+  // the comps closest to those rules — so every priced comp is eligible.
+  // As soon as one comp passes, only rule-passers are.
+  const eligible = noCompPassesRules(comps) ? comps : comps.filter((c) => c.isEnabled)
+  const enabled = new Map(eligible.filter((c) => c.id).map((c) => [c.id, c] as const))
   const picks = sel.selectedCompIds ?? []
   if (picks.length === 0) fails.push('empty selection — at least one comp is required')
   for (const id of picks) {
@@ -2598,8 +2650,8 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
         }
       : null,
     comps: ctx.appraisalResult.comparables.map((comp, i) => ({
-      id: comp.id,
       ...bcomps[i]!,
+      id: comp.id,
       priceLadder: compLadderPosition(comp, ladder),
       observables: ctx.compObservables?.[comp.id] ?? null,
     })),

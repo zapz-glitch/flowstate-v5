@@ -30,8 +30,9 @@ import {
 } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
-import { runOpusAppraiser } from '../services/evaluation/appraiser'
+import { runAssistShadowSelection, runOpusAppraiser } from '../services/evaluation/appraiser'
 import { runDeterministicSelector } from '../services/evaluation/selector'
+import { runDecisionsSeat } from '../services/evaluation/decisions-seat'
 import { runTypeSelector } from '../services/evaluation/type-selector'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
@@ -40,7 +41,7 @@ import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
 import { assessRenovationFromPhotos, unavailableAssessment } from '../services/vision/renovation'
 import { createPropertyApi } from '../services/property-api'
-import { mergeComparablePools } from '../services/property-api/comparable-pool'
+import { mergeComparablePools, nearestComparables } from '../services/property-api/comparable-pool'
 import {
   resolveCandidateLimit,
   providerMaxComps,
@@ -56,13 +57,18 @@ import {
   describeLadderConcessions, filtersForLadder, geoLevelForScope, ladderFactorAt, ladderLimitsAt, lastUsefulLadderStep,
 } from '../services/appraisal/filter-ladder'
 import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
-import { startCompEvidenceBatch, type CompConditionEvidence } from '../services/comp-evidence'
+import { startCompEvidenceSource, type CompEvidenceSource, startCompEvidenceBatch, type CompConditionEvidence } from '../services/comp-evidence'
 import { startCompDigestBatch, type CompDigest, type DigestComp, type DigestSubject } from '../services/comp-evidence/digest'
 import { isClefAvailable } from '../services/clef'
 import { isReasoningProviderAvailable } from '../services/llm'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
+import { withAssistArm, type AssistArm } from '../services/llm/assist-arms'
+import { evidenceStageEnv } from '../services/llm/stage-env'
+import { isGeoGateActive } from '../services/geo/geo-gate'
+import { assistModel } from '../services/evaluation/assist'
+import { loadCallLog, newCallLog, runWithCallLog, saveCallLog, summarizeCallLog } from '../services/observability/call-log'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
 import { createApiLedger } from '../services/api-ledger'
@@ -176,12 +182,24 @@ export interface StartStreamingRequest {
   }
   /** 'agent' pauses the run at the evidence-complete boundary and waits for
    *  the Evaluation Agent's comp-selection verdict instead of evaluateB. */
-  harness?: 'agent' | 'corelogic' | 'typescript'
+  harness?: 'agent' | 'corelogic' | 'typescript' | 'finale'
+  /** Assist-model A/B arm — pins the reasoning lane's model for this run
+   *  (A = haiku, B = DeepSeek). Unset = the deployment's own model. */
+  arm?: AssistArm
+  /** Job whose call log this run replays identical calls from, so two arms
+   *  evaluate the same provider data and decision-model answers. */
+  replayCallsFrom?: string
 }
 
 export class AnalysisJobDO {
   private state: DurableObjectState
   private env: Env
+  /** The deployment env as bound. */
+  private readonly baseEnv: Env
+  /** The run's full env (arm applied) — what the reasoning stage uses: the
+   *  appraiser and its sub-agent. `env` is the evidence-stage view of it,
+   *  which may hold the reasoning model back (REASONING_STAGE_ONLY). */
+  private reasoningEnv: Env
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
@@ -203,6 +221,8 @@ export class AnalysisJobDO {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
+    this.baseEnv = env
+    this.reasoningEnv = env
     this.persistence = new ChunkedJobState(state.storage)
     state.blockConcurrencyWhile(async () => {
       this.jobState = await this.persistence.read()
@@ -361,8 +381,10 @@ export class AnalysisJobDO {
     // SSE connection holding the object alive) lose the run mid-flight.
     this.runActive = true
     this.markEvalActive(body)
+    this.reasoningEnv = withAssistArm(this.baseEnv, body.arm)
+    this.env = evidenceStageEnv(this.reasoningEnv)
     this.state.waitUntil(
-      this.runStreamingAnalysis(body)
+      this.runRecorded(body, () => this.runStreamingAnalysis(body))
         .catch((err) => {
           console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
           const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
@@ -379,6 +401,32 @@ export class AnalysisJobDO {
     )
 
     return new Response('OK', { status: 200 })
+  }
+
+  /**
+   * Run the pipeline with every outbound API call recorded to this job's
+   * call log (kept 90 days). On by CALL_LOG_ENABLED, and always for an A/B
+   * arm or a replay run. A replay source must belong to the same user.
+   */
+  private async runRecorded(config: StartStreamingRequest, run: () => Promise<void>): Promise<void> {
+    const recording = this.env.CALL_LOG_ENABLED === 'true' || !!config.arm || !!config.replayCallsFrom
+    if (!recording) return run()
+    const source = config.replayCallsFrom ? await loadCallLog(this.env.API_CACHE, config.replayCallsFrom) : null
+    const replay = source && source.userId === config.userId ? source : null
+    const log = newCallLog({
+      jobId: config.jobId,
+      userId: config.userId,
+      address: config.search.address ?? config.search.streetAddress ?? null,
+      meta: { harness: config.harness ?? null, arm: config.arm ?? null, assistModel: assistModel(this.reasoningEnv) },
+      replayedFrom: replay ? replay.jobId : null,
+    })
+    try {
+      await runWithCallLog(log, { store: this.env.API_CACHE, replayFrom: replay }, run)
+    } finally {
+      const saved = await saveCallLog(this.env.API_CACHE, log)
+      const summary = summarizeCallLog(log)
+      console.log(`[call-log] ${config.jobId} ${saved ? 'saved' : 'NOT saved'} — ${log.entries.length} calls ${JSON.stringify(summary)}`)
+    }
   }
 
   private async runStreamingAnalysis(config: StartStreamingRequest): Promise<void> {
@@ -592,9 +640,21 @@ export class AnalysisJobDO {
     }
     if (config.enrichment?.permits !== false) sendProgress(permitsRequested())
 
-    const compsPromise = coreFamily
+    // COMP_POOL_NEAREST keeps only that many comps — the ones closest to the
+    // subject — as the whole pool: every read, and the appraiser's
+    // selection, works from those and nothing farther out.
+    const nearestCap = Number(this.env.COMP_POOL_NEAREST) || null
+    const compsPromise = (coreFamily
       ? propertyApi.getComparablesWithFallback(comparablesParams)
       : propertyApi.getComparables(comparablesParams)
+    ).then((res) => {
+      if (!res.success || !nearestCap) return res
+      const kept = nearestComparables(res.data.comparables, nearestCap)
+      if (kept.length < res.data.comparables.length) {
+        console.log(`[AnalysisJobDO] comp pool: kept the ${kept.length} nearest of ${res.data.comparables.length}`)
+      }
+      return { ...res, data: { ...res.data, comparables: kept } }
+    })
 
     // ── Clef digest passes — the agent-assist layer, three stages ──────
     // A rides the comps-landed tap (sale records only), B fires inside the
@@ -660,7 +720,7 @@ export class AnalysisJobDO {
     const compEvidenceOn =
       clefDigestsOn ||
       config.harness === 'corelogic' ||
-      (config.harness === 'agent' && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
+      ((config.harness === 'agent' || config.harness === 'finale') && (isReasoningProviderAvailable(this.env) || isClefAvailable(this.env)))
 
     // TypeScript lane's comp-condition fan-out — fired on the 12-comp
     // enriched shortlist (below) so listing truth reaches the pick seat
@@ -668,7 +728,7 @@ export class AnalysisJobDO {
     let typeCompEvidence: Promise<Map<string, CompConditionEvidence | null> | null> | null = null
     // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
     // search→scrape→Clef runs beside geo/enrich instead of behind it.
-    const prefetchedCompEvidence = compsPromise.then(async (res) => {
+    const prefetchedCompEvidence = compsPromise.then(async (res): Promise<CompEvidenceSource | null> => {
       try {
         if (!res.success || !compEvidenceOn) return null
         // corelogic caps the working pool at CORE_WORKING_POOL distance-
@@ -676,7 +736,11 @@ export class AnalysisJobDO {
         // no downstream lane can use.
         const prefetchCap = config.harness === 'corelogic'
           ? Math.min(Number(this.env.CLEF_COMP_MAX) || Infinity, Number(this.env.CORE_WORKING_POOL) || 30)
-          : (Number(this.env.CLEF_COMP_MAX) || Infinity)
+          // Finale: the spec's evidence set is the 15 closest comps —
+          // prefetching beyond it spends listing calls the seat never sees.
+          : config.harness === 'finale'
+            ? 15
+            : (Number(this.env.CLEF_COMP_MAX) || Infinity)
         const inputs = res.data.comparables.slice(0, prefetchCap).map((c) => ({
           propertyId: c.id,
           address: c.address,
@@ -691,7 +755,9 @@ export class AnalysisJobDO {
           squareFeet: c.squareFeet ?? undefined,
         }))
         apiLedger.record('scrape:comp-evidence', inputs.length)
-        const evidenceBatch = startCompEvidenceBatch(this.env, inputs, {
+        // Streaming source: evaluation's per-comp observable calls start
+        // on each scrape as it lands instead of the whole batch tail.
+        const evidenceSource = startCompEvidenceSource(this.env, inputs, {
           subject: { squareFeet: property.squareFeet ?? undefined, address: property.address ?? undefined },
           // Defer classification whenever a post-geo classifier will run —
           // this prefetch fires before census geo-stamps land, and the
@@ -710,10 +776,64 @@ export class AnalysisJobDO {
               .catch(() => new Map()),
           )
         }
-        return await evidenceBatch
+        return evidenceSource
       } catch { return null }
     }).catch(() => null)
-    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
+    // Subject photos — scrape + canonical-address retry ride as one promise
+    // handed to the eval; the pipeline awaits it where vision needs it, so
+    // a slow listing scrape never gates eval start.
+    const prefetchedPhotoBundlePromise: Promise<import('../services/photo-provider').PhotoBundle | null> = (async () => {
+      try {
+        const photoService = createPhotoService(this.env)
+        if (!photoService.isAvailable()) return null
+        let bundle = await photoService.fetchPhotoBundle({
+          propertyId: property.id,
+          address: property.address,
+          city: property.city,
+          state: property.state,
+          zipCode: property.zipCode,
+        }, [], { maxComps: 0, skipCache: !!config.skipCache })
+        // Photo retry — the listing scrape keys on the address string and
+        // misses on odd spellings. The county's canonical site address often
+        // matches what the listing sites index; retry once with it.
+        if (!bundle?.subject?.photos?.length && propertyApi.providerName === 'attom-mcp') {
+          const parcel = await resolveParcelApn(
+            `${property.address}, ${property.city}, ${property.state} ${property.zipCode ?? ''}`.trim(),
+          ).catch(() => null)
+          if (parcel?.siteAddress && !property.address.toUpperCase().startsWith(parcel.siteAddress.slice(0, 12))) {
+            console.log('[AnalysisJobDO] subject photos empty — retrying scrape with county canonical address', parcel.siteAddress)
+            bundle = await photoService.fetchPhotoBundle({
+              propertyId: property.id,
+              address: parcel.siteAddress,
+              city: property.city,
+              state: property.state,
+              zipCode: property.zipCode,
+            }, [], { maxComps: 0, skipCache: true })
+          }
+        }
+        return bundle
+      } catch { return null }
+    })()
+    // Subject renovation — fires the moment the photo bundle resolves and
+    // overlaps the whole comp pipeline (the vision condition read is a
+    // product requirement on the typescript lane).
+    const prefetchedRenovation = prefetchedPhotoBundlePromise.then((bundle) =>
+      bundle?.subject?.photos?.length
+        ? assessRenovationFromPhotos(this.env, [...bundle.subject.photos], {
+            address: property.address,
+            squareFeet: property.squareFeet,
+            yearBuilt: property.yearBuilt,
+            description: bundle.subject.description ?? null,
+          }).catch((e) =>
+            unavailableAssessment({
+              error: e instanceof Error ? e.message : 'Vision assessment failed',
+              limitations: ['Assessment call threw — no level invented'],
+            }))
+        : unavailableAssessment({
+            error: 'Subject photo scrape returned no photos',
+            limitations: ['photo bundle empty or unavailable'],
+          }))
+    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult] = await Promise.all([
       compsPromise,
       // Permits: fetched on every run (KV-cached) — the permit-age
       // thresholds drive major-item additions in the buybox derivation.
@@ -746,78 +866,12 @@ export class AnalysisJobDO {
       // Location risk (major roads, railroads, commercial) — fetched during
       // enrichment so it can deduct from valuation, not just flag post-hoc.
       // The street name lets detection classify fronting/backing/siding.
-      property.latitude && property.longitude
+      property.latitude && property.longitude && this.env.OSM_ENABLED !== 'false'
         ? detectOsmLocationRisks(property.latitude, property.longitude, 150, {
             streetName: property.address?.replace(/^\d+\s+/, '') ?? undefined,
           }).catch(() => null)
         : Promise.resolve(null),
-      // Subject photos — subject-only scrape; the bundle feeds the Zillow
-      // field merge, the flood signal, vision, and R2 persistence inside
-      // performAnalysis. Prefetching here overlaps it with the comps fetch.
-      // typescript lane keeps subject photos (vision condition is a product
-      // requirement); only the comp listing fan-out stays cut.
-      (async () => {
-        try {
-          const photoService = createPhotoService(this.env)
-          if (!photoService.isAvailable()) return null
-          return await photoService.fetchPhotoBundle({
-            propertyId: property.id,
-            address: property.address,
-            city: property.city,
-            state: property.state,
-            zipCode: property.zipCode,
-          }, [], { maxComps: 0, skipCache: !!config.skipCache })
-        } catch { return null }
-      })(),
     ])
-
-    // Photo retry — the listing scrape keys on the address string and
-    // misses on odd spellings (same class of gap as the ATTOM address
-    // matcher). The county's canonical site address often matches what
-    // the listing sites index; retry once with it.
-    let prefetchedPhotoBundle = prefetchedPhotoBundleRaw
-    if (!prefetchedPhotoBundle?.subject?.photos?.length && propertyApi.providerName === 'attom-mcp') {
-      const parcel = await resolveParcelApn(
-        `${property.address}, ${property.city}, ${property.state} ${property.zipCode ?? ''}`.trim(),
-      ).catch(() => null)
-      if (parcel?.siteAddress && !property.address.toUpperCase().startsWith(parcel.siteAddress.slice(0, 12))) {
-        console.log('[AnalysisJobDO] subject photos empty — retrying scrape with county canonical address', parcel.siteAddress)
-        try {
-          const photoService = createPhotoService(this.env)
-          if (photoService.isAvailable()) {
-            prefetchedPhotoBundle = await photoService.fetchPhotoBundle({
-              propertyId: property.id,
-              address: parcel.siteAddress,
-              city: property.city,
-              state: property.state,
-              zipCode: property.zipCode,
-            }, [], { maxComps: 0, skipCache: true })
-          }
-        } catch { /* retry is best-effort */ }
-      }
-    }
-
-    // Subject condition is the FIRST derived signal — the reno tier drives
-    // the buybox, so the vision call fires the moment the photo bundle
-    // resolves and overlaps the entire comp pipeline below.
-    const prefetchedRenovation = prefetchedPhotoBundle?.subject?.photos?.length
-      ? (async () => {
-          try {
-            return await assessRenovationFromPhotos(this.env, [...prefetchedPhotoBundle.subject!.photos], {
-              address: property.address,
-              squareFeet: property.squareFeet,
-              yearBuilt: property.yearBuilt,
-              description: prefetchedPhotoBundle.subject!.description ?? null,
-            })
-          } catch (e) {
-            return unavailableAssessment({
-              error: e instanceof Error ? e.message : 'Vision assessment failed',
-              limitations: ['Assessment call threw — no level invented'],
-            })
-          }
-        })()
-      : null
-
     // Zoning — county GIS point-in-polygon on the subject. ATTOM carries
     // no zoning dataset; the county layers populate the fields
     // detectLocationRisks already reads (commercial/mixed-use flags) and
@@ -953,7 +1007,7 @@ export class AnalysisJobDO {
     // stamp tract/BG/subdivision matches, enrich the in-pocket passers).
     // attom-only calls inside (market-context supplement, deed/bulk id
     // sets) degrade silently under other providers.
-    const geoGateActive = isAttomMcp || coreFamily
+    const geoGateActive = isGeoGateActive({ isAttomMcp, harness: config.harness })
     const gateAndEnrich = async (
       comps: NormalizedComparable[],
     ): Promise<NormalizedComparable[]> => {
@@ -1219,7 +1273,7 @@ export class AnalysisJobDO {
           // concurrent-request cap — every comp raced out at 25s. 4 lanes
           // stays under the cap; the batch is ~3 waves and still overlaps
           // enrich + labels + gates before the seat waits on it.
-          gatherOnly: false, lanes: 4, perCompTimeoutMs: 30_000, globalDeadlineMs: 95_000,
+          gatherOnly: false, lanes: 4, perCompTimeoutMs: 20_000, globalDeadlineMs: 95_000,
         }).catch(() => null)
         const enriched = await propertyApi.enrichComparables(shortlist, { concurrency: FAST_ENRICH })
         const enrichedByIdFast = new Map(enriched.map((e) => [e.id, e]))
@@ -1501,6 +1555,9 @@ export class AnalysisJobDO {
       }
       const newById = new Map(newCandidates.map((c) => [c.id, c]))
       enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
+      // The nearest-comp cap holds through a widening too: the wider search
+      // may swap in closer comps, never grow the pool past the cap.
+      enrichedComps = nearestComparables(enrichedComps, nearestCap)
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
       if (monthsBack != null) retrieval.monthsBack = monthsBack
@@ -1658,14 +1715,11 @@ export class AnalysisJobDO {
       // B retry attempt 3 — per-comp valuation/tax-history fetch for pool
       // members lacking AVM/land evidence.
       enrichComparables: (comps: NormalizedComparable[]) => { apiLedger.record('provider:comp-detail-enrich', comps.length); return propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null) },
-      // Sqft-conflict permit verification — ATTOM permits dataset per comp.
-      getCompPermits: (compId: string) =>
-        (apiLedger.record('provider:comp-permits'), propertyApi.getBuildingPermits(compId))
-          .then((r) => (r.success ? r.data.permits : null))
-          .catch(() => null),
+      // Comp permits dropped — permits are subject-only evidence now; the
+      // sqft-conflict verify path degrades to "unverified" without a fetch.
       // attom-mcp comp enrichment happens in the census gate above —
       // passers only, 1 provider call each.
-      prefetchedPhotoBundle,
+      prefetchedPhotoBundle: prefetchedPhotoBundlePromise,
       // Subject renovation assessment — fired the moment the photo bundle
       // resolved; vision overlaps the entire comp pipeline.
       prefetchedRenovation,
@@ -1713,7 +1767,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      if (config.harness === 'agent' || coreFamily) {
+      if (config.harness === 'agent' || coreFamily || config.harness === 'finale') {
         // Self-completing harness: phase 1 freezes the evidence bundle,
         // then the Opus appraiser reviews the complete dataset and posts
         // the final selection — verified by the deterministic gate, with
@@ -1747,19 +1801,34 @@ export class AnalysisJobDO {
         // Corelogic harness: code is the selection seat — no model call.
         // The gate still verifies; a reject completes on the deterministic
         // engine below. Agent harness keeps the Sonnet appraiser.
-        const appraisal = config.harness === 'agent'
-          ? await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+        // A/B runs only: the arm's assist model makes its own selection on
+        // the same evidence, beside the appraiser. Recorded, never applied.
+        // Pointless when that model already holds the appraiser seat.
+        const shadowPromise = config.arm && this.reasoningEnv.APPRAISER_SEAT !== 'reasoning'
+          ? runAssistShadowSelection(this.reasoningEnv, ctx, evidence).catch(() => null)
+          : Promise.resolve(null)
+        const appraisal = config.harness === 'corelogic'
+          ? runDeterministicSelector(ctx, evidence)
           : config.harness === 'typescript'
             // typescript lane: code labels every data set, the reasoning
             // model picks identical-or-closest (falls back to the
             // deterministic seat on any failure). Supervised price
             // segmentation — both band tails are outliers (owner spec).
             ? await runTypeSelector(this.env, ctx, evidence, { priceBand: { upper: 2.0, lower: 0.5 }, compEvidence: typeCompEvidence }).catch(() => null)
-            : runDeterministicSelector(ctx, evidence)
+            : config.harness === 'finale'
+              // Finale lane: TypeScript labels every comp (geo/physical/
+              // price/pocket-value/feat), Decisions scores each candidate's
+              // apples-to-apples fit, highest-probability picks drive the
+              // deterministic ARV.
+              ? await runDecisionsSeat(this.env, ctx, evidence).catch(() => null)
+              : await runOpusAppraiser(this.reasoningEnv, ctx, evidence).catch(() => null)
+        const shadowSelection = await shadowPromise
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
-        const seat = config.harness === 'agent' ? `Opus (${appraisal?.model ?? 'unavailable'})`
-          : config.harness === 'typescript' ? `Type (${appraisal?.model ?? 'selector'})` : 'Selector'
+        const seat = config.harness === 'corelogic' ? 'Selector'
+          : config.harness === 'typescript' ? `Type (${appraisal?.model ?? 'selector'})`
+          : config.harness === 'finale' ? `Decisions (${appraisal?.model ?? 'unavailable'})`
+          : `Opus (${appraisal?.model ?? 'unavailable'})`
         const appraiserNote = appraisal == null
           ? 'appraiser unavailable — deterministic engine completes'
           : decision
@@ -1835,6 +1904,13 @@ export class AnalysisJobDO {
                   classified: d.classified,
                 }]),
               ),
+            },
+            abTest: {
+              arm: config.arm ?? null,
+              assistModel: assistModel(this.reasoningEnv),
+              assistCalls: (appraisal as { assistCalls?: number } | null)?.assistCalls ?? 0,
+              replayedCallsFrom: config.replayCallsFrom ?? null,
+              shadowSelection,
             },
             opus: {
               model: appraisal?.model ?? null,
@@ -2579,7 +2655,7 @@ export class AnalysisJobDO {
         osmPromise = (async () => {
           try {
             const prop = config.bundle.property
-            if (prop.latitude && prop.longitude) {
+            if (prop.latitude && prop.longitude && this.env.OSM_ENABLED !== 'false') {
               const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
               if (osmResult.riskFlags.length > 0) {
                 const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []

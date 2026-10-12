@@ -20,7 +20,6 @@
 
 import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { fetchRedfinListing } from '../photo-provider/providers/redfin-stingray'
 import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, CONDITION_QUESTIONS, buildConditionResult, type ClefImage, type CompConditionResult } from '../clef'
 import { createReasoningProvider, createSpecialistProvider } from '../llm'
 import { decisionsRun } from '../decisions'
@@ -190,7 +189,7 @@ async function embedPhotos(photoUrls: string[]): Promise<ClefImage[]> {
 /** Evidence pin — comp stamps are cached by identity+sale so a re-run of
  *  the same report replays the SAME classification instead of re-rolling
  *  Clef + the listing scrape. A new sale produces a new key → re-stamp. */
-const EVIDENCE_TTL = 30 * 86400
+const EVIDENCE_TTL = 90 * 86400
 const evidenceKey = (c: CompEvidenceInput) =>
   `clef-evidence:${c.propertyId}:${c.saleDate ?? 'nosale'}:${c.salePrice ?? 0}`
 
@@ -353,14 +352,12 @@ export async function gatherCompConditionEvidence(
     investorSignalSources: [],
   }
 
-  // Owner-specified chain: the Redfin listing provider (Scrapfly scrape of
-  // the redfin.com listing page) is primary; the stingray fast-fetch is the
-  // fallback — its direct calls break under concurrency, so it only starts
-  // when the scrape misses or stalls. When the scrape stalls past 5s,
-  // stingray launches in parallel so a slow scrape can't starve the comp
-  // past the 30s batch deadline — the scrape's result still wins if it
-  // lands first. No Zillow in the lookup chain.
-  const scrapePromise = (async (): Promise<PropertyPhotos | null> => {
+  // Scrape-only chain: Scrapfly ASP page render is the single listing
+  // source (stingray removed — its 3-ASP-call chain starved under the
+  // same session pool it was meant to relieve). On a miss the lane
+  // settles 5s and retries once — transient ASP congestion clears
+  // between attempts. No Zillow in the lookup chain.
+  const scrape = async (): Promise<PropertyPhotos | null> => {
     try {
       const photoService = createPhotoService(env, { provider: 'redfin', fallbacks: ['realtor'] })
       if (!photoService.isAvailable()) return null
@@ -371,17 +368,11 @@ export async function gatherCompConditionEvidence(
       })
       return result.success && result.data.photos.length > 0 ? result.data : null
     } catch { return null }
-  })()
-  let photos: PropertyPhotos | null = null
-  const first = await Promise.race([
-    scrapePromise.then(() => 'scrape' as const),
-    new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 5000)),
-  ])
-  if (first === 'scrape') {
-    photos = (await scrapePromise) ?? (await fetchRedfinListing(env, comp).catch(() => null))
-  } else {
-    const stingrayPromise = fetchRedfinListing(env, comp).catch(() => null)
-    photos = (await scrapePromise) ?? (await stingrayPromise)
+  }
+  let photos = await scrape()
+  if (!photos) {
+    await new Promise((r) => setTimeout(r, 5_000))
+    photos = await scrape()
   }
 
   if (!photos) {
@@ -758,7 +749,7 @@ export async function classifyCompBatchDecisions(
 
 /**
  * Parallel comp-evidence fan-out — Firecrawl (search → scrape → photos+text)
- * into Clef, 15 lanes wide (Firecrawl's 25-browser plan leaves headroom for
+ * into Clef, 20 lanes wide (the ASP plan's session cap is the real gate;
  * the subject scrape + redfin lanes). Returns a propertyId → evidence map
  * so callers that start the batch early (the moment comps land, before
  * geo/enrich finishes) can hand the result into the pipeline as it sorts.
@@ -766,12 +757,12 @@ export async function classifyCompBatchDecisions(
 export async function startCompEvidenceBatch(
   env: Env,
   comps: CompEvidenceInput[],
-  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean },
+  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean; onEach?: (propertyId: string, ev: CompConditionEvidence | null) => void },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
-  const perComp = opts?.perCompTimeoutMs ?? 30_000
-  const deadline = opts?.globalDeadlineMs ?? 150_000
-  const laneCount = Math.min(opts?.lanes ?? 15, comps.length)
+  const perComp = opts?.perCompTimeoutMs ?? 20_000
+  const deadline = opts?.globalDeadlineMs ?? 60_000
+  const laneCount = Math.min(opts?.lanes ?? 20, comps.length)
   // Decisions lane: gather every comp's listing + photos first, then run
   // the pool-level batch classify — the model sees all the data at the
   // end, not comp-by-comp as each fetch lands. Clef lane keeps the
@@ -792,6 +783,9 @@ export async function startCompEvidenceBatch(
         new Promise<null>((r) => setTimeout(() => r(null), perComp)),
       ]).catch(() => null)
       out.set(comp.propertyId, ev)
+      // Streaming hook: downstream lanes (comp observables) start on this
+      // comp's evidence now instead of waiting on the whole batch tail.
+      opts?.onEach?.(comp.propertyId, ev)
     }
   }
   await Promise.race([
@@ -808,4 +802,44 @@ export async function startCompEvidenceBatch(
     ).catch(() => null)
   }
   return out
+}
+
+export interface CompEvidenceSource {
+  /** Resolves the moment THIS comp's gather lands (null on miss/timeout). */
+  get(propertyId: string): Promise<CompConditionEvidence | null>
+  /** True when the comp is in this batch's coverage set (regardless of outcome). */
+  covers(propertyId: string): boolean
+  /** The full batch — resolves to the complete map when the batch ends. */
+  done: Promise<Map<string, CompConditionEvidence | null>>
+}
+
+/**
+ * Streaming wrapper over startCompEvidenceBatch: downstream lanes (comp
+ * observables) consume each comp's evidence as it lands instead of
+ * waiting on the slowest scrape in the batch.
+ */
+export function startCompEvidenceSource(
+  env: Env,
+  comps: CompEvidenceInput[],
+  opts?: Omit<Parameters<typeof startCompEvidenceBatch>[2], 'onEach'>,
+): CompEvidenceSource {
+  const resolvers = new Map<string, (ev: CompConditionEvidence | null) => void>()
+  const deferreds = new Map<string, Promise<CompConditionEvidence | null>>()
+  for (const comp of comps) {
+    deferreds.set(comp.propertyId, new Promise((r) => resolvers.set(comp.propertyId, r)))
+  }
+  const done = startCompEvidenceBatch(env, comps, {
+    ...opts,
+    onEach: (propertyId, ev) => resolvers.get(propertyId)?.(ev),
+  }).catch(() => new Map<string, CompConditionEvidence | null>()).then((filled) => {
+    // Global-deadline exits can leave comps never visited — settle their
+    // deferreds (data-only) so no consumer stalls on the batch tail.
+    for (const comp of comps) resolvers.get(comp.propertyId)?.(filled.get(comp.propertyId) ?? null)
+    return filled
+  })
+  return {
+    get: (id) => deferreds.get(id) ?? Promise.resolve(null),
+    covers: (id) => deferreds.has(id),
+    done,
+  }
 }

@@ -14,6 +14,7 @@
 import { createOpenRouterProvider } from '../../llm'
 import type { PropertyIdentifier } from '../types'
 import { webSearch } from '../../web-search'
+import { REPLAYED_HEADER } from '../../observability/call-log'
 
 // ─── Site Adapters ─────────────────────────────────────────────────────────────
 
@@ -197,7 +198,7 @@ export class ListingPhotoScraper {
     this.openrouterApiKey = config.openrouterApiKey
     this.openrouterModel = config.openrouterModel ?? 'google/gemini-2.5-flash'
     this.cache = config.cache
-    this.cacheTtl = config.cacheTtl ?? 24 * 60 * 60
+    this.cacheTtl = config.cacheTtl ?? 90 * 24 * 60 * 60
   }
 
   private cacheKey(adapter: ListingSiteAdapter, property: PropertyIdentifier): string {
@@ -270,6 +271,8 @@ export class ListingPhotoScraper {
       })
       const wait = SCRAPFLY_CONCURRENCY_RETRY_MS[attempt]
       if (resp.status !== 429 || wait == null) break
+      // A replayed 429 comes from an earlier run's log — there is nothing to wait out.
+      if (resp.headers.get(REPLAYED_HEADER)) break
       await new Promise((r) => setTimeout(r, wait))
     }
     if (!resp.ok) throw new Error(`Scrapfly failed: ${resp.status}`)

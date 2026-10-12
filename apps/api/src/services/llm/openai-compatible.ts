@@ -189,11 +189,12 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
 export class OpenRouterProvider extends OpenAICompatibleProvider {
   readonly name = 'openrouter' as const
 
-  constructor(config: { apiKey: string; model?: string; maxTokens?: number }) {
+  constructor(config: { apiKey: string; model?: string; maxTokens?: number; timeout?: number }) {
     super({
       apiKey: config.apiKey,
       model: config.model ?? 'google/gemini-2.0-flash-001',
       maxTokens: config.maxTokens,
+      timeout: config.timeout,
       baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
     })
   }
@@ -205,6 +206,8 @@ export function createOpenRouterProvider(config: {
   apiKey: string
   model?: string
   maxTokens?: number
+  /** Request timeout in ms — default 60s */
+  timeout?: number
 }): OpenRouterProvider {
   return new OpenRouterProvider(config)
 }
