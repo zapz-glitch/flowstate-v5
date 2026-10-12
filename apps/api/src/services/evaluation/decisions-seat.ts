@@ -211,18 +211,35 @@ export async function runDecisionsSeat(
 
   const state = {
     task:
-      'Each question names a comparable sale. A QUALIFIED comp for this ' +
-      'subject is: (1) in the subject pocket or a pocket with proven similar ' +
-      'value, (2) physically similar on the big items — size, era, style, ' +
-      'lot, pool/construction/foundation/garage matches, (3) a plausible ' +
-      'non-distressed sale — not investor-grade, not a flip acquisition, ' +
-      '(4) priced at or above the pocket median — above-market (renovated ' +
-      'evidence) or at-market. Every row is labeled: price labels are facts ' +
-      '(pricePoint below_market can NEVER price ARV), condition fields are ' +
-      'evidence you weigh. Rows marked verdict=excluded carry the code\'s ' +
-      'exclusion reason in `why` — override it only when the row\'s own ' +
-      'evidence proves the comp qualified anyway. Answer the probability ' +
-      'the comp qualifies as ARV evidence for THIS subject.',
+      'Each question names a comparable sale. Judge under OUR APPRAISAL ' +
+      'DOCTRINE:\n' +
+      'A QUALIFIED comp is: (1) in the subject pocket (same block group, ' +
+      'then tract, then neighborhood — a comp across a major road is a ' +
+      'different pocket even inside the census polygon) or a pocket with ' +
+      'proven similar value; (2) physically similar on the big items — ' +
+      'size, era, style, lot, construction; (3) a plausible non-distressed ' +
+      'arm\'s-length sale — not investor-grade, not a flip acquisition, ' +
+      'not divergent from its own AVM; (4) priced at or above the pocket ' +
+      'median — above-market (renovated evidence) or at-market.\n' +
+      'EVIDENCE HIERARCHY: price labels are facts (pricePoint ' +
+      'below_market can NEVER price ARV — distressed/as-is evidence only ' +
+      'ever prices the floor); condition fields are evidence you weigh. ' +
+      'Facts outrank evidence.\n' +
+      'SELECTION DOCTRINE: the best comp is the most-similar VERIFIED ' +
+      'sale — close beats cheap, verified beats shiny. A sale needing ' +
+      'large adjustments (>25% of its price) or sitting far above the ' +
+      'pocket (>30-60%) is bound-not-driver: it can support the range but ' +
+      'must never lead the answer. A stale or divergent sale can inform ' +
+      'context, never drive. Extra square footage on a comp is worth less ' +
+      'per foot than its average $/sf — do not credit a bigger comp\'s raw ' +
+      'price as the subject\'s value. An as-is pool yields an as-is value, ' +
+      'never an ARV — when nothing qualifies, say so via NONE_QUALIFIED ' +
+      'rather than picking a floor sale as an ARV comp.\n' +
+      'Rows marked verdict=excluded carry the code\'s exclusion reason in ' +
+      '`why` — override it only when the row\'s own evidence proves the ' +
+      'comp qualified anyway (exclusions are priors, not verdicts you ' +
+      'must echo). Answer the probability each comp qualifies as ARV ' +
+      'evidence for THIS subject.',
     // The entire subject profile the candidates are judged against — the
     // model answers 'how well does this comp represent THIS property'.
     subject: {
