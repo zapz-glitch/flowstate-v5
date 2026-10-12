@@ -235,6 +235,24 @@ export async function runDecisionsSeat(
       return base
     }
     const ids = picks.map((x) => x.r.id)
+    // A seat pick IS the ARV evidence — re-enable it on the saved pool
+    // (an upstream audit may have disabled it) so the card, enabledCount
+    // and the enabled-comp Set-B path all see the selection.
+    for (const x of picks) {
+      x.r.comp.isEnabled = true
+      delete (x.r.comp as { disableReasons?: string[] }).disableReasons
+      // The saved pool reads appraisalResult.comparables — a different
+      // object set than evidence.comps. Flip the same comp there too.
+      const appraised = ctx.appraisalResult?.comparables?.find((c) => c.id === x.r.id)
+      if (appraised) {
+        appraised.isEnabled = true
+        ;(appraised as { seatPick?: boolean }).seatPick = true
+        if (appraised.evaluation) appraised.evaluation.disableReasons = []
+      }
+    }
+    // A landed pick IS ARV evidence — the pre-seat insufficient verdict no
+    // longer describes this run.
+    if (ctx.appraisalResult) ctx.appraisalResult.insufficientComps = false
     // ARV is code: median implied value of the picks (marginal-sqft taper),
     // clamped inside the picks' own sale-price envelope for the gate.
     const implieds = picks

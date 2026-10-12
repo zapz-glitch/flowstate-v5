@@ -2394,7 +2394,9 @@ function stampPoolVerification(
       bandRefPpsf: topBandRefPpsf,
     })
     const noise = TRANSACTION_NOISE_REASON[comp.evidenceVerification?.transactionCheck ?? '']
-    if (noise && comp.isEnabled) {
+    // A Decisions-seat pick is the run's ARV evidence — noise flags land
+    // on the card but never re-disable it.
+    if (noise && comp.isEnabled && !(comp as { seatPick?: boolean }).seatPick) {
       comp.isEnabled = false
       if (comp.evaluation) comp.evaluation.disableReasons = [...(comp.evaluation.disableReasons ?? []), noise]
     }
