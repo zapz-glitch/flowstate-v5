@@ -140,8 +140,8 @@ export interface LLMRequest {
   /** Enable reasoning/thinking mode */
   reasoning?: {
     enabled: boolean
-    /** Reasoning effort: xhigh, high, medium, low, minimal */
-    effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'minimal'
+    /** Reasoning effort: max, xhigh, high, medium, low, minimal */
+    effort?: 'max' | 'xhigh' | 'high' | 'medium' | 'low' | 'minimal'
   }
 }
 

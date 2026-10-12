@@ -30,7 +30,7 @@ import {
 } from '../services/evaluation'
 import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
-import { runOpusAppraiser } from '../services/evaluation/appraiser'
+import { runAssistShadowSelection, runOpusAppraiser } from '../services/evaluation/appraiser'
 import { runDeterministicSelector } from '../services/evaluation/selector'
 import { runDecisionsSeat } from '../services/evaluation/decisions-seat'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
@@ -39,7 +39,7 @@ import { priceAgentRenovation } from '../services/evaluation/renovation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
 import { createPropertyApi } from '../services/property-api'
-import { mergeComparablePools } from '../services/property-api/comparable-pool'
+import { mergeComparablePools, nearestComparables } from '../services/property-api/comparable-pool'
 import {
   resolveCandidateLimit,
   providerMaxComps,
@@ -62,6 +62,11 @@ import { isReasoningProviderAvailable } from '../services/llm'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
+import { withAssistArm, type AssistArm } from '../services/llm/assist-arms'
+import { evidenceStageEnv } from '../services/llm/stage-env'
+import { isGeoGateActive } from '../services/geo/geo-gate'
+import { assistModel } from '../services/evaluation/assist'
+import { loadCallLog, newCallLog, runWithCallLog, saveCallLog, summarizeCallLog } from '../services/observability/call-log'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
 import { createApiLedger } from '../services/api-ledger'
@@ -176,11 +181,23 @@ export interface StartStreamingRequest {
   /** 'agent' pauses the run at the evidence-complete boundary and waits for
    *  the Evaluation Agent's comp-selection verdict instead of evaluateB. */
   harness?: 'agent' | 'corelogic' | 'typescript' | 'finale'
+  /** Assist-model A/B arm — pins the reasoning lane's model for this run
+   *  (A = haiku, B = DeepSeek). Unset = the deployment's own model. */
+  arm?: AssistArm
+  /** Job whose call log this run replays identical calls from, so two arms
+   *  evaluate the same provider data and decision-model answers. */
+  replayCallsFrom?: string
 }
 
 export class AnalysisJobDO {
   private state: DurableObjectState
   private env: Env
+  /** The deployment env as bound. */
+  private readonly baseEnv: Env
+  /** The run's full env (arm applied) — what the reasoning stage uses: the
+   *  appraiser and its sub-agent. `env` is the evidence-stage view of it,
+   *  which may hold the reasoning model back (REASONING_STAGE_ONLY). */
+  private reasoningEnv: Env
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
@@ -202,6 +219,8 @@ export class AnalysisJobDO {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
+    this.baseEnv = env
+    this.reasoningEnv = env
     this.persistence = new ChunkedJobState(state.storage)
     state.blockConcurrencyWhile(async () => {
       this.jobState = await this.persistence.read()
@@ -360,8 +379,10 @@ export class AnalysisJobDO {
     // SSE connection holding the object alive) lose the run mid-flight.
     this.runActive = true
     this.markEvalActive(body)
+    this.reasoningEnv = withAssistArm(this.baseEnv, body.arm)
+    this.env = evidenceStageEnv(this.reasoningEnv)
     this.state.waitUntil(
-      this.runStreamingAnalysis(body)
+      this.runRecorded(body, () => this.runStreamingAnalysis(body))
         .catch((err) => {
           console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
           const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
@@ -378,6 +399,32 @@ export class AnalysisJobDO {
     )
 
     return new Response('OK', { status: 200 })
+  }
+
+  /**
+   * Run the pipeline with every outbound API call recorded to this job's
+   * call log (kept 90 days). On by CALL_LOG_ENABLED, and always for an A/B
+   * arm or a replay run. A replay source must belong to the same user.
+   */
+  private async runRecorded(config: StartStreamingRequest, run: () => Promise<void>): Promise<void> {
+    const recording = this.env.CALL_LOG_ENABLED === 'true' || !!config.arm || !!config.replayCallsFrom
+    if (!recording) return run()
+    const source = config.replayCallsFrom ? await loadCallLog(this.env.API_CACHE, config.replayCallsFrom) : null
+    const replay = source && source.userId === config.userId ? source : null
+    const log = newCallLog({
+      jobId: config.jobId,
+      userId: config.userId,
+      address: config.search.address ?? config.search.streetAddress ?? null,
+      meta: { harness: config.harness ?? null, arm: config.arm ?? null, assistModel: assistModel(this.reasoningEnv) },
+      replayedFrom: replay ? replay.jobId : null,
+    })
+    try {
+      await runWithCallLog(log, { store: this.env.API_CACHE, replayFrom: replay }, run)
+    } finally {
+      const saved = await saveCallLog(this.env.API_CACHE, log)
+      const summary = summarizeCallLog(log)
+      console.log(`[call-log] ${config.jobId} ${saved ? 'saved' : 'NOT saved'} — ${log.entries.length} calls ${JSON.stringify(summary)}`)
+    }
   }
 
   private async runStreamingAnalysis(config: StartStreamingRequest): Promise<void> {
@@ -588,9 +635,21 @@ export class AnalysisJobDO {
     }
     if (config.enrichment?.permits !== false) sendProgress(permitsRequested())
 
-    const compsPromise = config.harness === 'corelogic'
+    // COMP_POOL_NEAREST keeps only that many comps — the ones closest to the
+    // subject — as the whole pool: every read, and the appraiser's
+    // selection, works from those and nothing farther out.
+    const nearestCap = Number(this.env.COMP_POOL_NEAREST) || null
+    const compsPromise = (config.harness === 'corelogic'
       ? propertyApi.getComparablesWithFallback(comparablesParams)
       : propertyApi.getComparables(comparablesParams)
+    ).then((res) => {
+      if (!res.success || !nearestCap) return res
+      const kept = nearestComparables(res.data.comparables, nearestCap)
+      if (kept.length < res.data.comparables.length) {
+        console.log(`[AnalysisJobDO] comp pool: kept the ${kept.length} nearest of ${res.data.comparables.length}`)
+      }
+      return { ...res, data: { ...res.data, comparables: kept } }
+    })
 
     // ── Clef digest passes — the agent-assist layer, three stages ──────
     // A rides the comps-landed tap (sale records only), B fires inside the
@@ -778,7 +837,7 @@ export class AnalysisJobDO {
       // Location risk (major roads, railroads, commercial) — fetched during
       // enrichment so it can deduct from valuation, not just flag post-hoc.
       // The street name lets detection classify fronting/backing/siding.
-      property.latitude && property.longitude
+      property.latitude && property.longitude && this.env.OSM_ENABLED !== 'false'
         ? detectOsmLocationRisks(property.latitude, property.longitude, 150, {
             streetName: property.address?.replace(/^\d+\s+/, '') ?? undefined,
           }).catch(() => null)
@@ -920,7 +979,7 @@ export class AnalysisJobDO {
     // stamp tract/BG/subdivision matches, enrich the in-pocket passers).
     // attom-only calls inside (market-context supplement, deed/bulk id
     // sets) degrade silently under other providers.
-    const geoGateActive = isAttomMcp || config.harness === 'corelogic'
+    const geoGateActive = isGeoGateActive({ isAttomMcp, harness: config.harness })
     const gateAndEnrich = async (
       comps: NormalizedComparable[],
     ): Promise<NormalizedComparable[]> => {
@@ -1392,6 +1451,9 @@ export class AnalysisJobDO {
       }
       const newById = new Map(newCandidates.map((c) => [c.id, c]))
       enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
+      // The nearest-comp cap holds through a widening too: the wider search
+      // may swap in closer comps, never grow the pool past the cap.
+      enrichedComps = nearestComparables(enrichedComps, nearestCap)
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
       if (monthsBack != null) retrieval.monthsBack = monthsBack
@@ -1632,6 +1694,12 @@ export class AnalysisJobDO {
         // Corelogic harness: code is the selection seat — no model call.
         // The gate still verifies; a reject completes on the deterministic
         // engine below. Agent harness keeps the Sonnet appraiser.
+        // A/B runs only: the arm's assist model makes its own selection on
+        // the same evidence, beside the appraiser. Recorded, never applied.
+        // Pointless when that model already holds the appraiser seat.
+        const shadowPromise = config.arm && this.reasoningEnv.APPRAISER_SEAT !== 'reasoning'
+          ? runAssistShadowSelection(this.reasoningEnv, ctx, evidence).catch(() => null)
+          : Promise.resolve(null)
         const appraisal = config.harness === 'corelogic'
           ? runDeterministicSelector(ctx, evidence)
           : config.harness === 'finale'
@@ -1640,7 +1708,8 @@ export class AnalysisJobDO {
             // apples-to-apples fit, highest-probability picks drive the
             // deterministic ARV.
             ? await runDecisionsSeat(this.env, ctx, evidence).catch(() => null)
-            : await runOpusAppraiser(this.env, ctx, evidence).catch(() => null)
+            : await runOpusAppraiser(this.reasoningEnv, ctx, evidence).catch(() => null)
+        const shadowSelection = await shadowPromise
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
         const seat = config.harness === 'corelogic' ? 'Selector'
@@ -1717,6 +1786,13 @@ export class AnalysisJobDO {
                   classified: d.classified,
                 }]),
               ),
+            },
+            abTest: {
+              arm: config.arm ?? null,
+              assistModel: assistModel(this.reasoningEnv),
+              assistCalls: (appraisal as { assistCalls?: number } | null)?.assistCalls ?? 0,
+              replayedCallsFrom: config.replayCallsFrom ?? null,
+              shadowSelection,
             },
             opus: {
               model: appraisal?.model ?? null,
@@ -2461,7 +2537,7 @@ export class AnalysisJobDO {
         osmPromise = (async () => {
           try {
             const prop = config.bundle.property
-            if (prop.latitude && prop.longitude) {
+            if (prop.latitude && prop.longitude && this.env.OSM_ENABLED !== 'false') {
               const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
               if (osmResult.riskFlags.length > 0) {
                 const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []
