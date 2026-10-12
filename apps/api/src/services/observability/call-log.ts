@@ -173,13 +173,15 @@ function stripInlineImages(body: string): string {
 
 /** Credential fields redacted before any request/response body lands in the
  *  call log — a 90-day observability record must never retain secrets. */
-const CREDENTIAL_KEYS = /("(?:access_token|refresh_token|client_secret|api_key|apikey|apiKey|password|secret|token|authorization|Authorization)"\s*:\s*")([^"]*)(")/g
+const CREDENTIAL_KEYS = /("(?:access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|apikey|password|secret|token|authorization)"\s*:\s*")((?:[^"\\]|\\.)*)(")/gi
+
+const REDACTED = '[REDACTED]'
 
 function redactCredentials(body: string): string {
   return body
-    .replace(CREDENTIAL_KEYS, '$1[REDACTED]$3')
-    .replace(/((?:api_key|apikey|access_token|refresh_token|client_secret|password|secret|token)=)([^&\s]+)/gi, '$1[REDACTED]')
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/g, '$1[REDACTED]')
+    .replace(CREDENTIAL_KEYS, `$1${REDACTED}$3`)
+    .replace(/((?:access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|apikey|key|sig|signature|password|secret|token)=)([^&\s"']+)/gi, `$1${REDACTED}`)
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/g, `$1${REDACTED}`)
 }
 
 function sanitizeLoggedBody(body: string): string {
@@ -259,7 +261,9 @@ export function recordingFetch(original: FetchFn): FetchFn {
     if (logged && logged.status != null) {
       const text = logged.response
         ?? (logged.responseKey && scope.store ? await scope.store.get(logged.responseKey).catch(() => null) : null)
-      if (text != null) {
+      // A sanitized body can't drive a live caller — a replayed
+      // "access_token":"[REDACTED]" would break downstream auth. Refetch.
+      if (text != null && !text.includes(REDACTED)) {
         entry.replayed = true
         entry.status = logged.status
         entry.responseType = logged.responseType
@@ -284,7 +288,7 @@ export function recordingFetch(original: FetchFn): FetchFn {
         if (text != null) {
           entry.responseBytes = text.length
           if (response.ok || text.length <= ERROR_BODY_CHARS) keep('res', sanitizeLoggedBody(text))
-          else { entry.response = text.slice(0, ERROR_BODY_CHARS); entry.truncated = true }
+          else { entry.response = sanitizeLoggedBody(text.slice(0, ERROR_BODY_CHARS)); entry.truncated = true }
         }
       } else {
         const length = Number(response.headers.get('content-length'))
