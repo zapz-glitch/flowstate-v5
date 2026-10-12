@@ -12,7 +12,7 @@
     "deploy": "turbo deploy",
     "lint": "eslint apps/api/src apps/dashboard/src packages/shared/src",
     "test": "npm run test -w @flowstate-api/api && npm run test -w @flowstate-api/dashboard",
-    "security:audit": "npm audit --audit-level=moderate",
+    "security:audit": "node scripts/security-audit.mjs",
     "typecheck": "turbo typecheck",
     "db:generate": "turbo db:generate",
     "db:migrate:local": "turbo db:migrate:local",
