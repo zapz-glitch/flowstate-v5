@@ -171,6 +171,21 @@ function stripInlineImages(body: string): string {
       `${a}[${data.length} chars ${data.slice(0, 12)}…${data.slice(-12)}]${z}`)
 }
 
+/** Credential fields redacted before any request/response body lands in the
+ *  call log — a 90-day observability record must never retain secrets. */
+const CREDENTIAL_KEYS = /("(?:access_token|refresh_token|client_secret|api_key|apikey|apiKey|password|secret|token|authorization|Authorization)"\s*:\s*")([^"]*)(")/g
+
+function redactCredentials(body: string): string {
+  return body
+    .replace(CREDENTIAL_KEYS, '$1[REDACTED]$3')
+    .replace(/((?:api_key|apikey|access_token|refresh_token|client_secret|password|secret|token)=)([^&\s]+)/gi, '$1[REDACTED]')
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/g, '$1[REDACTED]')
+}
+
+function sanitizeLoggedBody(body: string): string {
+  return redactCredentials(stripInlineImages(body))
+}
+
 const isTextual = (type: string | null) =>
   !!type && /json|text|xml|javascript|html|event-stream|x-www-form-urlencoded/i.test(type)
 
@@ -237,7 +252,7 @@ export function recordingFetch(original: FetchFn): FetchFn {
     if (body != null) {
       const model = (entry.kind === 'reasoning' || entry.kind === 'decisions') ? /"model"\s*:\s*"([^"]{1,120})"/.exec(body)?.[1] : undefined
       if (model) entry.model = model
-      keep('req', stripInlineImages(body))
+      keep('req', sanitizeLoggedBody(body))
     }
 
     const logged = scope.replay?.get(entry.requestHash)
@@ -249,7 +264,7 @@ export function recordingFetch(original: FetchFn): FetchFn {
         entry.status = logged.status
         entry.responseType = logged.responseType
         entry.responseBytes = logged.responseBytes
-        keep('res', text)
+        keep('res', sanitizeLoggedBody(text))
         entry.ms = Date.now() - started
         return new Response(text, {
           status: logged.status,
@@ -268,7 +283,7 @@ export function recordingFetch(original: FetchFn): FetchFn {
         const text = await response.clone().text().catch(() => null)
         if (text != null) {
           entry.responseBytes = text.length
-          if (response.ok || text.length <= ERROR_BODY_CHARS) keep('res', text)
+          if (response.ok || text.length <= ERROR_BODY_CHARS) keep('res', sanitizeLoggedBody(text))
           else { entry.response = text.slice(0, ERROR_BODY_CHARS); entry.truncated = true }
         }
       } else {
