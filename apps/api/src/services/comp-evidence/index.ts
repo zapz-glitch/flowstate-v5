@@ -760,7 +760,7 @@ export async function startCompEvidenceBatch(
   opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number; subject?: { squareFeet?: number; address?: string }; gatherOnly?: boolean; onEach?: (propertyId: string, ev: CompConditionEvidence | null) => void },
 ): Promise<Map<string, CompConditionEvidence | null>> {
   const out = new Map<string, CompConditionEvidence | null>()
-  const perComp = opts?.perCompTimeoutMs ?? 30_000
+  const perComp = opts?.perCompTimeoutMs ?? 20_000
   const deadline = opts?.globalDeadlineMs ?? 60_000
   const laneCount = Math.min(opts?.lanes ?? 20, comps.length)
   // Decisions lane: gather every comp's listing + photos first, then run
