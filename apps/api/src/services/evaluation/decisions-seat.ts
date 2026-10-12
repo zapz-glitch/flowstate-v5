@@ -249,10 +249,11 @@ export async function runDecisionsSeat(
   }
 
   // Owner doctrine: the seat answers the questions a human appraiser asks.
-  // Physical/location/final call = predicates (yes/no, p>=0.5 = yes).
-  // The price band is the single classification question — every comp
-  // already carries a code price label (fact); the model classifies which
-  // market band the comp resembles matching our rules.
+  // Facts-in-a-cell = predicates (yes/no: block group, neighborhood).
+  // Degrees-of-fit = probabilities (sqft band, year band, apples-to-apples,
+  // the final call — a scale, not a binary). The price band is the single
+  // classification question — the model says which market band the comp
+  // resembles matching our rules; code price labels stay facts.
   const siteRows = new Set(Object.keys(ctx.compObservables ?? {}))
   const asked = rows.filter((r) => siteRows.has(r.id))
   const questionRows = asked.length ? asked : rows
@@ -262,11 +263,11 @@ export async function runDecisionsSeat(
     const id = row.id
     questions[`q_sqft_${id}`] = {
       type: 'noul',
-      instructions: `Comp ${id}: YES or NO — is this property within the subject's square footage band? Use the sqft label on its row (exact/close/far).`,
+      instructions: `Comp ${id}: probability this property is within the subject's square footage band — a scale, not a binary. Use the sqft label on its row (exact ≈ 1.0, far ≈ 0).`,
     }
     questions[`q_year_${id}`] = {
       type: 'noul',
-      instructions: `Comp ${id}: YES or NO — is this property within the subject's year-built band? Use the year label on its row.`,
+      instructions: `Comp ${id}: probability this property is within the subject's year-built band — a scale. Use the year label on its row.`,
     }
     questions[`q_block_${id}`] = {
       type: 'noul',
@@ -278,7 +279,7 @@ export async function runDecisionsSeat(
     }
     questions[`q_apples_${id}`] = {
       type: 'noul',
-      instructions: `Comp ${id}: YES or NO — is this property an apples-to-apples physical comparison to the subject? Weigh sqft/year/lot/style/feature labels, physicalMatchP, exteriorMatchP, development vintage, and the site predicates.`,
+      instructions: `Comp ${id}: probability this property is an apples-to-apples physical comparison to the subject — a scale. Weigh sqft/year/lot/style/feature labels, physicalMatchP, exteriorMatchP, development vintage, and the site predicates.`,
     }
     questions[`q_final_${id}`] = {
       type: 'noul',
