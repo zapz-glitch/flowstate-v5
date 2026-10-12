@@ -761,7 +761,7 @@ export async function classifyCompBatchDecisions(
 
 /**
  * Parallel comp-evidence fan-out — Firecrawl (search → scrape → photos+text)
- * into Clef, 15 lanes wide (Firecrawl's 25-browser plan leaves headroom for
+ * into Clef, 20 lanes wide (the ASP plan's session cap is the real gate;
  * the subject scrape + redfin lanes). Returns a propertyId → evidence map
  * so callers that start the batch early (the moment comps land, before
  * geo/enrich finishes) can hand the result into the pipeline as it sorts.
@@ -774,7 +774,7 @@ export async function startCompEvidenceBatch(
   const out = new Map<string, CompConditionEvidence | null>()
   const perComp = opts?.perCompTimeoutMs ?? 30_000
   const deadline = opts?.globalDeadlineMs ?? 150_000
-  const laneCount = Math.min(opts?.lanes ?? 15, comps.length)
+  const laneCount = Math.min(opts?.lanes ?? 20, comps.length)
   // Decisions lane: gather every comp's listing + photos first, then run
   // the pool-level batch classify — the model sees all the data at the
   // end, not comp-by-comp as each fetch lands. Clef lane keeps the
