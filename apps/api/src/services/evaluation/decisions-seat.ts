@@ -288,17 +288,13 @@ export async function runDecisionsSeat(
         `This is THE appraisal call: it must be physically similar, in or near the pocket, a non-distressed sale, and represent the subject at above-market or at-market price. ` +
         `pricePoint=${row.pricePoint} — below_market means NO.`,
     }
-    questions[`band_${id}`] = {
-      type: 'choice',
-      criteria: {
-        ABOVE_MARKET: 'resembles an above-market comp matching our rules',
-        AT_MARKET: 'resembles an at-market comp matching our rules',
-        BELOW_MARKET: 'resembles a below-market comp matching our rules',
-      },
+    questions[`q_market_${id}`] = {
+      type: 'noul',
       instructions:
-        `Comp ${id}: which market band does this property resemble as a comparable matching our appraisal rules? ` +
-        `Read the whole row — price labels (facts), condition evidence, geo tier, site predicates. ` +
-        `Code price label pricePoint=${row.pricePoint}; classify the comp, do not just echo the label.`,
+        `Comp ${id}: YES or NO — does this property sell AT or ABOVE the pocket's market value? ` +
+        `The pocket median is in state; compare the comp's price evidence against it. ` +
+        `YES = at-market or above-market (can drive ARV); NO = below market (can never price ARV). ` +
+        `Code label pricePoint=${row.pricePoint} is a fact — answer NO only when it says below_market or the sale is distressed.`,
     }
   }
   // The head-to-head choice: Luna compares the whole asked set and
@@ -350,15 +346,19 @@ export async function runDecisionsSeat(
     const pref = choiceProbs('best_comp')
     const modelBest = choice('best_comp')
     const askedIds = new Set(questionRows.map((r) => r.id))
-    const scored: { r: RankedComp; p: number; band: string | null; pref: number }[] = candidates
+    // q_market is the yes/no band gate: >=0.5 = at/above market (may
+    // drive ARV); <0.5 = below market (floor evidence only). The code's
+    // pricePoint label stays a fact — below_market rows are below market
+    // no matter what the model scores.
+    const scored: { r: RankedComp; p: number; market: number | null; pref: number }[] = candidates
       .filter((r) => askedIds.has(r.id))
-      .map((r) => ({ r, p: prob(`q_final_${r.id}`) ?? -1, band: choice(`band_${r.id}`), pref: pref[r.id] ?? 0 }))
+      .map((r) => ({ r, p: prob(`q_final_${r.id}`) ?? -1, market: prob(`q_market_${r.id}`), pref: pref[r.id] ?? 0 }))
       .filter((x) => x.p >= 0 || x.pref > 0)
     if (!scored.length) {
       // Malformed/absent answers — still pick the best-ranked candidate;
       // a seat answer must exist, honestly labeled.
       const r = candidates[0]!
-      scored.push({ r, p: 0, band: null, pref: 0 })
+      scored.push({ r, p: 0, market: null, pref: 0 })
       base.debugNotes.push(`decisions-seat: no answers returned — forced pick ${r.id}`)
     }
     if (modelBest === 'NONE_QUALIFIED') base.debugNotes.push('decisions-seat: model judged no candidate qualified — forcing least-bad pick')
@@ -368,10 +368,12 @@ export async function runDecisionsSeat(
     // passed (q_final >= 0.5) or that the model itself ranked first, and
     // never let a BELOW_MARKET band pick drive ARV unless nothing else
     // exists (forced floor, flagged).
+    const belowMarket = (x: { r: RankedComp; market: number | null }) =>
+      pricePoint(x.r) === 'below_market' || (x.market != null && x.market < 0.5)
     const rankedByPref = [...scored].sort((a, b) => (b.pref - a.pref) || (b.p - a.p))
-    const qualified = rankedByPref.filter((x) => x.band !== 'BELOW_MARKET' && (x.p >= 0.5 || x.r.id === modelBest))
+    const qualified = rankedByPref.filter((x) => !belowMarket(x) && (x.p >= 0.5 || x.r.id === modelBest))
     let forcedBelowMarket = false
-    let picks = qualified.length ? qualified.slice(0, 3) : rankedByPref.filter((x) => x.band !== 'BELOW_MARKET').slice(0, 1)
+    let picks = qualified.length ? qualified.slice(0, 3) : rankedByPref.filter((x) => !belowMarket(x)).slice(0, 1)
     if (!picks.length && scored.length) {
       // Every candidate reads below-market — the seat still must answer.
       // Least-bad is the highest-preference distressed comp; it prices the
@@ -435,7 +437,7 @@ export async function runDecisionsSeat(
     const conf: 'high' | 'medium' | 'low' =
       topP >= 0.7 && poolP >= 0.5 ? 'high' : topP >= 0.45 ? 'medium' : 'low'
     const note = picks
-      .map((x) => `${x.r.id} final=${x.p.toFixed(2)} pref=${x.pref.toFixed(2)} band=${x.band ?? '?'} ${pricePoint(x.r)}`)
+      .map((x) => `${x.r.id} final=${x.p.toFixed(2)} mkt=${x.market == null ? '?' : x.market.toFixed(2)} pref=${x.pref.toFixed(2)} ${pricePoint(x.r)}`)
       .join(' · ')
     base.debugNotes.push(`decisions-seat: picks ${note} → ARV $${arv} (conf ${conf}, pool p=${poolP.toFixed(2)})`)
     return {
