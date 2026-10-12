@@ -1096,6 +1096,26 @@ export async function performAnalysisPhase1(
           return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null
+
+  // Subject condition FIRST — the renovation/curb-appeal verdict must land
+  // before the appraisal-rules pass stamps any evidence verdict on the run.
+  const renovation: RenovationAssessment = await visionAndPersist
+  step(
+    'renovation_assessment',
+    renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
+    renovation.renovationLevelIndex != null
+      ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
+      : `condition fetch completed — ${renovation.status}${renovation.error ? ` (${renovation.error})` : ''}`
+  )
+  if (renovation.status !== 'ok') {
+    fallbacksUsed.push(`vision:${renovation.status}`)
+  }
+  onProgress?.('Renovation level assessed')
+
+  // Subject curb appeal comes from the merged vision pass (one LLM call for
+  // both renovation level + curb-appeal condition).
+  const subjectCurbAppeal: CurbAppealCheck | null = renovation.curbAppeal ?? null
+
   if (arvComps.length > 0) {
     appraisalResult.insufficientComps = false
     step('appraisal_rules', 'completed',
@@ -1127,30 +1147,6 @@ export async function performAnalysisPhase1(
   // Set-B is the only ARV path — it fills finalArv below; there is no
   // legacy blend.
   let finalArv: number | null = null
-
-  // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
-  // Subject-only — comps are never photo-scraped, so there is no per-comp
-  // vision pass. The renovation level drives the rehab tier; the curb-appeal
-  // condition is the subject's detected condition.
-  // Required step — the fetch always resolves a verdict object. Non-ok
-  // statuses are recorded in fallbacksUsed so the report exposes that the
-  // subject condition could not be verified from photos.
-  const renovation: RenovationAssessment = await visionAndPersist
-  step(
-    'renovation_assessment',
-    renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
-    renovation.renovationLevelIndex != null
-      ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
-      : `condition fetch completed — ${renovation.status}${renovation.error ? ` (${renovation.error})` : ''}`
-  )
-  if (renovation.status !== 'ok') {
-    fallbacksUsed.push(`vision:${renovation.status}`)
-  }
-  onProgress?.('Renovation level assessed')
-
-  // Subject curb appeal comes from the merged vision pass (one LLM call for
-  // both renovation level + curb-appeal condition).
-  const subjectCurbAppeal: CurbAppealCheck | null = renovation.curbAppeal ?? null
 
   // ── 4. Classifications — transaction evidence, not condition guessing ────
   // flip resale → after_renovation; distressed sale → as_is; ordinary sale
