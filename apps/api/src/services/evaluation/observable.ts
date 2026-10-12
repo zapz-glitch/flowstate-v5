@@ -899,7 +899,7 @@ export async function decisionsCompObservables(
    *  description, spec step 2); the seat runs { condition: false } (satellite
    *  premiums, street-view physical match, exterior match, spec step 5) after
    *  the TypeScript labels exist. Omit to run every phase. */
-  phases?: { condition?: boolean; site?: boolean },
+  phases?: { condition?: boolean; site?: boolean; street?: boolean },
 ): Promise<CompObservables | null> {
   if (!isDecisionsAvailable(env)) return null
   const wantCondition = phases?.condition !== false
@@ -913,11 +913,12 @@ export async function decisionsCompObservables(
     if (fetched) img = { base64: fetched.base64, content_type: fetched.mimeType }
   }
   const listingImages = input.listingImages?.length ? input.listingImages : img ? [img] : []
+  const wantStreet = wantSite && phases?.street !== false
   const [satImg, satCloseImg, streetImg] = wantSite
     ? await Promise.all([
         fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
         fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }, 90).catch(() => null),
-        fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null),
+        wantStreet ? fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null) : Promise.resolve(null),
       ])
     : [null, null, null]
   type Labeled = { label: string; content_type?: string; base64: string }

@@ -16,7 +16,7 @@ import type { Phase1Context, HarnessEvidence } from './index'
 import type { AppraiserResult } from './appraiser'
 import { runDeterministicSelector, type PocketValues, type RankedComp } from './selector'
 import {
-  decisionsCompObservables, fetchSatelliteTile, fetchStreetViewTile,
+  decisionsCompObservables, fetchSatelliteTile,
   type CompObservables,
 } from './observable'
 import { pickFrontCoverImage } from './exterior-match'
@@ -126,9 +126,10 @@ export async function runDecisionsSeat(
     const subjLat = ctx.bundle?.property?.latitude ?? null
     const subjLng = ctx.bundle?.property?.longitude ?? null
     const subjectPhotos = ctx.photoBundle?.subject?.photos ?? []
-    const [subjectCoverImage, subjectStreetViewImage, subjectSatelliteImage] = await Promise.all([
+    // Street view stays out — cover-vs-cover exterior match is the
+    // physical-similarity read (owner directive).
+    const [subjectCoverImage, subjectSatelliteImage] = await Promise.all([
       pickFrontCoverImage(env, subjectPhotos).catch(() => null),
-      fetchStreetViewTile(env, { latitude: subjLat, longitude: subjLng }).catch(() => null),
       fetchSatelliteTile(env, { latitude: subjLat ?? undefined, longitude: subjLng ?? undefined }).catch(() => null),
     ])
     let siteRead = 0
@@ -148,11 +149,11 @@ export async function runDecisionsSeat(
         coverPhotoUrl: r.comp.coverPhotoUrl ?? ac?.coverPhotoUrl ?? null,
         latitude: ac?.latitude ?? null,
         longitude: ac?.longitude ?? null,
-        subjectCoverImage, subjectStreetViewImage, subjectSatelliteImage,
+        subjectCoverImage, subjectSatelliteImage,
         subjectAddress: evidence.subject.address ?? null,
         subjectRef: evidence.subject,
         benchmark: evidence.marketBenchmark ?? null,
-      }, { condition: false }).catch(() => null)
+      }, { condition: false, street: false }).catch(() => null)
       if (site) {
         r.comp.observables = mergeObservables(r.comp.observables, site)
         if (ctx.compObservables && r.comp.observables) ctx.compObservables[r.id] = r.comp.observables
@@ -199,7 +200,7 @@ export async function runDecisionsSeat(
         conditionTier: ob.conditionTier, renoClaimP: ob.renoClaimP,
         premium: ob.premiumAttributes, premiumP: ob.premiumProbabilities ?? null,
         exposure: ob.siteExposure, vintage: ob.developmentVintage,
-        physicalMatchP: ob.physicalMatchP, arvFitnessP: ob.arvFitnessP,
+        physicalMatchP: ob.physicalMatchP, exteriorMatchP: ob.exteriorMatchP, arvFitnessP: ob.arvFitnessP,
         unexplainedPremiumP: ob.unexplainedPremiumP,
         tier: ob.finalTier,
       } : null,
