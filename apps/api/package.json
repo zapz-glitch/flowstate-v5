@@ -15,8 +15,9 @@
     "db:migrate:remote": "wrangler d1 migrations apply flowstate-api-db --remote"
   },
   "dependencies": {
-    "@flowstate-api/shared": "*",
     "@anthropic-ai/sdk": "^0.76.0",
+    "@cloudflare/puppeteer": "^1.4.0",
+    "@flowstate-api/shared": "*",
     "@google/generative-ai": "^0.24.1",
     "better-auth": "^1.4.18",
     "drizzle-orm": "^0.45.1",

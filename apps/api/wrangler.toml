@@ -49,6 +49,10 @@ bucket_name = "flowstate-report-assets"
 [ai]
 binding = "AI"
 
+# Dedicated headless-browser pool — comp listing-page renders
+[browser]
+binding = "BROWSER"
+
 [[durable_objects.bindings]]
 name = "ANALYSIS_JOB"
 class_name = "AnalysisJobDO"

@@ -142,6 +142,9 @@ export interface Env {
   SCRAPFLY_URL?: string
   /** Google Maps Platform — Street View Static curb-appeal fallback */
   GOOGLE_MAPS_KEY?: string
+  /** Cloudflare Browser Rendering — dedicated headless-browser pool for
+   *  listing-page renders (comp evidence). @cloudflare/puppeteer binding. */
+  BROWSER?: Fetcher
   /** Geocodio — metered census-geography lookups (primary path; free 2.5k/day) */
   GEOCODIO_API_KEY?: string
 
