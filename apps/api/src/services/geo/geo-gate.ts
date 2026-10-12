@@ -8,5 +8,5 @@
  * without the stamps every comp reads as outside the pocket.
  */
 export function isGeoGateActive(run: { isAttomMcp: boolean; harness?: 'agent' | 'corelogic' | 'typescript' | 'finale' }): boolean {
-  return run.isAttomMcp || run.harness === 'corelogic' || run.harness === 'agent' || run.harness === 'typescript'
+  return run.isAttomMcp || run.harness === 'corelogic' || run.harness === 'agent' || run.harness === 'typescript' || run.harness === 'finale'
 }
