@@ -90,19 +90,34 @@ export async function decisionsRun(
     return { type: 'predicate', name, instructions: q.instructions }
   })
 
-  const resp = await fetch(DECISIONS_URL, {
-    method: 'POST',
-    signal: AbortSignal.timeout(60_000),
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: env.DECISIONS_MODEL || 'gpt-6-luna',
-      input: [{ role: 'user', content }],
-      questions,
-    }),
-  })
+  const call = async (): Promise<Response> =>
+    fetch(DECISIONS_URL, {
+      method: 'POST',
+      signal: AbortSignal.timeout(60_000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: env.DECISIONS_MODEL || 'gpt-6-luna',
+        input: [{ role: 'user', content }],
+        questions,
+      }),
+    })
+
+  // One retry on transient failure (timeout / network / 5xx). A hung or
+  // flapping call gets refired once before the caller's fallback takes over.
+  let resp: Response
+  try {
+    resp = await call()
+  } catch (first) {
+    console.warn('DECISIONS: call failed, retrying once —', first)
+    resp = await call()
+  }
+  if (!resp.ok && resp.status >= 500) {
+    const retry = await call().catch(() => null)
+    if (retry) resp = retry
+  }
   if (!resp.ok) {
     const body = await resp.text().catch(() => '')
     throw new Error(`DECISIONS: HTTP ${resp.status} — ${body.slice(0, 300)}`)
