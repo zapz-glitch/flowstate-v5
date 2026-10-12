@@ -189,7 +189,7 @@ export class ListingPhotoScraper {
     this.openrouterApiKey = config.openrouterApiKey
     this.openrouterModel = config.openrouterModel ?? 'google/gemini-2.5-flash'
     this.cache = config.cache
-    this.cacheTtl = config.cacheTtl ?? 24 * 60 * 60
+    this.cacheTtl = config.cacheTtl ?? 90 * 24 * 60 * 60
   }
 
   private cacheKey(adapter: ListingSiteAdapter, property: PropertyIdentifier): string {

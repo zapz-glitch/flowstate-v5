@@ -190,7 +190,7 @@ async function embedPhotos(photoUrls: string[]): Promise<ClefImage[]> {
 /** Evidence pin — comp stamps are cached by identity+sale so a re-run of
  *  the same report replays the SAME classification instead of re-rolling
  *  Clef + the listing scrape. A new sale produces a new key → re-stamp. */
-const EVIDENCE_TTL = 30 * 86400
+const EVIDENCE_TTL = 90 * 86400
 const evidenceKey = (c: CompEvidenceInput) =>
   `clef-evidence:${c.propertyId}:${c.saleDate ?? 'nosale'}:${c.salePrice ?? 0}`
 
