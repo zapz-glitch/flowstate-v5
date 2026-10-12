@@ -184,6 +184,19 @@ dev.post('/observable-probe', async (c) => {
   return c.json(out)
 })
 
+/** Browser-Rendering probe — loads a listing URL in the CF headless pool
+ *  and reports whether the host served the page or challenged it. */
+dev.post('/render-probe', async (c) => {
+  const { url } = await c.req.json<{ url?: string }>()
+  if (!url) return c.json({ error: 'url required' }, 400)
+  const { renderListingPage } = await import('../services/browser-render')
+  const out = await renderListingPage(c.env, url).catch((e) => ({
+    url, finalUrl: null, status: null, blocked: false, photoUrls: [] as string[],
+    description: null, title: null, durationMs: 0, error: e instanceof Error ? e.message : String(e),
+  }))
+  return c.json({ success: true, browserBinding: !!c.env.BROWSER, data: out })
+})
+
 dev.post('/attom-token-warm', async (c) => {
   const { warmAttomMcpToken } = await import('../services/property-api/providers/attom-mcp')
   await warmAttomMcpToken(c.env)

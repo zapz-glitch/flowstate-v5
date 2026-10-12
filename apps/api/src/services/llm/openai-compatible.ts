@@ -23,15 +23,19 @@ import { toDataUrl } from './image-utils'
 export interface OpenAICompatibleConfig extends BaseLLMProviderConfig {
   /** Override for providers using different endpoints */
   baseUrl: string
+  /** OpenRouter routing preferences (provider.only/allow_fallbacks etc.) */
+  providerPrefs?: Record<string, unknown>
 }
 
 // ─── OpenAI-Compatible Provider ──────────────────────────────────────────────
 
 export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
   abstract readonly name: LLMProviderType
+  protected readonly providerPrefs?: Record<string, unknown>
 
   constructor(config: OpenAICompatibleConfig) {
     super(config)
+    this.providerPrefs = config.providerPrefs
   }
 
   /**
@@ -136,6 +140,9 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
       }
     }
 
+    // OpenRouter routing preferences (pinned upstream provider)
+    if (this.providerPrefs) body.provider = this.providerPrefs
+
     const fetchOptions = this.createFetchOptions(
       'POST',
       {
@@ -182,11 +189,12 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
 export class OpenRouterProvider extends OpenAICompatibleProvider {
   readonly name = 'openrouter' as const
 
-  constructor(config: { apiKey: string; model?: string; maxTokens?: number }) {
+  constructor(config: { apiKey: string; model?: string; maxTokens?: number; timeout?: number }) {
     super({
       apiKey: config.apiKey,
       model: config.model ?? 'google/gemini-2.0-flash-001',
       maxTokens: config.maxTokens,
+      timeout: config.timeout,
       baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
     })
   }
@@ -198,6 +206,8 @@ export function createOpenRouterProvider(config: {
   apiKey: string
   model?: string
   maxTokens?: number
+  /** Request timeout in ms — default 60s */
+  timeout?: number
 }): OpenRouterProvider {
   return new OpenRouterProvider(config)
 }

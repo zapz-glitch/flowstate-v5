@@ -17,7 +17,8 @@
  */
 
 import { decisionsRun, isDecisionsAvailable } from '../decisions'
-import { RENOVATION_LEVEL_DEFINITIONS } from '../vision/renovation'
+import { RENOVATION_LEVEL_DEFINITIONS, renovationTierInstructions, renovationTierProbabilities } from '../vision/renovation'
+import { decisionsExteriorMatch, type CoverImage } from './exterior-match'
 import { fetchImagesAsBase64, fetchImageAsBase64 } from '../llm/image-utils'
 import type { Env } from '../../types'
 
@@ -198,8 +199,13 @@ const SUBJECT_QUESTIONS = {
   s8_lot_premium: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent lot', OVERSIZED_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac premium lot', POOL: 'pool visible on property', NONE: 'no premium lot features evident', UNVERIFIED: 'imagery insufficient to tell' },
-    instructions: 'From the aerial/satellite image and photographs, does the SUBJECT sit on a premium lot? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile (second image) frames the parcel itself; judge that parcel, not the neighborhood. Check each label: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; (2) CORNER/CUL-DE-SAC — the center lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — the center parcel is clearly larger than its neighbors; (4) POOL visible on the center lot. Answer WATERFRONT whenever water borders the center parcel — do not answer NONE while a water body touches the lot.',
+    instructions: 'From the aerial/satellite images, does the SUBJECT sit on a premium lot? THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile (second image) frames the parcel itself; judge that parcel, not the neighborhood. Check each label: (1) WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; (2) CORNER/CUL-DE-SAC — the center lot sits on a street corner or at a dead-end bulb; (3) OVERSIZED — the center parcel is clearly larger than its neighbors; (4) POOL visible on the center lot. Answer WATERFRONT whenever water borders the center parcel — do not answer NONE while a water body touches the lot.',
   },
+  // Per-attribute probabilities — same decomposition as the comp c8p lane.
+  s8p_waterfront: { type: 'noul' as const, instructions: 'Probability the SUBJECT parcel has a water premium — lakefront, riverfront, canal, bay, or a water body touching/adjacent to the parcel boundary. THE SUBJECT LOT IS AT THE CENTER OF EACH AERIAL FRAME. ~0 when no water touches the center parcel.' },
+  s8p_culdesac_corner: { type: 'noul' as const, instructions: 'Probability the SUBJECT sits on a cul-de-sac bulb or a corner lot — the parcel faces onto a circular dead-end bulb or fronts two intersecting streets. ~0 for a mid-block interior lot.' },
+  s8p_oversized: { type: 'noul' as const, instructions: 'Probability the SUBJECT parcel is notably larger than its immediate neighbors — a lot-size premium versus the surrounding block. ~0 for a typical parcel.' },
+  s8p_pool: { type: 'noul' as const, instructions: 'Probability the SUBJECT parcel has a pool — visible pool geometry in the aerial or photos. ~0 when none evident.' },
   s9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient to tell' },
@@ -213,11 +219,6 @@ const SUBJECT_QUESTIONS = {
   s9e_east: { type: 'noul' as const, instructions: 'On the EAST edge of the aerial frames (right of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel east boundary; 0 when the east edge borders only homes, yards, woods, or a quiet residential street.' },
   s9e_south: { type: 'noul' as const, instructions: 'On the SOUTH edge of the aerial frames (bottom of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel south boundary; 0 when the south edge borders only homes, yards, woods, or a quiet residential street.' },
   s9e_west: { type: 'noul' as const, instructions: 'On the WEST edge of the aerial frames (left of image), does anything NON-RESIDENTIAL touch or immediately border the CENTER parcel: a large flat-roof commercial/industrial building, warehouse, retail store, parking lot, multi-lane arterial/highway, rail line, or industrial yard? Score high only when such a feature clearly touches the center parcel west boundary; 0 when the west edge borders only homes, yards, woods, or a quiet residential street.' },
-  s10_renovation_tier: {
-    type: 'choice' as const,
-    criteria: TIER_COND_CHOICES,
-    instructions: 'Which approved renovation tier best fits the scope of work the SUBJECT needs to reach finished retail condition, based on the photos and description? Judge the work required, not curb appeal alone — LIPSTICK is paint-level only, FULL_GUT is studs-out reconstruction; partial demo or a dated kitchen alone stays at Heavy Rehab or below. UNVERIFIED when the photos cannot support a tier.',
-  },
 }
 
 const COMP_QUESTIONS = {
@@ -255,7 +256,76 @@ const COMP_QUESTIONS = {
   c8_premium_attributes: {
     type: 'choice' as const,
     criteria: { WATERFRONT: 'waterfront or water-adjacent', LARGE_LOT: 'notably larger lot than neighbors', CORNER_CULDESAC: 'corner or cul-de-sac lot', VIEW: 'view premium (golf, water, skyline)', POOL: 'pool present', NONE: 'no premium attribute evident', UNVERIFIED: 'evidence insufficient' },
-    instructions: "Does the description, cover photo, supplied property data, or satellite aerial (when present in the image set) indicate a premium lot attribute that could explain a price premium? THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile frames the parcel itself; judge that parcel. Check each label: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the center lot.",
+    instructions: "Do the satellite aerials or the supplied lot data indicate a premium lot attribute that could explain a price premium? THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME — the close-up tile frames the parcel itself; judge that parcel. Check each label: WATERFRONT — water (bay, canal, lake, pond) touching or adjacent to the center lot boundary; CORNER_CULDESAC — corner lot or cul-de-sac bulb position; LARGE_LOT — clearly larger parcel than neighbors; POOL — visible pool; VIEW — golf/water/skyline view. Pick the strongest single attribute; NONE only when none is evident — do not answer NONE while a water body touches the center lot.",
+  },
+  // Per-attribute lot-premium probabilities — the seat reads the odds, not
+  // just c8's winning label. Appraiser priors: waterfront/lake/river adjacency
+  // carries the largest lot premium; cul-de-sac position is a modest premium
+  // (privacy, low traffic, often larger pie-shaped lots); corner lots are
+  // mixed-to-slightly-positive in residential appraisals (more frontage but
+  // also more exposure and setback loss — the model weighs what it sees).
+  c8p_waterfront: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP parcel has a water premium — lakefront, riverfront, canal, bay, or a water body touching/adjacent to the parcel boundary. THE COMP LOT IS AT THE CENTER OF EACH AERIAL FRAME. Score ~0 when no water touches the center parcel; a distant water body in frame is not waterfront.',
+  },
+  c8p_culdesac_corner: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP sits on a cul-de-sac bulb or a corner lot. Cul-de-sac: parcel faces onto the circular dead-end bulb of a street. Corner: parcel fronts two intersecting streets. Judge the aerial/street-view evidence; ~0 for a mid-block interior lot.',
+  },
+  c8p_large_lot: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP parcel is notably larger than its immediate neighbors — a lot-size premium versus the surrounding block, not merely an average lot. ~0 for a typical parcel.',
+  },
+  c8p_view: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP carries a view premium — golf course, water, skyline, or open-space frontage visible from the parcel. ~0 for a standard residential outlook.',
+  },
+  c8p_pool: {
+    type: 'noul' as const,
+    instructions: 'Probability that the COMP parcel has a pool — visible pool geometry in the aerial or street view, or a pool noted in the description/property data. ~0 when none evident.',
+  },
+  // Site predicates — yes/no facts from the aerial (owner doctrine:
+  // environmental facts are predicates, not probabilities). Each answers
+  // one binary question about the CENTER parcel in the aerial frames.
+  sp_backs_busy_road: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial BACK onto a busy road, arterial, highway, or rail line — its REAR edge (opposite the street side) touches one?',
+  },
+  sp_fronts_busy_road: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial FRONT onto a busy road or arterial — its STREET side faces one?',
+  },
+  sp_sides_busy_road: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial SIDE onto a busy road or arterial — a SIDE edge (not the street frontage, not the rear) borders one?',
+  },
+  sp_commercial: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: is the CENTER parcel in the aerial exposed to commercial use — a commercial/industrial building, warehouse, big-box store, or parking lot touching or immediately adjacent to it?',
+  },
+  sp_corner_lot: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial sit on a corner — fronting two intersecting streets?',
+  },
+  sp_culdesac: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial face onto a cul-de-sac bulb — the circular dead-end of a street?',
+  },
+  sp_infill_lot: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: is the CENTER parcel an interior infill lot — mid-block inside the pocket, surrounded by the same housing stock, not on an edge/corner/cul-de-sac?',
+  },
+  sp_waterfront: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does a water body (bay, canal, lake, pond, river) touch or border the CENTER parcel boundary in the aerial? A distant water body in frame is not waterfront.',
+  },
+  sp_lakefront: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does a LAKE or POND touch or border the CENTER parcel boundary in the aerial?',
+  },
+  sp_riverfront: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does a RIVER or CANAL touch or border the CENTER parcel boundary in the aerial?',
   },
   c9_site_exposure: {
     type: 'choice' as const,
@@ -264,7 +334,7 @@ const COMP_QUESTIONS = {
   },
   c10_physical_match: {
     type: 'noul' as const,
-    instructions: 'When street-view images are supplied (the SUBJECT street view comes second-to-last, before the SUBJECT aerial), score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when images are absent or the styles clearly differ.',
+    instructions: 'Two street-view images are supplied: the FIRST is the COMP, the SECOND is the SUBJECT. Score the probability that the COMP is a physical match to the subject — architectural style, stories, garage layout, curb appeal. Judge physical similarity ONLY, never condition — street view cannot verify condition. Score low when the styles clearly differ.',
   },
   c11_arv_fitness: {
     type: 'noul' as const,
@@ -283,9 +353,33 @@ const COMP_QUESTIONS = {
   c13_condition_tier: {
     type: 'choice' as const,
     criteria: TIER_COND_CHOICES,
-    instructions: 'Using the cover photo and listing description, which approved renovation tier best describes the scope of work this COMP represents or needs? Judge condition evidence only — a top-tier price does not prove renovation. A comp that shows fully updated kitchen/baths/flooring reads FULL_COSMETIC or better; obvious deferred maintenance or damage reads HEAVY_REHAB/FULL_GUT. UNVERIFIED when no photo or description exists.',
+    instructions: renovationTierInstructions('comp'),
   },
 }
+
+// Each question reads exactly one kind of evidence, and each kind travels
+// in its own model call: listing photos + description (condition), satellite
+// aerials (site), street views (physical match). The calls never share
+// images, so an aerial cannot colour a condition answer or the reverse.
+type AnyQuestion = (typeof SUBJECT_QUESTIONS)[keyof typeof SUBJECT_QUESTIONS] | (typeof COMP_QUESTIONS)[keyof typeof COMP_QUESTIONS]
+const questionsWhere = <Q extends Record<string, AnyQuestion>>(all: Q, keep: (name: string) => boolean): Record<string, AnyQuestion> =>
+  Object.fromEntries(Object.entries(all).filter(([name]) => keep(name)))
+
+const isSubjectSatellite = (name: string) => name.startsWith('s8_') || name.startsWith('s9')
+const SUBJECT_SATELLITE_QUESTIONS = questionsWhere(SUBJECT_QUESTIONS, isSubjectSatellite)
+const SUBJECT_CONDITION_QUESTIONS = questionsWhere(SUBJECT_QUESTIONS, (name) => !isSubjectSatellite(name))
+
+const COMP_SATELLITE_NAMES = ['c8_premium_attributes', 'c9_site_exposure', 'c12_development_vintage']
+const COMP_STREET_NAMES = ['c10_physical_match']
+// c8p_* premium-probability reads judge the aerial — they ride the
+// satellite call (spec step 5), not the listing-condition call.
+const isCompSatellite = (name: string) => COMP_SATELLITE_NAMES.includes(name) || name.startsWith('c8p_') || name.startsWith('sp_')
+const COMP_SATELLITE_QUESTIONS = questionsWhere(COMP_QUESTIONS, isCompSatellite)
+const COMP_STREET_QUESTIONS = questionsWhere(COMP_QUESTIONS, (name) => COMP_STREET_NAMES.includes(name))
+const COMP_CONDITION_QUESTIONS = questionsWhere(
+  COMP_QUESTIONS,
+  (name) => !isCompSatellite(name) && !COMP_STREET_NAMES.includes(name),
+)
 
 // ─── Deterministic match profile (code, not model) ──────────────────────
 
@@ -390,6 +484,9 @@ export interface SubjectObservables {
   priceConditionAgreement: string | null
   /** Premium lot attribute from satellite + photos (waterfront/pool/corner etc.). */
   lotPremium: string | null
+  /** Per-attribute lot-premium odds — P(waterfront) / P(corner-cul-de-sac)
+   *  / P(oversized) / P(pool). */
+  lotPremiumProbabilities: Record<string, number> | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
   /** Edge-wise exposure probabilities + computed street orientation —
@@ -403,9 +500,14 @@ export interface SubjectObservables {
     streetBearingDeg: number | null
   }
   /** Scope of work the subject needs, in the product's rehab-tier
-   *  vocabulary (LIPSTICK … FULL_GUT) — the model picked against the
-   *  Evaluation Settings criteria. */
+   *  vocabulary (LIPSTICK … FULL_GUT) — the subject renovation
+   *  assessment's verdict (see applySubjectTierVerdict). */
   renovationTier: string | null
+  /** Probability per renovation tier behind `renovationTier` */
+  renovationTierProbabilities?: Record<string, number> | null
+  /** The subject's saved cover photo — the first listing photo that loads,
+   *  used as the reference image for every comp's exterior match. */
+  coverPhotoUrl?: string | null
   confidence: Record<string, number>
   photosRead: number
   photosTotal: number
@@ -429,6 +531,10 @@ export interface CompObservables {
   finalTier: string | null
   /** Non-condition premium driver (waterfront/lot/pool/view) — explains c6 flags. */
   premiumAttributes: string | null
+  /** Per-attribute probabilities for premiumAttributes — P(waterfront),
+   *  P(corner/cul-de-sac), P(large lot), P(view), P(pool) — the seat reads
+   *  the odds, not just the winning label. */
+  premiumProbabilities?: Record<string, number> | null
   /** Adverse site exposure from satellite (arterial/commercial/freeway). */
   siteExposure: string | null
   /** Development-era comparison from both aerials — NEWER means the comp
@@ -438,8 +544,21 @@ export interface CompObservables {
   /** Comp condition in the product's rehab-tier vocabulary — the model
    *  picked against the Evaluation Settings criteria (photo+description). */
   conditionTier: string | null
+  /** Probability per renovation tier behind `conditionTier` */
+  conditionTierProbabilities?: Record<string, number> | null
   /** P(comp is a physical match to the subject) — street view lane. */
   physicalMatchP: number | null
+  /** P(the comp's exterior matches the subject's) — listing cover photo vs
+   *  listing cover photo. Null when either photo is missing. */
+  exteriorMatchP?: number | null
+  /** Site predicates — yes/no satellite reads (probability ≥0.5 = yes):
+   *  backsBusyRoad / frontsBusyRoad / sidesBusyRoad / commercial /
+   *  cornerLot / culdesac / infillLot / waterfront / lakefront / riverfront. */
+  sitePredicates?: Record<string, number | null> | null
+  /** P(the comp's cover photo shows the front of the house) */
+  coverIsFrontP?: number | null
+  /** P(the subject's cover photo shows the front of the house) */
+  subjectCoverIsFrontP?: number | null
   /** P(comp is a finished/renovated/move-in-ready version of the subject) —
    *  ARV-fitness ladder: flipper-complete highest, maintained ~70-80s,
    *  fixer/investor lowest. */
@@ -451,13 +570,32 @@ export interface CompObservables {
   durationMs: number
 }
 
-type DecisionsAnswers = Record<string, { probability?: number; choice?: string | boolean | null; score?: number; confidence?: number }>
+type DecisionsAnswers = Record<string, { probability?: number; choice?: string | boolean | null; score?: number; confidence?: number; probabilities?: Record<string, number> }>
 const choiceOf = (a: DecisionsAnswers, k: string): string | null =>
   typeof a[k]?.choice === 'string' ? (a[k]!.choice as string) : null
 const probOf = (a: DecisionsAnswers, k: string): number | null =>
   typeof a[k]?.probability === 'number' ? a[k]!.probability! : null
+const choiceProbs = (a: DecisionsAnswers, k: string): Record<string, number> | null =>
+  a[k]?.probabilities && Object.keys(a[k]!.probabilities!).length ? a[k]!.probabilities! : null
+/** Probability per renovation tier behind a tier choice answer. */
+const tierProbsOf = (a: DecisionsAnswers, k: string): Record<string, number> | null =>
+  renovationTierProbabilities(a[k]?.probabilities)
 const confs = (a: DecisionsAnswers): Record<string, number> =>
   Object.fromEntries(Object.entries(a).filter(([, v]) => typeof v?.confidence === 'number').map(([k, v]) => [k, v.confidence!]))
+
+/**
+ * One subject tier per evaluation. The renovation assessment asks the tier
+ * question once and prices the rehab from it, so that verdict is also the
+ * tier the appraiser is told — this lane does not ask it a second time.
+ */
+export function applySubjectTierVerdict(
+  observables: SubjectObservables,
+  assessment: { renovationLevelIndex: number | null; tierProbabilities?: Record<string, number> | null },
+): void {
+  const tier = assessment.renovationLevelIndex === null ? null : RENOVATION_LEVEL_DEFINITIONS[assessment.renovationLevelIndex]
+  observables.renovationTier = tier ? tier.name.toUpperCase().replace(/ /g, '_') : null
+  observables.renovationTierProbabilities = tier ? assessment.tierProbabilities ?? null : null
+}
 
 // ─── Subject call — every listing photo (100% coverage), chunked past the
 //     API's 128-image cap; empty sets fall back to the cover photo. ───────
@@ -488,7 +626,10 @@ export async function fetchSatelliteTile(env: Env, subject: Record<string, unkno
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
   const key = env.GOOGLE_MAPS_KEY
   if (key) {
-    const g = await fetchTile(`https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=640x640&maptype=hybrid&key=${key}`).catch(() => null)
+    // 640px at zoom 17 spans ~600m (the wide frame); zoom 19 spans ~150m
+    // (the close-up, parcel centered). One fixed zoom made both frames identical.
+    const zoom = half >= 200 ? 17 : 19
+    const g = await fetchTile(`https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=640x640&maptype=hybrid&key=${key}`).catch(() => null)
     if (g) return g
   }
   // Web-Mercator bbox ≈ zoom 17 (~600m across at 640px).
@@ -515,7 +656,8 @@ export async function fetchSatelliteTile(env: Env, subject: Record<string, unkno
 export type FrameEdge = 'north' | 'east' | 'south' | 'west'
 export interface StreetOrientation { streetEdge: FrameEdge; bearingDeg: number; streetName: string | null }
 
-export async function fetchStreetOrientation(subject: Record<string, unknown>): Promise<StreetOrientation | null> {
+export async function fetchStreetOrientation(subject: Record<string, unknown>, env?: { OSM_ENABLED?: string }): Promise<StreetOrientation | null> {
+  if (env?.OSM_ENABLED === 'false') return null
   const lat = subject.latitude ?? subject.lat, lng = subject.longitude ?? subject.lng
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
   const addr = String(subject.address ?? '')
@@ -596,7 +738,16 @@ export function deriveExposure(
 export async function fetchStreetViewTile(env: Env, loc: { latitude?: number | null; longitude?: number | null }) {
   const key = env.GOOGLE_MAPS_KEY
   const lat = loc.latitude, lng = loc.longitude
+  if (env.STREET_VIEW_ENABLED === 'false') return null
   if (!key || typeof lat !== 'number' || typeof lng !== 'number') return null
+  // Where there is no coverage the image endpoint still answers 200 with a
+  // grey "no imagery" placeholder. The (free) metadata endpoint says whether
+  // a real panorama exists — never hand the placeholder to a reader.
+  const meta = await fetch(
+    `https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat},${lng}&key=${key}`,
+    { signal: AbortSignal.timeout(10000) },
+  )
+  if (!meta.ok || ((await meta.json()) as { status?: string }).status !== 'OK') return null
   const url = `https://maps.googleapis.com/maps/api/streetview?size=640x640&location=${lat},${lng}&key=${key}`
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
   if (!res.ok) return null
@@ -625,23 +776,22 @@ export async function decisionsSubjectObservables(
   if (!isDecisionsAvailable(env)) return null
   const started = Date.now()
   const urls = input.photoUrls.length > 0 ? input.photoUrls : (input.coverPhotoUrl ? [input.coverPhotoUrl] : [])
-  const [sat, satClose, street, images, orientation] = await Promise.all([
+  const [sat, satClose, images, orientation] = await Promise.all([
     fetchSatelliteTile(env, input.subject).catch(() => null),
     fetchSatelliteTile(env, input.subject, 90).catch(() => null),
-    fetchStreetViewTile(env, { latitude: input.subject.latitude as number | null ?? null, longitude: input.subject.longitude as number | null ?? null }).catch(() => null),
     fetchImagesAsBase64(urls, { concurrency: 10 }),
-    fetchStreetOrientation(input.subject).catch(() => null),
+    fetchStreetOrientation(input.subject, env).catch(() => null),
   ])
   const satImg = sat ?? input.satelliteImage ?? null
-  const imgs = [
-    ...(satImg ? [{ mimeType: satImg.content_type ?? 'image/png', base64: satImg.base64 }] : []),
-    ...(satClose ? [{ mimeType: satClose.content_type ?? 'image/png', base64: satClose.base64 }] : []),
-    ...(street ? [{ mimeType: street.content_type ?? 'image/jpeg', base64: street.base64 }] : []),
-    ...urls.map((u) => images.get(u)).filter((i): i is NonNullable<typeof i> => !!i),
+  const photos = urls.map((u) => images.get(u)).filter((i): i is NonNullable<typeof i> => !!i)
+  const satelliteImages = [
+    ...(satImg ? [{ label: 'satellite aerial (wide ~600m)', content_type: satImg.content_type ?? 'image/png', base64: satImg.base64 }] : []),
+    ...(satClose ? [{ label: 'satellite close-up (~180m — subject parcel centered)', content_type: satClose.content_type ?? 'image/png', base64: satClose.base64 }] : []),
   ]
   const askPos = input.askPpsf != null && input.benchmark ? positionFor(input.askPpsf, input.benchmark) : null
 
-  const state = {
+  // Condition read — listing photos + description only.
+  const conditionState = {
     role: 'SUBJECT property — evaluate ONLY this property.',
     subject: input.subject,
     askingPrice: input.askPrice ?? null,
@@ -649,45 +799,63 @@ export async function decisionsSubjectObservables(
     codePricePosition: askPos,
     matchedMarket: input.benchmark,
     description: input.description ?? null,
-    imageOrder: [
-      ...(satImg ? ['satellite aerial (wide ~600m)'] : []),
-      ...(satClose ? ['satellite close-up (~180m — subject parcel centered)'] : []),
-      ...(street ? ['street view (curb-level)'] : []),
-      'listing photos',
-    ],
+    imageOrder: ['listing photos'],
     doctrine: DECISIONS_DOCTRINE,
     rules: [
       'A price tier is not proof of renovation condition.',
       'Missing interior photographs do not prove that a property is dated.',
       'Marketing claims are evidence, not verified facts.',
-      'Street view judges physical similarity only — never condition.',
       'Record confidence for every answer; confidence is not independent verification.',
     ],
   }
-
-  // 100% coverage — chunk past the image cap and merge answers (condition
-  // questions read every chunk; price/description questions run once on
-  // the first chunk's call).
-  const chunks: typeof imgs[] = []
-  for (let i = 0; i < imgs.length; i += DECISIONS_IMG_CAP) chunks.push(imgs.slice(i, i + DECISIONS_IMG_CAP))
-  if (chunks.length === 0) chunks.push([])
+  // Satellite read — the aerials and the parcel's location facts only. No
+  // listing photos, no description, no price.
+  const satelliteState = {
+    role: 'SUBJECT property — site and lot read from satellite imagery. Evaluate ONLY the parcel at the center of each frame.',
+    subject: {
+      address: input.subject.address ?? null,
+      lotSizeAcres: input.subject.lotSizeAcres ?? null,
+      latitude: input.subject.latitude ?? null,
+      longitude: input.subject.longitude ?? null,
+    },
+    imageOrder: satelliteImages.map((i) => i.label),
+  }
 
   const merged: DecisionsAnswers = {}
-  for (let i = 0; i < chunks.length; i++) {
-    const questions = i === 0
-      ? SUBJECT_QUESTIONS
-      : Object.fromEntries(Object.entries(SUBJECT_QUESTIONS).filter(([k]) => !k.startsWith('s6') && !k.startsWith('s5')))
-    const res = await decisionsRun(env, {
-      state: i === 0 ? state : { ...state, note: `photo chunk ${i + 1}/${chunks.length} — same subject, continue answering` },
-      questions,
-      images: chunks[i]!.map((im) => ({ content_type: im.mimeType, base64: im.base64 })),
-    }).catch(() => null)
-    for (const [k, v] of Object.entries(res?.answers ?? {})) {
+  const absorb = (answers: Record<string, unknown> | undefined) => {
+    for (const [k, v] of Object.entries(answers ?? {})) {
       if (!(k in merged) || (typeof (v as { confidence?: number }).confidence === 'number' && ((v as { confidence?: number }).confidence! > ((merged[k] as { confidence?: number })?.confidence ?? 0)))) {
         merged[k] = v as DecisionsAnswers[string]
       }
     }
   }
+
+  const satelliteRead = satelliteImages.length
+    ? decisionsRun(env, {
+        state: satelliteState,
+        questions: SUBJECT_SATELLITE_QUESTIONS,
+        images: satelliteImages.map(({ content_type, base64 }) => ({ content_type, base64 })),
+      }).catch(() => null)
+    : Promise.resolve(null)
+
+  // 100% photo coverage — chunk past the image cap and merge answers
+  // (condition questions read every chunk; price/description questions run
+  // once on the first chunk's call).
+  const chunks: typeof photos[] = []
+  for (let i = 0; i < photos.length; i += DECISIONS_IMG_CAP) chunks.push(photos.slice(i, i + DECISIONS_IMG_CAP))
+  if (chunks.length === 0) chunks.push([])
+  for (let i = 0; i < chunks.length; i++) {
+    const questions = i === 0
+      ? SUBJECT_CONDITION_QUESTIONS
+      : questionsWhere(SUBJECT_CONDITION_QUESTIONS, (k) => !k.startsWith('s6') && !k.startsWith('s5'))
+    const res = await decisionsRun(env, {
+      state: i === 0 ? conditionState : { ...conditionState, note: `photo chunk ${i + 1}/${chunks.length} — same subject, continue answering` },
+      questions,
+      images: chunks[i]!.map((im) => ({ content_type: im.mimeType, base64: im.base64 })),
+    }).catch(() => null)
+    absorb(res?.answers)
+  }
+  absorb((await satelliteRead)?.answers)
   if (Object.keys(merged).length === 0) return null
 
   return {
@@ -700,6 +868,12 @@ export async function decisionsSubjectObservables(
     askPriceSupport: choiceOf(merged, 's6_ask_price_support'),
     priceConditionAgreement: choiceOf(merged, 's7_price_condition'),
     lotPremium: choiceOf(merged, 's8_lot_premium'),
+    lotPremiumProbabilities: {
+      WATERFRONT: probOf(merged, 's8p_waterfront') ?? 0,
+      CORNER_CULDESAC: probOf(merged, 's8p_culdesac_corner') ?? 0,
+      OVERSIZED_LOT: probOf(merged, 's8p_oversized') ?? 0,
+      POOL: probOf(merged, 's8p_pool') ?? 0,
+    },
     siteExposure: (() => {
       // Edge predicates + code-computed street orientation resolve the side
       // when they fire — the choice answer stays the fallback for the frames
@@ -724,11 +898,13 @@ export async function decisionsSubjectObservables(
       streetEdge: orientation?.streetEdge ?? null,
       streetBearingDeg: orientation?.bearingDeg ?? null,
     },
-    renovationTier: choiceOf(merged, 's10_renovation_tier'),
+    // Set from the renovation assessment by applySubjectTierVerdict.
+    renovationTier: null,
+    renovationTierProbabilities: null,
     confidence: confs(merged),
-    photosRead: imgs.length,
+    photosRead: photos.length,
     photosTotal: urls.length,
-    imagesRead: state.imageOrder,
+    imagesRead: [...satelliteState.imageOrder, ...(photos.length ? ['listing photos'] : [])],
     model: env.DECISIONS_MODEL || 'gpt-6-luna',
     durationMs: Date.now() - started,
   }
@@ -745,36 +921,75 @@ export async function decisionsCompObservables(
     description?: string | null
     /** Pre-fetched cover image; falls back to coverPhotoUrl fetch. */
     coverImage?: { base64: string; content_type?: string } | null
+    /** Every pre-fetched listing photo (cover first) — the condition read
+     *  sees them all; the cover alone feeds the exterior match. */
+    listingImages?: Array<{ base64: string; content_type?: string }> | null
     coverPhotoUrl?: string | null
     /** Comp coordinates for the satellite tile feeding c9. */
     latitude?: number | null
     longitude?: number | null
-    /** Subject street-view image for the c10 physical-similarity lane —
-     *  fetched once per eval and shared across every comp call. */
+    /** Subject listing cover photo — reference image for the exterior
+     *  match, fetched once per eval and shared across every comp call. */
+    subjectCoverImage?: CoverImage | null
+    /** Subject street-view image — c10 street-comparison mate. Fetched once
+     *  per eval, shared across every comp call. */
     subjectStreetViewImage?: { base64: string; content_type?: string } | null
     /** Subject wide satellite aerial for the c12 development-vintage lane —
      *  fetched once per eval and shared across every comp call. */
     subjectSatelliteImage?: { base64: string; content_type?: string } | null
+    subjectAddress?: string | null
     /** Subject's geo/physical fields — feeds the code-computed matchProfile. */
     subjectRef?: MatchLike
     benchmark: PocketBenchmark | null
   },
+  /** Spec order split — the lane runs { site: false } (condition/cover/
+   *  description, spec step 2); the seat runs { condition: false } (satellite
+   *  premiums, street-view physical match, exterior match, spec step 5) after
+   *  the TypeScript labels exist. Omit to run every phase. */
+  phases?: { condition?: boolean; site?: boolean; street?: boolean },
 ): Promise<CompObservables | null> {
   if (!isDecisionsAvailable(env)) return null
+  const wantCondition = phases?.condition !== false
+  const wantSite = phases?.site !== false
+  if (!wantCondition && !wantSite) return null
   const started = Date.now()
   const pos = input.ppsf != null && input.benchmark ? positionFor(input.ppsf, input.benchmark) : { tier: 'UNVERIFIED' as PriceTier, vsMedianPct: null }
-  let img = input.coverImage ?? null
+  let img = input.listingImages?.[0] ?? input.coverImage ?? null
   if (!img && input.coverPhotoUrl) {
     const fetched = await fetchImageAsBase64(input.coverPhotoUrl).catch(() => null)
     if (fetched) img = { base64: fetched.base64, content_type: fetched.mimeType }
   }
-  const [satImg, satCloseImg, streetImg] = await Promise.all([
-    fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
-    fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }, 90).catch(() => null),
-    fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null),
-  ])
+  const listingImages = input.listingImages?.length ? input.listingImages : img ? [img] : []
+  const wantStreet = wantSite && phases?.street !== false
+  const [satImg, satCloseImg, streetImg] = wantSite
+    ? await Promise.all([
+        fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }).catch(() => null),
+        fetchSatelliteTile(env, { latitude: input.latitude ?? undefined, longitude: input.longitude ?? undefined }, 90).catch(() => null),
+        wantStreet ? fetchStreetViewTile(env, { latitude: input.latitude, longitude: input.longitude }).catch(() => null) : Promise.resolve(null),
+      ])
+    : [null, null, null]
+  type Labeled = { label: string; content_type?: string; base64: string }
+  const listingSet: Labeled[] = listingImages.map((im, i) => ({
+    label: i === 0 ? 'comp listing cover photo' : `comp listing photo ${i + 1}`,
+    content_type: im.content_type, base64: im.base64,
+  }))
+  const satelliteSet: Labeled[] = [
+    ...(satImg ? [{ label: 'comp satellite aerial (wide ~600m)', content_type: satImg.content_type, base64: satImg.base64 }] : []),
+    ...(satCloseImg ? [{ label: 'comp satellite close-up (~180m — comp parcel centered)', content_type: satCloseImg.content_type, base64: satCloseImg.base64 }] : []),
+    ...(input.subjectSatelliteImage ? [{ label: 'SUBJECT satellite aerial (wide ~600m — subject parcel centered)', content_type: input.subjectSatelliteImage.content_type, base64: input.subjectSatelliteImage.base64 }] : []),
+  ]
+  // Street comparison needs both houses; one street view alone compares nothing.
+  const streetSet: Labeled[] = streetImg && input.subjectStreetViewImage
+    ? [
+        { label: 'comp street view', content_type: streetImg.content_type, base64: streetImg.base64 },
+        { label: 'SUBJECT street view', content_type: input.subjectStreetViewImage.content_type, base64: input.subjectStreetViewImage.base64 },
+      ]
+    : []
+  const payload = (set: Labeled[]) => set.map(({ content_type, base64 }) => ({ content_type, base64 }))
 
-  const state = {
+  // Condition read — listing photos + description + the code-computed
+  // price position. No aerials, no street views.
+  const conditionState = {
     role: 'COMPARABLE closed sale — evaluate ONLY this property.',
     comp: input.comp,
     closedSalePrice: input.salePrice ?? null,
@@ -783,37 +998,58 @@ export async function decisionsCompObservables(
     matchedMarket: input.benchmark,
     matchProfile: compMatchProfile(input.subjectRef ?? {}, input.comp),
     description: input.description ?? null,
-    imageOrder: [
-      ...(img ? ['comp listing cover photo'] : []),
-      ...(satImg ? ['comp satellite aerial (wide ~600m)'] : []),
-      ...(satCloseImg ? ['comp satellite close-up (~180m — comp parcel centered)'] : []),
-      ...(streetImg ? ['comp street view'] : []),
-      ...(input.subjectStreetViewImage ? ['SUBJECT street view'] : []),
-      ...(input.subjectSatelliteImage ? ['SUBJECT satellite aerial (wide ~600m — subject parcel centered)'] : []),
-    ],
+    imageOrder: listingSet.map((i) => i.label),
     doctrine: DECISIONS_DOCTRINE,
     rules: [
       'A price tier is not proof of renovation condition.',
       'A price outlier must be flagged when its premium cannot be explained.',
       'Do not automatically remove a comp because its price and condition disagree.',
       'Preserve disagreements between price position and condition evidence.',
-      'Street view judges physical similarity only — never condition.',
       'Decisions classifies evidence. The appraiser selects comps and determines ARV.',
     ],
   }
-  const res = await decisionsRun(env, {
-    state,
-    questions: COMP_QUESTIONS,
-    images: [
-      ...(img ? [{ content_type: img.content_type, base64: img.base64 }] : []),
-      ...(satImg ? [{ content_type: satImg.content_type, base64: satImg.base64 }] : []),
-      ...(satCloseImg ? [{ content_type: satCloseImg.content_type, base64: satCloseImg.base64 }] : []),
-      ...(streetImg ? [{ content_type: streetImg.content_type, base64: streetImg.base64 }] : []),
-      ...(input.subjectStreetViewImage ? [{ content_type: input.subjectStreetViewImage.content_type, base64: input.subjectStreetViewImage.base64 }] : []),
-      ...(input.subjectSatelliteImage ? [{ content_type: input.subjectSatelliteImage.content_type, base64: input.subjectSatelliteImage.base64 }] : []),
-    ],
-  }).catch(() => null)
-  const a = (res?.answers ?? {}) as DecisionsAnswers
+  // Satellite read — the aerials and the parcel's lot facts only. No
+  // listing photos, no description, no price.
+  const satelliteState = {
+    role: 'COMPARABLE property — site and lot read from satellite imagery. Evaluate the parcel at the center of the comp frames.',
+    comp: {
+      address: input.comp.address ?? null,
+      lotSizeAcres: input.comp.lotSizeAcres ?? null,
+      pool: input.comp.pool ?? null,
+    },
+    imageOrder: satelliteSet.map((i) => i.label),
+  }
+  const streetState = {
+    role: 'Street-view comparison of a COMPARABLE with the SUBJECT — physical similarity only, never condition.',
+    imageOrder: streetSet.map((i) => i.label),
+  }
+
+  // Cover photo vs cover photo — its own two-image call.
+  const exteriorPromise = wantSite
+    ? decisionsExteriorMatch(env, {
+        subjectCover: input.subjectCoverImage,
+        compCover: img,
+        subjectAddress: input.subjectAddress ?? null,
+        compAddress: (input.comp.address as string | undefined) ?? null,
+      }).catch(() => null)
+    : Promise.resolve(null)
+  const [conditionRes, satelliteRes, streetRes, exterior] = await Promise.all([
+    wantCondition
+      ? decisionsRun(env, { state: conditionState, questions: COMP_CONDITION_QUESTIONS, images: payload(listingSet) }).catch(() => null)
+      : null,
+    wantSite && satelliteSet.length
+      ? decisionsRun(env, { state: satelliteState, questions: COMP_SATELLITE_QUESTIONS, images: payload(satelliteSet) }).catch(() => null)
+      : null,
+    wantSite && streetSet.length
+      ? decisionsRun(env, { state: streetState, questions: COMP_STREET_QUESTIONS, images: payload(streetSet) }).catch(() => null)
+      : null,
+    exteriorPromise,
+  ])
+  const a = {
+    ...(conditionRes?.answers ?? {}),
+    ...(satelliteRes?.answers ?? {}),
+    ...(streetRes?.answers ?? {}),
+  } as DecisionsAnswers
   if (Object.keys(a).length === 0) return null
 
   return {
@@ -827,13 +1063,36 @@ export async function decisionsCompObservables(
     unexplainedPremiumP: probOf(a, 'c6_unexplained_premium'),
     finalTier: choiceOf(a, 'c7_final_tier'),
     premiumAttributes: choiceOf(a, 'c8_premium_attributes'),
+    premiumProbabilities: choiceProbs(a, 'c8_premium_attributes') ?? {
+      WATERFRONT: probOf(a, 'c8p_waterfront') ?? 0,
+      CORNER_CULDESAC: probOf(a, 'c8p_culdesac_corner') ?? 0,
+      LARGE_LOT: probOf(a, 'c8p_large_lot') ?? 0,
+      VIEW: probOf(a, 'c8p_view') ?? 0,
+      POOL: probOf(a, 'c8p_pool') ?? 0,
+    },
+    sitePredicates: {
+      backsBusyRoad: probOf(a, 'sp_backs_busy_road'),
+      frontsBusyRoad: probOf(a, 'sp_fronts_busy_road'),
+      sidesBusyRoad: probOf(a, 'sp_sides_busy_road'),
+      commercial: probOf(a, 'sp_commercial'),
+      cornerLot: probOf(a, 'sp_corner_lot'),
+      culdesac: probOf(a, 'sp_culdesac'),
+      infillLot: probOf(a, 'sp_infill_lot'),
+      waterfront: probOf(a, 'sp_waterfront'),
+      lakefront: probOf(a, 'sp_lakefront'),
+      riverfront: probOf(a, 'sp_riverfront'),
+    },
     siteExposure: choiceOf(a, 'c9_site_exposure'),
     developmentVintage: choiceOf(a, 'c12_development_vintage'),
     conditionTier: choiceOf(a, 'c13_condition_tier'),
+    conditionTierProbabilities: tierProbsOf(a, 'c13_condition_tier'),
     physicalMatchP: probOf(a, 'c10_physical_match'),
+    exteriorMatchP: exterior?.matchP ?? null,
+    coverIsFrontP: exterior?.compCoverIsFrontP ?? null,
+    subjectCoverIsFrontP: exterior?.subjectCoverIsFrontP ?? null,
     arvFitnessP: probOf(a, 'c11_arv_fitness'),
     confidence: confs(a),
-    imagesRead: state.imageOrder,
+    imagesRead: [...conditionState.imageOrder, ...satelliteState.imageOrder, ...streetState.imageOrder],
     model: env.DECISIONS_MODEL || 'gpt-6-luna',
     durationMs: Date.now() - started,
   }

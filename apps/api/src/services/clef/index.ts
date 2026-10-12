@@ -15,6 +15,14 @@
 
 import type { Env } from '../../types'
 import { decisionsRun } from '../decisions'
+import {
+  RENOVATION_LEVEL_DEFINITIONS,
+  RENOVATION_TIER_CHOICES,
+  RENOVATION_TIER_UNVERIFIED,
+  renovationLevelToIndex,
+  renovationTierInstructions,
+  renovationTierProbabilities,
+} from '../vision/renovation'
 
 // Workers-AI reader names, the legacy OpenRouter lane, or whichever
 // reasoning model answered (e.g. 'claude-haiku-5-5' via Anthropic).
@@ -77,6 +85,12 @@ export interface CompConditionResult {
   conditionLabel: string
   /** Clef's reported confidence in the score answer, when present */
   confidence?: number
+  /** Renovation tier the comp was most like as sold — the same five tiers
+   *  and definitions the subject is read against. Null when the evidence
+   *  could not support a tier. */
+  renovationTier?: string | null
+  /** Probability per renovation tier behind `renovationTier` */
+  renovationTierProbabilities?: Record<string, number> | null
   /** 1-2 sentence evidence summary the classifier wrote (haiku path). */
   summary?: string
   /** Comp-rules check — does the comp satisfy the selection rules and,
@@ -145,6 +159,16 @@ export const CONDITION_QUESTIONS: Record<string, Question> = {
       median:
         'Median retail sale — typical owner-occupant purchase in mid-range condition and price for the neighborhood',
       arv: 'After-repair-value evidence — genuinely renovated sale at or near the top of the market',
+    },
+  },
+  // Renovation tier — the comp read against the same five tiers (and the
+  // same definition sentences) as the subject, so the two are comparable.
+  renovation_tier: {
+    type: 'choice',
+    instructions: renovationTierInstructions('comp'),
+    criteria: {
+      ...RENOVATION_TIER_CHOICES,
+      [RENOVATION_TIER_UNVERIFIED]: 'No photo or description evidence to support a tier.',
     },
   },
   // Agent-assist digests — pre-reasoned hints the Evaluation Agent weighs
@@ -311,6 +335,10 @@ export function buildConditionResult(
   const tier = parseTier(answers.tier)
   const priceSanity = choicePick(answers.price_sanity, ['plausible', 'suspicious', 'data_error'] as const)
   const anchorQuality = choicePick(answers.anchor_quality, ['strong_anchor', 'supporting', 'weak', 'reject'] as const)
+  const renovationTier = choicePick(
+    answers.renovation_tier,
+    [...RENOVATION_LEVEL_DEFINITIONS.map((d) => d.name), RENOVATION_TIER_UNVERIFIED],
+  )
   const hint: CompHint | undefined =
     priceSanity.pick || anchorQuality.pick
       ? {
@@ -335,6 +363,8 @@ export function buildConditionResult(
     conditionScore: score,
     conditionLabel: CONDITION_SCALE[clamped].split(' — ')[0],
     confidence: typeof conf === 'number' ? conf : undefined,
+    renovationTier: renovationLevelToIndex(renovationTier.pick) === null ? null : renovationTier.pick,
+    renovationTierProbabilities: renovationTierProbabilities(renovationTier.probabilities),
     hint,
   }
 }

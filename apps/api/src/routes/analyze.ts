@@ -34,6 +34,8 @@ import {
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, or, lt, asc } from 'drizzle-orm';
 import { analysisRuns, harnessQueue, savedReports, compTierOverrides } from '../db/schema';
+import { parseAssistArm } from '../services/llm/assist-arms';
+import { loadCallBodies, loadCallLog, summarizeCallLog, summarizeModelCalls } from '../services/observability/call-log';
 import { applyCompTierOverrides } from '../utils/comp-tier-overrides';
 
 type Variables = { auth: AuthContext };
@@ -144,7 +146,15 @@ interface AnalyzeRequest {
    *  `awaiting_agent` — the Evaluation Agent posts its comp-selection
    *  verdict to /jobs/:jobId/harness/selection and the deterministic tail
    *  finishes the eval. Omitted = today's deterministic Set-B path. */
-  harness?: 'agent' | 'corelogic';
+  harness?: 'agent' | 'corelogic' | 'typescript' | 'finale';
+
+  /** Assist-model A/B arm: 'A' = claude-haiku-5-5, 'B' =
+   *  deepseek/deepseek-v4.1-flash. Pins the backup reader and the
+   *  appraiser's reasoning sub-agent for this run; nothing else changes. */
+  arm?: 'A' | 'B';
+  /** Replay identical outbound calls from this earlier job's call log, so
+   *  both arms of an A/B evaluate the same evidence. */
+  replayCallsFrom?: string;
 }
 
 const ALLOWED_MODELS = new Set([
@@ -248,7 +258,16 @@ analyze.post('/', async (c) => {
     // The route returns immediately with jobId + SSE token.
 
     let appraisalRules = userSettings.appraisalRules;
-    if (body.appraisalOverrides || body.harness === 'agent' || body.harness === 'corelogic') {
+    // The env default counts too — a DEFAULT_HARNESS=typescript run with no
+    // explicit harness must not inherit the caller's preset grid, or the same
+    // request evaluates differently per user's saved preset. Same resolution
+    // the result-cache key uses below.
+    const seatHarness = (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript' || body.harness === 'finale')
+      ? body.harness
+      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'typescript' || c.env.DEFAULT_HARNESS === 'finale'
+          ? c.env.DEFAULT_HARNESS
+          : undefined)
+    if (body.appraisalOverrides || seatHarness) {
       const overrideFilters = body.appraisalOverrides?.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
@@ -263,7 +282,7 @@ analyze.post('/', async (c) => {
           percent: a.percent,
         }),
       );
-      appraisalRules = (body.harness === 'agent' || body.harness === 'corelogic')
+      appraisalRules = seatHarness != null
         // Agent runs are governed by EVAL-AGENT-RULESET.md — the caller's
         // overrides are verbatim and the user's preset never merges in.
         // With no filters enabled, comps stay enabled except for the hard
@@ -310,15 +329,12 @@ analyze.post('/', async (c) => {
     // env-defaulted harness must key the cache too, or a corelogic-default
     // deployment serves deterministic-harness reports to ordinary requests
     // (and vice versa) through the shared KV.
-    const effectiveHarness = (body.harness === 'agent' || body.harness === 'corelogic')
-      ? body.harness
-      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
-          ? c.env.DEFAULT_HARNESS
-          : undefined)
+    // An A/B arm keys the cache too — arm A's report is never served as arm B's.
+    const assistArm = parseAssistArm(body.arm);
     const resultCacheKey = evalResultKey(
       auth.userId,
       body.address ?? '',
-      evalParamsHash + (effectiveHarness ? `:${effectiveHarness}` : ''),
+      evalParamsHash + (seatHarness ? `:${seatHarness}` : '') + (assistArm ? `:arm${assistArm}` : ''),
     );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
@@ -412,11 +428,15 @@ analyze.post('/', async (c) => {
         // Explicit harness param wins; else the deployment's DEFAULT_HARNESS
         // env drives it (alpha.flowstate runs the corelogic harness
         // deployment-wide — same dashboard, different eval seat).
-        harness: (body.harness === 'agent' || body.harness === 'corelogic')
+        harness: (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript' || body.harness === 'finale')
           ? body.harness
-          : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent'
+          : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'typescript' || c.env.DEFAULT_HARNESS === 'finale'
               ? c.env.DEFAULT_HARNESS
               : undefined),
+        arm: assistArm,
+        replayCallsFrom: typeof body.replayCallsFrom === 'string' && /^job_[\w-]{1,80}$/.test(body.replayCallsFrom)
+          ? body.replayCallsFrom
+          : undefined,
       }),
     });
     // A live run owns the DO — don't error, hand the caller the same job
@@ -504,6 +524,34 @@ analyze.post('/', async (c) => {
  */
 // Registered before /jobs/:jobId so 'queue' isn't captured as a jobId param.
 analyze.get('/jobs/queue', harnessQueueListHandler);
+
+/**
+ * GET /analyze/jobs/:jobId/calls
+ * The job's call log — every outbound API call the run made (provider,
+ * scrapes, imagery, decision model, reasoning models) with request,
+ * response and timing. Kept 90 days. `?summary=1` returns counts only;
+ * `?seq=N` returns one call with its full request and response bodies
+ * (large bodies are stored apart from the index).
+ */
+analyze.get('/jobs/:jobId/calls', async (c) => {
+  const log = await loadCallLog(c.env.API_CACHE, c.req.param('jobId'));
+  // Same answer for "no log" and "not yours" — a job id is not an oracle.
+  if (!log || log.userId !== c.get('auth').userId) {
+    return c.json({ success: false, error: 'No call log for this job' }, 404);
+  }
+  const seq = Number(c.req.query('seq'));
+  if (Number.isInteger(seq) && seq > 0) {
+    const entry = log.entries.find((e) => e.seq === seq);
+    if (!entry) return c.json({ success: false, error: 'No such call' }, 404);
+    return c.json({ success: true, data: { ...entry, ...(await loadCallBodies(c.env.API_CACHE, entry)) } });
+  }
+  const summary = summarizeCallLog(log);
+  if (c.req.query('summary')) {
+    const { entries, ...header } = log;
+    return c.json({ success: true, data: { ...header, calls: entries.length, summary, models: summarizeModelCalls(log) } });
+  }
+  return c.json({ success: true, data: { ...log, summary, models: summarizeModelCalls(log) } });
+});
 
 analyze.get('/jobs/:jobId', async (c) => {
   const auth = c.get('auth');

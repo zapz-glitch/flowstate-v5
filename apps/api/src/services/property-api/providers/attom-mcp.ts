@@ -636,7 +636,7 @@ function femaToFloodZone(fema: any): NormalizedFloodZone {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 const SUBJECT_DATASETS = ['identity', 'overview', 'geography-context', 'valuation', 'sales-history', 'tax-history', 'permits']
-const COMP_DETAIL_DATASETS = ['identity', 'overview', 'geography-context', 'sales-history', 'valuation', 'tax-history']
+const COMP_DETAIL_DATASETS = ['identity', 'overview', 'geography-context', 'sales-history', 'tax-history']
 const MCP_COMP_LIMIT_CAP = 25 // find_comparable_sales limit param max is 25
 
 class AttomMcpProvider implements PropertyProviderAdapter {

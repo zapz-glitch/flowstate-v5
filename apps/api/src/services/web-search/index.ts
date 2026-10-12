@@ -10,6 +10,8 @@
  * a failed search returns [] and logs why (credits, upstream wall, timeout).
  */
 
+import { REPLAYED_HEADER } from '../observability/call-log'
+
 export interface WebSearchEnv {
   SCRAPFLY_API_KEY?: string
   /** Scrapfly scrape endpoint — defaults to https://api.scrapfly.io/scrape */
@@ -113,6 +115,8 @@ export async function webSearch(
       })
       const wait = CONCURRENCY_RETRY_MS[attempt]
       if (resp.status !== 429 || wait == null || Date.now() + wait >= deadline) break
+      // A replayed 429 comes from an earlier run's log — there is nothing to wait out.
+      if (resp.headers.get(REPLAYED_HEADER)) break
       await new Promise((r) => setTimeout(r, wait))
     }
     if (!resp.ok) {
