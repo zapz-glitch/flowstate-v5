@@ -89,6 +89,9 @@ export interface BSubject {
 }
 
 export interface BComp {
+  /** Pool identity — the comparable's id in the host system. Optional:
+   *  only needed when opts.driverIds selects the driver set. */
+  id?: string | null
   address?: string | null
   isEnabled: boolean
   salePrice?: number | null
@@ -308,7 +311,16 @@ const bMedian = (xs: number[]) =>
 export function evaluateB(
   subject: BSubject,
   items: BComp[],
-  opts?: { rehabCost?: number | null },
+  opts?: {
+    rehabCost?: number | null
+    /** Seat-driven selection — the model picks WHICH comps drive, the
+     *  engine prices them: contributions, URAR cap, verification, geo
+     *  tier, similarity gate, anchor, microscope, ceiling, bracket and
+     *  confidence all apply unchanged. Picks that fail verification or
+     *  the adjustment cap are dropped and flagged; if none survive the
+     *  normal tier cascade runs instead. */
+    driverIds?: string[]
+  },
 ): BResult {
   const subSqft = subject.squareFeet
   const flags: string[] = []
@@ -712,7 +724,18 @@ export function evaluateB(
   const medianComps = driverPool.filter((x) => bCondTier(x.comp) === 'median')
   const preferred = driverPool.filter((x) =>
     x.tier === 'arv' && !['median', 'distressed'].includes(bCondTier(x.comp)) && similarity(x) >= B_MIN_SIM)
-  let drivers: BContribution[]
+  let drivers: BContribution[] = []
+  // Seat-driven selection — an upstream seat (Decisions/appraiser model)
+  // named the drivers; the engine prices them and runs every downstream
+  // check. Picks that didn't verify are evidence, not drivers.
+  const seatIds = opts?.driverIds?.length ? new Set(opts.driverIds) : null
+  if (seatIds) {
+    drivers = driverPool.filter((x) => x.comp.id != null && seatIds.has(x.comp.id))
+    const missed = [...seatIds].filter((id) => !drivers.some((x) => x.comp.id === id))
+    if (missed.length) flags.push(`seat: ${missed.length} pick(s) did not verify (bound/unfit) — dropped from drivers`)
+    if (!drivers.length) flags.push('seat: no pick survived verification — falling to tier cascade')
+  }
+  if (!seatIds || !drivers.length)
   if (preferred.length) {
     drivers = preferred
   } else if (medianComps.length) {

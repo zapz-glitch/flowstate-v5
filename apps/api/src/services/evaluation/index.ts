@@ -1732,9 +1732,15 @@ export async function performAnalysisPhase2(
         ...(detail ? { detail } : {}),
       })
     }
-    let bResult = agentSelection
-      ? adaptAgentSelection(agentSelection, toBComps(), appraisalResult.comparables)
-      : evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
+    // Model selects, code prices — the seat names WHICH comps drive
+    // (driverIds); evaluateB prices them with the full tricks engine:
+    // marginal sqft slope, land ladder, URAR cap, verification gating,
+    // anchor/self-heal, subject-units ceiling, bracket + confidence.
+    const seatDriverIds = agentSelection?.drivers ?? agentSelection?.selectedCompIds ?? null
+    let bResult = evaluateB(bSubjectFields, toBComps(), {
+      rehabCost: valuation?.totalRehabCost ?? null,
+      driverIds: seatDriverIds ?? undefined,
+    })
     let fails = verifyB(bResult)
     recordBAttempt(agentSelection ? 'agent selection' : 'attempt 1', bResult, fails,
       agentSelection ? { source: 'agent', notes: agentSelection.notes ?? null } : undefined)
@@ -2310,6 +2316,7 @@ export function toBCompsOf(
   compEvidenceCoverage?: Record<string, 'photo+desc' | 'photo' | 'desc'>,
 ): BComp[] {
   return comparables.map((comp) => ({
+    id: comp.id,
     address: comp.address ?? null,
     isEnabled: comp.isEnabled,
     salePrice: comp.salePrice ?? null,
@@ -2643,8 +2650,8 @@ export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
         }
       : null,
     comps: ctx.appraisalResult.comparables.map((comp, i) => ({
-      id: comp.id,
       ...bcomps[i]!,
+      id: comp.id,
       priceLadder: compLadderPosition(comp, ladder),
       observables: ctx.compObservables?.[comp.id] ?? null,
     })),
