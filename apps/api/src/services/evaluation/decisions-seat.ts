@@ -301,6 +301,26 @@ export async function runDecisionsSeat(
         `Code price label pricePoint=${row.pricePoint}; classify the comp, do not just echo the label.`,
     }
   }
+  // The head-to-head choice: Luna compares the whole asked set and
+  // returns a preference distribution — which comp is the STRONGEST ARV
+  // evidence — rather than TypeScript inventing a blend formula.
+  questions['best_comp'] = {
+    type: 'choice',
+    criteria: Object.fromEntries([
+      ...questionRows.map((r) => {
+        const rc = candidates.find((x) => x.id === r.id)
+        return [r.id, rc?.comp.address ?? r.id]
+      }),
+      ['NONE_QUALIFIED', 'no candidate is strong enough ARV evidence to select'],
+    ]),
+    instructions:
+      'Considering the whole candidate set: which comparable provides the ' +
+      'STRONGEST ARV evidence for the subject — weighing market ' +
+      'compatibility (pocket/geo), physical similarity, condition ' +
+      'suitability for ARV comparison, sale recency, and required ' +
+      'adjustments? Pick the single best comp; NONE_QUALIFIED only when no ' +
+      'candidate can honestly price the subject post-renovation.',
+  }
   // The seat also answers one summary question — its probability the pick
   // set is complete doubles as run confidence.
   questions['pool_quality'] = {
@@ -323,33 +343,42 @@ export async function runDecisionsSeat(
       const a = answers[name] as { choice?: string | boolean } | undefined
       return typeof a?.choice === 'string' ? a.choice : null
     }
+    const choiceProbs = (name: string): Record<string, number> => {
+      const a = answers[name] as { probabilities?: Record<string, number> } | undefined
+      return a?.probabilities ?? {}
+    }
+    const pref = choiceProbs('best_comp')
+    const modelBest = choice('best_comp')
     const askedIds = new Set(questionRows.map((r) => r.id))
-    const scored: { r: RankedComp; p: number; band: string | null }[] = candidates
+    const scored: { r: RankedComp; p: number; band: string | null; pref: number }[] = candidates
       .filter((r) => askedIds.has(r.id))
-      .map((r) => ({ r, p: prob(`q_final_${r.id}`) ?? -1, band: choice(`band_${r.id}`) }))
-      .filter((x) => x.p >= 0)
+      .map((r) => ({ r, p: prob(`q_final_${r.id}`) ?? -1, band: choice(`band_${r.id}`), pref: pref[r.id] ?? 0 }))
+      .filter((x) => x.p >= 0 || x.pref > 0)
     if (!scored.length) {
       // Malformed/absent answers — still pick the best-ranked candidate;
       // a seat answer must exist, honestly labeled.
       const r = candidates[0]!
-      scored.push({ r, p: 0, band: null })
+      scored.push({ r, p: 0, band: null, pref: 0 })
       base.debugNotes.push(`decisions-seat: no answers returned — forced pick ${r.id}`)
     }
-    // The final call IS the pick: q_final YES (p>=0.5) means the model
-    // judged this comp a post-reno, at/above-market representation of the
-    // subject. Take the top 3 yeses; a below-market band pick is only a
-    // forced floor answer when no YES exists.
-    const yeses = scored.filter((x) => x.p >= 0.5 && x.band !== 'BELOW_MARKET').sort((a, b) => b.p - a.p)
+    if (modelBest === 'NONE_QUALIFIED') base.debugNotes.push('decisions-seat: model judged no candidate qualified — forcing least-bad pick')
+    // Selection = Luna's relative preference over the qualified set, not a
+    // TS blend: order by best_comp preference, keep comps the final call
+    // passed (q_final >= 0.5) or that the model itself ranked first, and
+    // never let a BELOW_MARKET band pick drive ARV unless nothing else
+    // exists (forced floor, flagged).
+    const rankedByPref = [...scored].sort((a, b) => (b.pref - a.pref) || (b.p - a.p))
+    const qualified = rankedByPref.filter((x) => x.band !== 'BELOW_MARKET' && (x.p >= 0.5 || x.r.id === modelBest))
     let forcedBelowMarket = false
-    let picks = yeses.length ? yeses.slice(0, 3) : scored.filter((x) => x.band !== 'BELOW_MARKET').sort((a, b) => b.p - a.p).slice(0, 1)
+    let picks = qualified.length ? qualified.slice(0, 3) : rankedByPref.filter((x) => x.band !== 'BELOW_MARKET').slice(0, 1)
     if (!picks.length && scored.length) {
       // Every candidate reads below-market — the seat still must answer.
-      // Least-bad is the highest q_final distressed comp; it prices the
+      // Least-bad is the highest-preference distressed comp; it prices the
       // floor, flagged so the card and the gate see what it is.
       forcedBelowMarket = true
-      const top = [...scored].sort((a, b) => b.p - a.p)[0]!
+      const top = rankedByPref[0]!
       picks = [top]
-      base.debugNotes.push(`decisions-seat: all candidates below-market — forced floor pick ${top.r.id} (p=${top.p.toFixed(2)})`)
+      base.debugNotes.push(`decisions-seat: all candidates below-market — forced floor pick ${top.r.id} (pref=${top.pref.toFixed(2)})`)
     }
     if (!picks.length) {
       base.debugNotes.push('decisions-seat: no candidates at all — deterministic seat')
@@ -405,7 +434,7 @@ export async function runDecisionsSeat(
     const conf: 'high' | 'medium' | 'low' =
       topP >= 0.7 && poolP >= 0.5 ? 'high' : topP >= 0.45 ? 'medium' : 'low'
     const note = picks
-      .map((x) => `${x.r.id} final=${x.p.toFixed(2)} band=${x.band ?? '?'} ${pricePoint(x.r)}`)
+      .map((x) => `${x.r.id} final=${x.p.toFixed(2)} pref=${x.pref.toFixed(2)} band=${x.band ?? '?'} ${pricePoint(x.r)}`)
       .join(' · ')
     base.debugNotes.push(`decisions-seat: picks ${note} → ARV $${arv} (conf ${conf}, pool p=${poolP.toFixed(2)})`)
     return {
