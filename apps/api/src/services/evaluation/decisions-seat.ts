@@ -248,29 +248,56 @@ export async function runDecisionsSeat(
     candidates: rows,
   }
 
-  const questions: Record<string, { type: 'noul'; instructions: string }> = {}
-  for (const row of rows) {
-    // rep — does this comp REPRESENT the subject? Physical characteristics,
-    // location, classification — price blind.
-    questions[`rep_${row.id}`] = {
+  // Owner doctrine: the seat answers the questions a human appraiser asks.
+  // Physical/location/final call = predicates (yes/no, p>=0.5 = yes).
+  // The price band is the single classification question — every comp
+  // already carries a code price label (fact); the model classifies which
+  // market band the comp resembles matching our rules.
+  const siteRows = new Set(Object.keys(ctx.compObservables ?? {}))
+  const asked = rows.filter((r) => siteRows.has(r.id))
+  const questionRows = asked.length ? asked : rows
+  type Q = { type: 'noul'; instructions: string } | { type: 'choice'; criteria: Record<string, string>; instructions: string }
+  const questions: Record<string, Q> = {}
+  for (const row of questionRows) {
+    const id = row.id
+    questions[`q_sqft_${id}`] = {
       type: 'noul',
-      instructions:
-        `Comp ${row.id}: probability this property is a good representation ` +
-        `of the subject — same kind of house in a similar-value location. ` +
-        `Weigh sqft/year/lot/style/feature labels, stories/construction/` +
-        `foundation/pool/garage matches, physicalMatchP, development ` +
-        `vintage and geo tier. Ignore sale price entirely.`,
+      instructions: `Comp ${id}: YES or NO — is this property within the subject's square footage band? Use the sqft label on its row (exact/close/far).`,
     }
-    // fit — can this comp's PRICE evidence drive the subject's ARV? Above
-    // market or at market only; below-market labels are disqualifying.
-    questions[`fit_${row.id}`] = {
+    questions[`q_year_${id}`] = {
+      type: 'noul',
+      instructions: `Comp ${id}: YES or NO — is this property within the subject's year-built band? Use the year label on its row.`,
+    }
+    questions[`q_block_${id}`] = {
+      type: 'noul',
+      instructions: `Comp ${id}: YES or NO — is this property in the subject's block group? Use its geo tier label (BLOCK_GROUP = yes).`,
+    }
+    questions[`q_hood_${id}`] = {
+      type: 'noul',
+      instructions: `Comp ${id}: YES or NO — is this property in the subject's neighborhood? Use its geo tier label and neighborhood field.`,
+    }
+    questions[`q_apples_${id}`] = {
+      type: 'noul',
+      instructions: `Comp ${id}: YES or NO — is this property an apples-to-apples physical comparison to the subject? Weigh sqft/year/lot/style/feature labels, physicalMatchP, exteriorMatchP, development vintage, and the site predicates.`,
+    }
+    questions[`q_final_${id}`] = {
       type: 'noul',
       instructions:
-        `Comp ${row.id}: probability this is an apples-to-apples ARV ` +
-        `comparable for the subject at above-market or at-market price. ` +
-        `pricePoint=${row.pricePoint} — if below_market the answer is ~0. ` +
-        `Weigh its price evidence, sale age, price sanity, condition ` +
-        `evidence and ARV fitness prior.`,
+        `Comp ${id}: YES or NO — does this property show what the subject will look like and sell for after renovation, at or above market? ` +
+        `This is THE appraisal call: it must be physically similar, in or near the pocket, a non-distressed sale, and represent the subject at above-market or at-market price. ` +
+        `pricePoint=${row.pricePoint} — below_market means NO.`,
+    }
+    questions[`band_${id}`] = {
+      type: 'choice',
+      criteria: {
+        ABOVE_MARKET: 'resembles an above-market comp matching our rules',
+        AT_MARKET: 'resembles an at-market comp matching our rules',
+        BELOW_MARKET: 'resembles a below-market comp matching our rules',
+      },
+      instructions:
+        `Comp ${id}: which market band does this property resemble as a comparable matching our appraisal rules? ` +
+        `Read the whole row — price labels (facts), condition evidence, geo tier, site predicates. ` +
+        `Code price label pricePoint=${row.pricePoint}; classify the comp, do not just echo the label.`,
     }
   }
   // The seat also answers one summary question — its probability the pick
@@ -291,35 +318,35 @@ export async function runDecisionsSeat(
       const a = answers[name] as { probability?: number } | undefined
       return typeof a?.probability === 'number' ? a.probability : null
     }
-    const scored = candidates
-      .map((r) => ({ r, fit: prob(`fit_${r.id}`), rep: prob(`rep_${r.id}`) }))
-      .filter((x): x is { r: RankedComp; fit: number; rep: number } => x.fit != null && x.rep != null)
-    if (!scored.length) {
-      // Malformed/absent probabilities — still pick the best-ranked
-      // candidate; a seat answer must exist, honestly labeled.
-      const r = candidates[0]!
-      scored.push({ r, fit: 0, rep: 0 })
-      base.debugNotes.push(`decisions-seat: no probabilities returned — forced pick ${r.id}`)
+    const choice = (name: string): string | null => {
+      const a = answers[name] as { choice?: string | boolean } | undefined
+      return typeof a?.choice === 'string' ? a.choice : null
     }
-    // Below-market labels are facts — a distressed/as-is sale can support
-    // the floor but can never be an ARV pick regardless of probability.
-    // Rank on min(rep, fit): a pick must BOTH represent the subject AND
-    // price it — the weaker leg bounds the comp.
-    const pickable = scored
-      .filter((x) => pricePoint(x.r) !== 'below_market')
-      .map((x) => ({ ...x, p: Math.min(x.fit, x.rep) }))
-      .sort((a, b) => b.p - a.p)
-    const over = pickable.filter((x) => x.p >= PROB_FLOOR).slice(0, 3)
+    const askedIds = new Set(questionRows.map((r) => r.id))
+    const scored: { r: RankedComp; p: number; band: string | null }[] = candidates
+      .filter((r) => askedIds.has(r.id))
+      .map((r) => ({ r, p: prob(`q_final_${r.id}`) ?? -1, band: choice(`band_${r.id}`) }))
+      .filter((x) => x.p >= 0)
+    if (!scored.length) {
+      // Malformed/absent answers — still pick the best-ranked candidate;
+      // a seat answer must exist, honestly labeled.
+      const r = candidates[0]!
+      scored.push({ r, p: 0, band: null })
+      base.debugNotes.push(`decisions-seat: no answers returned — forced pick ${r.id}`)
+    }
+    // The final call IS the pick: q_final YES (p>=0.5) means the model
+    // judged this comp a post-reno, at/above-market representation of the
+    // subject. Take the top 3 yeses; a below-market band pick is only a
+    // forced floor answer when no YES exists.
+    const yeses = scored.filter((x) => x.p >= 0.5 && x.band !== 'BELOW_MARKET').sort((a, b) => b.p - a.p)
     let forcedBelowMarket = false
-    let picks = over.length ? over : pickable.slice(0, 1)
+    let picks = yeses.length ? yeses.slice(0, 3) : scored.filter((x) => x.band !== 'BELOW_MARKET').sort((a, b) => b.p - a.p).slice(0, 1)
     if (!picks.length && scored.length) {
-      // Every candidate is below-market — the seat still must answer.
-      // Least-bad is the highest min(rep,fit) distressed comp; it prices
-      // the floor, flagged so the card and the gate see what it is.
+      // Every candidate reads below-market — the seat still must answer.
+      // Least-bad is the highest q_final distressed comp; it prices the
+      // floor, flagged so the card and the gate see what it is.
       forcedBelowMarket = true
-      const top = scored
-        .map((x) => ({ ...x, p: Math.min(x.fit, x.rep) }))
-        .sort((a, b) => b.p - a.p)[0]!
+      const top = [...scored].sort((a, b) => b.p - a.p)[0]!
       picks = [top]
       base.debugNotes.push(`decisions-seat: all candidates below-market — forced floor pick ${top.r.id} (p=${top.p.toFixed(2)})`)
     }
@@ -377,7 +404,7 @@ export async function runDecisionsSeat(
     const conf: 'high' | 'medium' | 'low' =
       topP >= 0.7 && poolP >= 0.5 ? 'high' : topP >= 0.45 ? 'medium' : 'low'
     const note = picks
-      .map((x) => `${x.r.id} rep=${x.rep.toFixed(2)} fit=${x.fit.toFixed(2)} ${pricePoint(x.r)}`)
+      .map((x) => `${x.r.id} final=${x.p.toFixed(2)} band=${x.band ?? '?'} ${pricePoint(x.r)}`)
       .join(' · ')
     base.debugNotes.push(`decisions-seat: picks ${note} → ARV $${arv} (conf ${conf}, pool p=${poolP.toFixed(2)})`)
     return {

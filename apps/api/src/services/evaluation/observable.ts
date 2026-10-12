@@ -284,6 +284,49 @@ const COMP_QUESTIONS = {
     type: 'noul' as const,
     instructions: 'Probability that the COMP parcel has a pool — visible pool geometry in the aerial or street view, or a pool noted in the description/property data. ~0 when none evident.',
   },
+  // Site predicates — yes/no facts from the aerial (owner doctrine:
+  // environmental facts are predicates, not probabilities). Each answers
+  // one binary question about the CENTER parcel in the aerial frames.
+  sp_backs_busy_road: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial BACK onto a busy road, arterial, highway, or rail line — its REAR edge (opposite the street side) touches one?',
+  },
+  sp_fronts_busy_road: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial FRONT onto a busy road or arterial — its STREET side faces one?',
+  },
+  sp_sides_busy_road: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial SIDE onto a busy road or arterial — a SIDE edge (not the street frontage, not the rear) borders one?',
+  },
+  sp_commercial: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: is the CENTER parcel in the aerial exposed to commercial use — a commercial/industrial building, warehouse, big-box store, or parking lot touching or immediately adjacent to it?',
+  },
+  sp_corner_lot: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial sit on a corner — fronting two intersecting streets?',
+  },
+  sp_culdesac: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel in the aerial face onto a cul-de-sac bulb — the circular dead-end of a street?',
+  },
+  sp_infill_lot: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: is the CENTER parcel an interior infill lot — mid-block inside the pocket, surrounded by the same housing stock, not on an edge/corner/cul-de-sac?',
+  },
+  sp_waterfront: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does a water body (bay, canal, lake, pond, river) touch or border the CENTER parcel boundary in the aerial? A distant water body in frame is not waterfront.',
+  },
+  sp_lakefront: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does a LAKE or POND touch or border the CENTER parcel boundary in the aerial?',
+  },
+  sp_riverfront: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does a RIVER or CANAL touch or border the CENTER parcel boundary in the aerial?',
+  },
   c9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
@@ -330,7 +373,7 @@ const COMP_SATELLITE_NAMES = ['c8_premium_attributes', 'c9_site_exposure', 'c12_
 const COMP_STREET_NAMES = ['c10_physical_match']
 // c8p_* premium-probability reads judge the aerial — they ride the
 // satellite call (spec step 5), not the listing-condition call.
-const isCompSatellite = (name: string) => COMP_SATELLITE_NAMES.includes(name) || name.startsWith('c8p_')
+const isCompSatellite = (name: string) => COMP_SATELLITE_NAMES.includes(name) || name.startsWith('c8p_') || name.startsWith('sp_')
 const COMP_SATELLITE_QUESTIONS = questionsWhere(COMP_QUESTIONS, isCompSatellite)
 const COMP_STREET_QUESTIONS = questionsWhere(COMP_QUESTIONS, (name) => COMP_STREET_NAMES.includes(name))
 const COMP_CONDITION_QUESTIONS = questionsWhere(
@@ -508,6 +551,10 @@ export interface CompObservables {
   /** P(the comp's exterior matches the subject's) — listing cover photo vs
    *  listing cover photo. Null when either photo is missing. */
   exteriorMatchP?: number | null
+  /** Site predicates — yes/no satellite reads (probability ≥0.5 = yes):
+   *  backsBusyRoad / frontsBusyRoad / sidesBusyRoad / commercial /
+   *  cornerLot / culdesac / infillLot / waterfront / lakefront / riverfront. */
+  sitePredicates?: Record<string, number | null> | null
   /** P(the comp's cover photo shows the front of the house) */
   coverIsFrontP?: number | null
   /** P(the subject's cover photo shows the front of the house) */
@@ -1022,6 +1069,18 @@ export async function decisionsCompObservables(
       LARGE_LOT: probOf(a, 'c8p_large_lot') ?? 0,
       VIEW: probOf(a, 'c8p_view') ?? 0,
       POOL: probOf(a, 'c8p_pool') ?? 0,
+    },
+    sitePredicates: {
+      backsBusyRoad: probOf(a, 'sp_backs_busy_road'),
+      frontsBusyRoad: probOf(a, 'sp_fronts_busy_road'),
+      sidesBusyRoad: probOf(a, 'sp_sides_busy_road'),
+      commercial: probOf(a, 'sp_commercial'),
+      cornerLot: probOf(a, 'sp_corner_lot'),
+      culdesac: probOf(a, 'sp_culdesac'),
+      infillLot: probOf(a, 'sp_infill_lot'),
+      waterfront: probOf(a, 'sp_waterfront'),
+      lakefront: probOf(a, 'sp_lakefront'),
+      riverfront: probOf(a, 'sp_riverfront'),
     },
     siteExposure: choiceOf(a, 'c9_site_exposure'),
     developmentVintage: choiceOf(a, 'c12_development_vintage'),
