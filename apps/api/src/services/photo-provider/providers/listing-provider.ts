@@ -42,6 +42,7 @@ export class ListingPhotoProvider implements PhotoProvider {
     if (!this.isAvailable()) return null
     if (!this.scraper) {
       this.scraper = new ListingPhotoScraper({
+        apiKey: this.env.FIRECRAWL_API_KEY,
         scrapflyApiKey: this.env.SCRAPFLY_API_KEY,
         scrapflyUrl: this.env.SCRAPFLY_URL,
         openrouterApiKey: this.env.OPENROUTER_API_KEY,

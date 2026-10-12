@@ -258,7 +258,16 @@ analyze.post('/', async (c) => {
     // The route returns immediately with jobId + SSE token.
 
     let appraisalRules = userSettings.appraisalRules;
-    if (body.appraisalOverrides || body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript' || body.harness === 'finale') {
+    // The env default counts too — a DEFAULT_HARNESS=typescript run with no
+    // explicit harness must not inherit the caller's preset grid, or the same
+    // request evaluates differently per user's saved preset. Same resolution
+    // the result-cache key uses below.
+    const seatHarness = (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript' || body.harness === 'finale')
+      ? body.harness
+      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'typescript' || c.env.DEFAULT_HARNESS === 'finale'
+          ? c.env.DEFAULT_HARNESS
+          : undefined)
+    if (body.appraisalOverrides || seatHarness) {
       const overrideFilters = body.appraisalOverrides?.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
@@ -273,7 +282,7 @@ analyze.post('/', async (c) => {
           percent: a.percent,
         }),
       );
-      appraisalRules = (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript' || body.harness === 'finale')
+      appraisalRules = seatHarness != null
         // Agent runs are governed by EVAL-AGENT-RULESET.md — the caller's
         // overrides are verbatim and the user's preset never merges in.
         // With no filters enabled, comps stay enabled except for the hard
@@ -322,15 +331,10 @@ analyze.post('/', async (c) => {
     // (and vice versa) through the shared KV.
     // An A/B arm keys the cache too — arm A's report is never served as arm B's.
     const assistArm = parseAssistArm(body.arm);
-    const effectiveHarness = (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript' || body.harness === 'finale')
-      ? body.harness
-      : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'finale'
-          ? c.env.DEFAULT_HARNESS
-          : undefined)
     const resultCacheKey = evalResultKey(
       auth.userId,
       body.address ?? '',
-      evalParamsHash + (effectiveHarness ? `:${effectiveHarness}` : '') + (assistArm ? `:arm${assistArm}` : ''),
+      evalParamsHash + (seatHarness ? `:${seatHarness}` : '') + (assistArm ? `:arm${assistArm}` : ''),
     );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
@@ -426,7 +430,7 @@ analyze.post('/', async (c) => {
         // deployment-wide — same dashboard, different eval seat).
         harness: (body.harness === 'agent' || body.harness === 'corelogic' || body.harness === 'typescript' || body.harness === 'finale')
           ? body.harness
-          : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'finale'
+          : (c.env.DEFAULT_HARNESS === 'corelogic' || c.env.DEFAULT_HARNESS === 'agent' || c.env.DEFAULT_HARNESS === 'typescript' || c.env.DEFAULT_HARNESS === 'finale'
               ? c.env.DEFAULT_HARNESS
               : undefined),
         arm: assistArm,

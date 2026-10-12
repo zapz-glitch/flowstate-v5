@@ -184,6 +184,12 @@ export interface EvaluationParams {
    */
   prefetchedRenovation?: Promise<RenovationAssessment> | null
   /**
+   * Subject renovation assessment started by the caller the moment the
+   * photo bundle resolved — vision overlaps the entire appraisal path
+   * instead of starting when evaluate() first runs.
+   */
+  prefetchedRenovation?: Promise<RenovationAssessment> | null
+  /**
    * Comp-evidence batch started by the caller the moment comps landed —
    * evidence lanes run beside geo/enrich instead of waiting for the sorted
    * pool. Comps absent from the map (pool-expansion refetches) get a top-up
