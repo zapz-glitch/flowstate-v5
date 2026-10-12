@@ -224,6 +224,10 @@ assert.deepEqual(arvItems, new Set(picks), 'only agent-selected comps render as 
 const anchorItem = (response.comps?.items ?? []).find((c) => c.bRole === 'anchor')
 assert.ok(anchorItem, 'an anchor comp is rendered from the agent verdict')
 assert.ok(picks.includes(anchorItem?.id ?? ''), 'the anchor is one of the agent picks')
-assert.equal(response.valuation?.arv ?? response.appraisal?.arv, arv, 'server renders valuation on the agent anchor')
+// Model selects, code prices: the engine reprices the agent's picks instead of
+// rendering the agent's stated ARV. It anchors on the most-similar verified
+// comp (c-1, $400k — anchor-not-blend), so the rendered ARV is the anchor's
+// price, not the mean of the picks.
+assert.equal(response.valuation?.arv ?? response.appraisal?.arv, 400000, 'server renders the engine-priced ARV on the agent anchor')
 
 console.log('harness-seam E2E: park → evidence → 409/422 guards → selection resume → agent-stamped report passed')
