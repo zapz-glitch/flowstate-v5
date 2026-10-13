@@ -30,6 +30,8 @@ interface ReplayCase {
   storedHash?: string | null
   recordId?: string | null
   jobId?: string | null
+  /** Source file path — set for file-loaded cases so --rebaseline can rewrite it. */
+  file?: string
 }
 
 interface Diff {
@@ -119,6 +121,7 @@ function loadFiles(files: string[]): ReplayCase[] {
       storedHash: raw?.payloadHash ?? raw?.payload_hash ?? (wrapped ? raw?.payloadHash : null) ?? null,
       recordId: raw?.recordId ?? raw?.id ?? null,
       jobId: raw?.jobId ?? (isRecord ? payload.jobId ?? null : payload.analysisId ?? null),
+      file,
     }
   })
 }
@@ -349,13 +352,65 @@ async function replayCase(c: ReplayCase): Promise<ReplayResult> {
   pushDiff(diffs, 'recommendation', expected.recommendation, valuationReplay?.recommendation ?? null,
     expected.recommendation === valuationReplay?.recommendation)
 
-  const status = diffs.some((d) => d.kind === 'integrity')
+  let status: ReplayResult['status'] = diffs.some((d) => d.kind === 'integrity')
     ? 'integrity_failed'
     : diffs.some((d) => d.kind === 'drift')
       ? 'drift'
       : diffs.length || c.kind === 'saved_report'
         ? 'missing_evidence'
         : 'pass'
+
+  if (rebaseline && c.file && status === 'drift') {
+    // Bless the current engine's output as canonical — the fixture
+    // maintenance path for intentional engine changes. Rewrites the stored
+    // attempt result + valuation and recomputes payloadHash.
+    const checkRows = replay.flags.map((f: string) => ({ ruleId: ruleIdForFlag(f), message: f }))
+    if (lastAttempt) {
+      lastAttempt.result = { ...(lastAttempt.result as Record<string, unknown>), ...replay }
+      lastAttempt.checks = checkRows
+    }
+    if (valuation && valuationReplay) {
+      valuation.arv = terminalReplayArv
+      valuation.arvB = replay.arv
+      valuation.arvPerSqft = valuationReplay.pricePerSqft ?? valuation.arvPerSqft
+      valuation.buyPrice = valuationReplay.buyPrice
+      valuation.buyPricePercent = valuationReplay.buyPricePercent
+      valuation.wholesalePrice = valuationReplay.wholesalePrice
+      valuation.projectedProfit = valuationReplay.projectedProfit
+      valuation.projectedROI = valuationReplay.projectedROI
+      valuation.totalInvestment = valuationReplay.totalInvestment
+      valuation.rehabCost = valuationReplay.totalRehabCost
+      valuation.closingCosts = valuationReplay.closingCosts
+      valuation.carryingCosts = valuationReplay.carryingCosts
+      valuation.rehabPerSqft = valuationReplay.rehabPerSqft
+      valuation.recommendation = valuationReplay.recommendation
+      valuation.recommendationReason = valuationReplay.recommendationReason
+      valuation.resultGrade = grades.resultGrade
+      valuation.processGrade = grades.processGrade
+      if (valuation.statusReason != null) {
+        valuation.statusReason = resultStatusReason(replay, fallbackUsed, expectedTrail, grades, {
+          arvSource: typeof valuation?.arvSource === 'string' ? valuation.arvSource : null,
+        })
+      }
+      const mech = valuation.bMechanics as Record<string, unknown> | undefined
+      if (mech) {
+        for (const k of ['arv', 'flags', 'drivers', 'contribs', 'bracket', 'conf', 'source',
+          'landRateSource', 'sqftRateSource', 'anchorAddress', 'ceiling', 'conditionAdj', 'healed', 'decisions']) {
+          mech[k] = (replay as Record<string, unknown>)[k]
+        }
+        mech.checks = checkRows
+        mech.harnessVersion = HARNESS_VERSION
+      }
+    }
+    const raw = JSON.parse(readFileSync(c.file, 'utf8'))
+    raw.payload = c.payload
+    raw.payloadHash = await sha256Text(canonicalJson(c.payload))
+    raw.exportedAt = new Date().toISOString()
+    writeFileSync(c.file, `${canonicalJson(raw)}\n`)
+    console.log(`    ↻ rebaselined → ${basename(c.file)}`)
+    status = 'pass'
+    diffs.length = 0
+  }
 
   return {
     label: c.label,
@@ -374,6 +429,7 @@ async function replayCase(c: ReplayCase): Promise<ReplayResult> {
 
 const args = process.argv.slice(2)
 const strict = args.includes('--strict')
+const rebaseline = args.includes('--rebaseline')
 const optionValue = (name: string) =>
   args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1)
   ?? (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)

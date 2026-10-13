@@ -171,6 +171,23 @@ function stripInlineImages(body: string): string {
       `${a}[${data.length} chars ${data.slice(0, 12)}…${data.slice(-12)}]${z}`)
 }
 
+/** Credential fields redacted before any request/response body lands in the
+ *  call log — a 90-day observability record must never retain secrets. */
+const CREDENTIAL_KEYS = /("(?:access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|apikey|password|secret|token|authorization)"\s*:\s*")((?:[^"\\]|\\.)*)(")/gi
+
+const REDACTED = '[REDACTED]'
+
+function redactCredentials(body: string): string {
+  return body
+    .replace(CREDENTIAL_KEYS, `$1${REDACTED}$3`)
+    .replace(/((?:access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|apikey|key|sig|signature|password|secret|token)=)([^&\s"']+)/gi, `$1${REDACTED}`)
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/g, `$1${REDACTED}`)
+}
+
+function sanitizeLoggedBody(body: string): string {
+  return redactCredentials(stripInlineImages(body))
+}
+
 const isTextual = (type: string | null) =>
   !!type && /json|text|xml|javascript|html|event-stream|x-www-form-urlencoded/i.test(type)
 
@@ -237,19 +254,21 @@ export function recordingFetch(original: FetchFn): FetchFn {
     if (body != null) {
       const model = (entry.kind === 'reasoning' || entry.kind === 'decisions') ? /"model"\s*:\s*"([^"]{1,120})"/.exec(body)?.[1] : undefined
       if (model) entry.model = model
-      keep('req', stripInlineImages(body))
+      keep('req', sanitizeLoggedBody(body))
     }
 
     const logged = scope.replay?.get(entry.requestHash)
     if (logged && logged.status != null) {
       const text = logged.response
         ?? (logged.responseKey && scope.store ? await scope.store.get(logged.responseKey).catch(() => null) : null)
-      if (text != null) {
+      // A sanitized body can't drive a live caller — a replayed
+      // "access_token":"[REDACTED]" would break downstream auth. Refetch.
+      if (text != null && !text.includes(REDACTED)) {
         entry.replayed = true
         entry.status = logged.status
         entry.responseType = logged.responseType
         entry.responseBytes = logged.responseBytes
-        keep('res', text)
+        keep('res', sanitizeLoggedBody(text))
         entry.ms = Date.now() - started
         return new Response(text, {
           status: logged.status,
@@ -268,8 +287,8 @@ export function recordingFetch(original: FetchFn): FetchFn {
         const text = await response.clone().text().catch(() => null)
         if (text != null) {
           entry.responseBytes = text.length
-          if (response.ok || text.length <= ERROR_BODY_CHARS) keep('res', text)
-          else { entry.response = text.slice(0, ERROR_BODY_CHARS); entry.truncated = true }
+          if (response.ok || text.length <= ERROR_BODY_CHARS) keep('res', sanitizeLoggedBody(text))
+          else { entry.response = sanitizeLoggedBody(text.slice(0, ERROR_BODY_CHARS)); entry.truncated = true }
         }
       } else {
         const length = Number(response.headers.get('content-length'))

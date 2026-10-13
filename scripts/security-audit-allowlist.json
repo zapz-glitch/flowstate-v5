@@ -1,0 +1,34 @@
+{
+  "advisories": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "No published fix (<=3.0.3 all vulnerable, latest is 3.0.3). Reached only through tailwindcss build-time tooling (chokidar/micromatch) \u2014 never parses untrusted glob input at runtime. Revisit when a patched braces ships.",
+      "added": "2026-10-12"
+    },
+    {
+      "id": "GHSA-c475-qrg2-pj4r",
+      "package": "basic-ftp",
+      "reason": "Transitive via get-uri/proxy-agent inside @puppeteer/browsers. The FTP code path only executes when a proxy chain requests an ftp:// URI \u2014 our deployment never configures one. No fixed version in range for get-uri@6.",
+      "added": "2026-10-12"
+    },
+    {
+      "id": "GHSA-jmr9-qjv8-65gv",
+      "package": "extract-zip",
+      "reason": "Transitive via @puppeteer/browsers. Runs only at browser-download time on zip archives fetched from Chrome release endpoints, not on user-supplied archives. extract-zip has no fixed release; upstream moved @puppeteer/browsers to modern-tar in 3.x which @cloudflare/puppeteer has not adopted.",
+      "added": "2026-10-12"
+    },
+    {
+      "id": "GHSA-7pqw-9j4j-h8q3",
+      "package": "extract-zip",
+      "reason": "Same reachability as GHSA-jmr9-qjv8-65gv \u2014 install-time extraction of trusted Chrome archives only.",
+      "added": "2026-10-12"
+    },
+    {
+      "id": "GHSA-rj75-hqrm-r3gf",
+      "package": "postcss-selector-parser",
+      "reason": "Transitive via tailwindcss/postcss-nested \u2014 build-time CSS compilation of our own stylesheet only, never parses attacker input. postcss-nested pins ^6.1.1 with no release accepting 7.1.6.",
+      "added": "2026-10-12"
+    }
+  ]
+}
