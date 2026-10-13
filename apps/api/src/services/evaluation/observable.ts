@@ -327,6 +327,10 @@ const COMP_QUESTIONS = {
     type: 'noul' as const,
     instructions: 'YES or NO: does a RIVER or CANAL touch or border the CENTER parcel boundary in the aerial?',
   },
+  sp_pool: {
+    type: 'noul' as const,
+    instructions: 'YES or NO: does the CENTER parcel have a pool — visible pool geometry (a bright rectangular or rounded basin, usually in the backyard) in the aerial, or a pool noted in the description or property data?',
+  },
   c9_site_exposure: {
     type: 'choice' as const,
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient or unavailable' },
@@ -553,8 +557,12 @@ export interface CompObservables {
   exteriorMatchP?: number | null
   /** Site predicates — yes/no satellite reads (probability ≥0.5 = yes):
    *  backsBusyRoad / frontsBusyRoad / sidesBusyRoad / commercial /
-   *  cornerLot / culdesac / infillLot / waterfront / lakefront / riverfront. */
+   *  cornerLot / culdesac / infillLot / waterfront / lakefront /
+   *  riverfront / pool. */
   sitePredicates?: Record<string, number | null> | null
+  /** The same reads resolved to yes/no — the fact the seat judges on.
+   *  null = imagery/evidence insufficient to answer. */
+  siteFacts?: Record<string, 'yes' | 'no' | null> | null
   /** P(the comp's cover photo shows the front of the house) */
   coverIsFrontP?: number | null
   /** P(the subject's cover photo shows the front of the house) */
@@ -582,6 +590,11 @@ const tierProbsOf = (a: DecisionsAnswers, k: string): Record<string, number> | n
   renovationTierProbabilities(a[k]?.probabilities)
 const confs = (a: DecisionsAnswers): Record<string, number> =>
   Object.fromEntries(Object.entries(a).filter(([, v]) => typeof v?.confidence === 'number').map(([k, v]) => [k, v.confidence!]))
+
+/** Site reads resolve to a yes/no fact for the seat — ≥0.5 is yes, below
+ *  is no, missing is null (no evidence to answer). */
+const siteFactsOf = (predicates: Record<string, number | null>): Record<string, 'yes' | 'no' | null> =>
+  Object.fromEntries(Object.entries(predicates).map(([k, p]) => [k, p == null ? null : p >= 0.5 ? 'yes' : 'no']))
 
 /**
  * One subject tier per evaluation. The renovation assessment asks the tier
@@ -1052,6 +1065,20 @@ export async function decisionsCompObservables(
   } as DecisionsAnswers
   if (Object.keys(a).length === 0) return null
 
+  const predicates: Record<string, number | null> = {
+    backsBusyRoad: probOf(a, 'sp_backs_busy_road'),
+    frontsBusyRoad: probOf(a, 'sp_fronts_busy_road'),
+    sidesBusyRoad: probOf(a, 'sp_sides_busy_road'),
+    commercial: probOf(a, 'sp_commercial'),
+    cornerLot: probOf(a, 'sp_corner_lot'),
+    culdesac: probOf(a, 'sp_culdesac'),
+    infillLot: probOf(a, 'sp_infill_lot'),
+    waterfront: probOf(a, 'sp_waterfront'),
+    lakefront: probOf(a, 'sp_lakefront'),
+    riverfront: probOf(a, 'sp_riverfront'),
+    pool: probOf(a, 'sp_pool'),
+  }
+
   return {
     pricePosition: pos.tier,
     priceSupport: choiceOf(a, 'c1_price_support'),
@@ -1070,18 +1097,8 @@ export async function decisionsCompObservables(
       VIEW: probOf(a, 'c8p_view') ?? 0,
       POOL: probOf(a, 'c8p_pool') ?? 0,
     },
-    sitePredicates: {
-      backsBusyRoad: probOf(a, 'sp_backs_busy_road'),
-      frontsBusyRoad: probOf(a, 'sp_fronts_busy_road'),
-      sidesBusyRoad: probOf(a, 'sp_sides_busy_road'),
-      commercial: probOf(a, 'sp_commercial'),
-      cornerLot: probOf(a, 'sp_corner_lot'),
-      culdesac: probOf(a, 'sp_culdesac'),
-      infillLot: probOf(a, 'sp_infill_lot'),
-      waterfront: probOf(a, 'sp_waterfront'),
-      lakefront: probOf(a, 'sp_lakefront'),
-      riverfront: probOf(a, 'sp_riverfront'),
-    },
+    sitePredicates: predicates,
+    siteFacts: siteFactsOf(predicates),
     siteExposure: choiceOf(a, 'c9_site_exposure'),
     developmentVintage: choiceOf(a, 'c12_development_vintage'),
     conditionTier: choiceOf(a, 'c13_condition_tier'),

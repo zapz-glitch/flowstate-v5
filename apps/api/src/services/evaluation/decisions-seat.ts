@@ -40,6 +40,93 @@ function mergeObservables(prev: CompObservables | null | undefined, next: CompOb
 
 /** Imaging depth for the site pass — the top of the sorted candidate set. */
 const SITE_CAP = 15
+
+interface SitePassComp {
+  id: string
+  address?: string | null
+  salePrice?: number | null
+  squareFeet?: number | null
+  yearBuilt?: number | null
+  saleDate?: string | null
+  neighborhoodName?: string | null
+  censusTract?: string | null
+  sameBlockGroup?: boolean | null
+  lotSizeAcres?: number | null
+  poolType?: string | null
+  coverPhotoUrl?: string | null
+  observables?: CompObservables | null
+}
+
+/** Spec-order step 5 — satellite lot-premium/exposure reads + cover-vs-cover
+ *  exterior match on the top of the candidate set (the far tail doesn't
+ *  burn tile fetches it will never need). Shared by the finale seat and
+ *  the agent path so every seat judges with the pool/site priors when
+ *  imagery exists. Mutates each row's observables and ctx.compObservables;
+ *  returns how many candidates got an answer. */
+export async function runCompSitePass(
+  env: Env,
+  ctx: Phase1Context,
+  evidence: HarnessEvidence,
+  rows: { comp: SitePassComp; ppsf: number | null }[],
+): Promise<number> {
+  const subjLat = ctx.bundle?.property?.latitude ?? null
+  const subjLng = ctx.bundle?.property?.longitude ?? null
+  const subjectPhotos = ctx.photoBundle?.subject?.photos ?? []
+  // Street view stays out — cover-vs-cover exterior match is the
+  // physical-similarity read (owner directive).
+  const [subjectCoverImage, subjectSatelliteImage] = await Promise.all([
+    pickFrontCoverImage(env, subjectPhotos).catch(() => null),
+    fetchSatelliteTile(env, { latitude: subjLat ?? undefined, longitude: subjLng ?? undefined }).catch(() => null),
+  ])
+  let siteRead = 0
+  await Promise.all(rows.slice(0, SITE_CAP).map(async ({ comp, ppsf }) => {
+    const ac = ctx.appraisalResult?.comparables?.find((c) => c.id === comp.id) as
+      { latitude?: number | null; longitude?: number | null; coverPhotoUrl?: string | null } | undefined
+    const site = await decisionsCompObservables(env, {
+      comp: {
+        propertyId: comp.id, address: comp.address, salePrice: comp.salePrice,
+        squareFeet: comp.squareFeet, yearBuilt: comp.yearBuilt, saleDate: comp.saleDate,
+        neighborhoodName: comp.neighborhoodName, censusTract: comp.censusTract,
+        sameBlockGroup: comp.sameBlockGroup, lotSizeAcres: comp.lotSizeAcres ?? null,
+        pool: comp.poolType ?? null,
+      },
+      salePrice: comp.salePrice ?? null,
+      ppsf,
+      coverPhotoUrl: comp.coverPhotoUrl ?? ac?.coverPhotoUrl ?? null,
+      latitude: ac?.latitude ?? null,
+      longitude: ac?.longitude ?? null,
+      subjectCoverImage, subjectSatelliteImage,
+      subjectAddress: evidence.subject.address ?? null,
+      subjectRef: evidence.subject,
+      benchmark: evidence.marketBenchmark ?? null,
+    }, { condition: false, street: false }).catch(() => null)
+    if (site) {
+      comp.observables = mergeObservables(comp.observables, site)
+      if (ctx.compObservables && comp.observables) ctx.compObservables[comp.id] = comp.observables
+      siteRead++
+    }
+  }))
+  return siteRead
+}
+
+/** Imaging order for the non-seat seats — where picks actually come from:
+ *  enabled first, then pocket depth (block group → subdivision → tract),
+ *  then the ladder's ARV band, then freshest sales. The far tail falls
+ *  past SITE_CAP untouched. */
+export function orderSiteCandidates(evidence: HarnessEvidence): HarnessEvidence['comps'] {
+  const subject = evidence.subject as { subdivision?: string | null; censusTract?: string | null }
+  const geoRank = (c: HarnessEvidence['comps'][number]) =>
+    c.sameBlockGroup === true ? 0
+      : (subject.subdivision && c.subdivision && c.subdivision === subject.subdivision) ? 1
+      : (subject.censusTract && c.censusTract === subject.censusTract) ? 2
+      : 3
+  const ladderRank: Record<string, number> = { top: 0, middle: 1, bottom: 2 }
+  return [...evidence.comps].sort((a, b) =>
+    Number(a.isEnabled === false) - Number(b.isEnabled === false)
+    || geoRank(a) - geoRank(b)
+    || (ladderRank[a.priceLadder?.group ?? ''] ?? 3) - (ladderRank[b.priceLadder?.group ?? ''] ?? 3)
+    || String(b.saleDate ?? '').localeCompare(String(a.saleDate ?? '')))
+}
 /** A pick needs real support — below the floor the deterministic seat keeps the pick. */
 const PROB_FLOOR = 0.4
 const GEO_RANK: Record<string, number> = { BLOCK_GROUP: 0, NEIGHBORHOOD: 1, SUBDIVISION: 2, TRACT: 3, OFF_POCKET: 4 }
@@ -120,46 +207,10 @@ export async function runDecisionsSeat(
   // physical match, cover-vs-cover exterior match. They stamp onto the same
   // observable record so the seat row carries the totality when judged.
   {
-    const subjLat = ctx.bundle?.property?.latitude ?? null
-    const subjLng = ctx.bundle?.property?.longitude ?? null
-    const subjectPhotos = ctx.photoBundle?.subject?.photos ?? []
-    // Street view stays out — cover-vs-cover exterior match is the
-    // physical-similarity read (owner directive).
-    const [subjectCoverImage, subjectSatelliteImage] = await Promise.all([
-      pickFrontCoverImage(env, subjectPhotos).catch(() => null),
-      fetchSatelliteTile(env, { latitude: subjLat ?? undefined, longitude: subjLng ?? undefined }).catch(() => null),
-    ])
-    let siteRead = 0
-    // Imaging depth: the top of the sorted set — where picks actually come
-    // from. The seat still SEES every candidate; the far tail doesn't burn
-    // tile fetches it will never need.
-    await Promise.all(candidates.slice(0, SITE_CAP).map(async (r) => {
-      const ac = ctx.appraisalResult?.comparables?.find((c) => c.id === r.id) as
-        { latitude?: number | null; longitude?: number | null; coverPhotoUrl?: string | null } | undefined
-      const site = await decisionsCompObservables(env, {
-        comp: {
-          propertyId: r.id, address: r.comp.address, salePrice: r.comp.salePrice,
-          squareFeet: r.comp.squareFeet, yearBuilt: r.comp.yearBuilt, saleDate: r.comp.saleDate,
-          neighborhoodName: r.comp.neighborhoodName, censusTract: r.comp.censusTract,
-          sameBlockGroup: r.comp.sameBlockGroup, lotSizeAcres: r.comp.lotSizeAcres ?? null,
-          pool: r.comp.poolType ?? null,
-        },
-        salePrice: r.comp.salePrice ?? null,
-        ppsf: r.ppsf,
-        coverPhotoUrl: r.comp.coverPhotoUrl ?? ac?.coverPhotoUrl ?? null,
-        latitude: ac?.latitude ?? null,
-        longitude: ac?.longitude ?? null,
-        subjectCoverImage, subjectSatelliteImage,
-        subjectAddress: evidence.subject.address ?? null,
-        subjectRef: evidence.subject,
-        benchmark: evidence.marketBenchmark ?? null,
-      }, { condition: false, street: false }).catch(() => null)
-      if (site) {
-        r.comp.observables = mergeObservables(r.comp.observables, site)
-        if (ctx.compObservables && r.comp.observables) ctx.compObservables[r.id] = r.comp.observables
-        siteRead++
-      }
-    }))
+    const siteRead = await runCompSitePass(
+      env, ctx, evidence,
+      candidates.map((r) => ({ comp: r.comp, ppsf: r.ppsf })),
+    )
     base.debugNotes.push(`decisions-seat: site pass → ${siteRead}/${Math.min(candidates.length, SITE_CAP)} candidates imaged (labels first)`)
   }
 
@@ -201,6 +252,9 @@ export async function runDecisionsSeat(
         descCondition: ob.descCondition, coverEvidence: ob.coverPhotoEvidence,
         conditionTier: ob.conditionTier, renoClaimP: ob.renoClaimP,
         premium: ob.premiumAttributes, premiumP: ob.premiumProbabilities ?? null,
+        // Yes/no site facts — waterfront, lakefront, riverfront, corner,
+        // cul-de-sac, busy-road edges, commercial, infill, pool.
+        siteFacts: ob.siteFacts ?? null,
         exposure: ob.siteExposure, vintage: ob.developmentVintage,
         physicalMatchP: ob.physicalMatchP, exteriorMatchP: ob.exteriorMatchP, arvFitnessP: ob.arvFitnessP,
         unexplainedPremiumP: ob.unexplainedPremiumP,
@@ -232,7 +286,11 @@ export async function runDecisionsSeat(
       'must never lead the answer. A stale or divergent sale can inform ' +
       'context, never drive. Extra square footage on a comp is worth less ' +
       'per foot than its average $/sf — do not credit a bigger comp\'s raw ' +
-      'price as the subject\'s value. An as-is pool yields an as-is value, ' +
+      'price as the subject\'s value. A comp premium the subject lacks ' +
+      '(a pool when the subject has none, waterfront, an oversized lot ' +
+      '— read premiumAttributes/premiumProbabilities against the subject\'s ' +
+      'pool/lotPremiumP) explains that comp\'s price, not the subject\'s ' +
+      'value — bound-not-driver. An as-is pool yields an as-is value, ' +
       'never an ARV — when nothing qualifies, say so via NONE_QUALIFIED ' +
       'rather than picking a floor sale as an ARV comp.\n' +
       'Rows marked verdict=excluded carry the code\'s exclusion reason in ' +
