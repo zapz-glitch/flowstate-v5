@@ -41,11 +41,11 @@ From this directory, launch with the environment already loaded:
 uvicorn eval_engine.local_bridge:app --host 127.0.0.1 --port 8788 --app-dir src
 ```
 
-`GET /health` identifies the `python-v4` engine. `POST /evaluate` requires
+`GET /health` identifies the `eval-v4` engine. `POST /evaluate` requires
 `Authorization: Bearer <token>` and an `EvaluationRequestV4` JSON body.
 Supply decimal quantities as strings, an explicit evaluation date, a settings
 snapshot ID, and all four canonical V4 renovation tiers. The endpoint returns
-`{ "engine": "python-v4", "result": <EvaluationResultV4> }`.
+`{ "engine": "eval-v4", "result": <EvaluationResultV4> }`.
 
 Only actual sale evidence belongs in `verified_sale_price`, `is_sale`, and
 `evidence_ref`. Do not infer a verified sale price from price per square foot.

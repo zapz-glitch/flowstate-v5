@@ -22,6 +22,7 @@ function harness() {
     react,
     sonner: { toast: { error: text => notices.push(text), info: text => notices.push(text) } },
     '@/components/analysis/format-helpers': { getCompKey: comp => comp.address },
+    '@/lib/evaluation-engine': { isV4Engine: engine => engine === 'eval-v4' || engine === 'python-v4' },
     '@/hooks/use-report-settings': { useReportSettings: () => ({ settings: {}, settingsChanged: false, recalcData: null }) },
     '@/lib/recalc': { recalculateValuationFromComps: () => assert.fail('Legacy math must not run') },
     '@/lib/client-api': { recalculateReportComps: (...args) => new Promise((resolve, reject) => requests.push({ args, resolve, reject })) },
@@ -36,7 +37,7 @@ function harness() {
   }
 }
 const analysis = (revision = 0, selected = ['a'], arv = 600000) => ({
-  evaluationEngine: 'python-v4', evaluationRevision: revision, meta: { analysisId: 'job-test' },
+  evaluationEngine: 'eval-v4', evaluationRevision: revision, meta: { analysisId: 'job-test' },
   valuation: { arv, buyPrice: arv / 2 },
   comps: { items: ['a', 'b'].map(id => ({ id, address: id, isEnabled: selected.includes(id) })) },
 })

@@ -66,7 +66,7 @@ if (command === 'init') {
     DASHBOARD_URL: 'http://localhost:3004',
     PROPERTY_PROVIDER: 'corelogic',
     ...(existsSync(resolve(state, 'python-token')) ? {
-      EVALUATION_ENGINE: 'python-v4', V4_LOCAL_BRIDGE_URL: 'http://127.0.0.1:8788',
+      EVALUATION_ENGINE: 'eval-v4', V4_LOCAL_BRIDGE_URL: 'http://127.0.0.1:8788',
       V4_LOCAL_BRIDGE_TOKEN: readFileSync(resolve(state, 'python-token'), 'utf8').trim(),
     } : {}),
   }
@@ -110,7 +110,7 @@ if (command === 'init') {
   const path = resolve(root, 'apps/api/.dev.vars')
   const current = parseEnv(readFileSync(path, 'utf8'))
   save(resolve(state, `api-before-python-${Date.now()}.backup`), readFileSync(path))
-  save(path, encodeEnvironment({ ...current, ...snapshotConfiguration(current), EVALUATION_ENGINE: 'python-v4', V4_LOCAL_BRIDGE_URL: 'http://127.0.0.1:8788', V4_LOCAL_BRIDGE_TOKEN: token }))
+  save(path, encodeEnvironment({ ...current, ...snapshotConfiguration(current), EVALUATION_ENGINE: 'eval-v4', V4_LOCAL_BRIDGE_URL: 'http://127.0.0.1:8788', V4_LOCAL_BRIDGE_TOKEN: token }))
   console.log('Local API configured for Python V4; start the python command before running analysis.')
 } else if (command === 'python') {
   const token = readFileSync(resolve(state, 'python-token'), 'utf8').trim()

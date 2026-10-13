@@ -21,7 +21,7 @@ let browser
 const user = { id: 'startup-fixture', name: 'Startup Test', email: 'startup@example.test', emailVerified: true, plan: 'free', role: 'user', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
 const session = { user, session: { id: 'session-fixture', userId: user.id, token: 'fixture', expiresAt: new Date(Date.now() + 86400000).toISOString() } }
 const usage = { currentUsage: 7, monthlyLimit: 100, remaining: 93, resetDate: '2026-10-01T00:00:00Z' }
-const report = { jobId: 'startup-report', address: '100 Test Street', createdAt: new Date().toISOString(), analysis: { evaluationEngine: 'python-v4', subject: { address: '100 Test Street', bedrooms: 3, bathrooms: 2, squareFeet: 1500, yearBuilt: 2000, photos: [] }, valuation: { arv: 300000, buyPrice: 180000, rehabCost: 40000, projectedProfit: 50000, projectedROI: 20 }, comps: { items: [], count: 0 } } }
+const report = { jobId: 'startup-report', address: '100 Test Street', createdAt: new Date().toISOString(), analysis: { evaluationEngine: 'eval-v4', subject: { address: '100 Test Street', bedrooms: 3, bathrooms: 2, squareFeet: 1500, yearBuilt: 2000, photos: [] }, valuation: { arv: 300000, buyPrice: 180000, rehabCost: 40000, projectedProfit: 50000, projectedROI: 20 }, comps: { items: [], count: 0 } } }
 const requests = []
 const imageryRequests = []
 let failStreetView = false

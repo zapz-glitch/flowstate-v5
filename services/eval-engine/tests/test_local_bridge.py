@@ -63,7 +63,7 @@ def test_uses_python_single_reference_and_decimal_results(client):
     response = send(client, payload())
     assert response.status_code == 200
     output = response.json()
-    assert output["engine"] == "python-v4"
+    assert output["engine"] == "eval-v4"
     result = output["result"]
     assert result["arv"]["final_arv"] == "640000"
     assert result["arv"]["accepted_comp_ids"] == ["2"]

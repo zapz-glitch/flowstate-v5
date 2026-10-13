@@ -25,7 +25,7 @@ const comps = [
   { id: 'nearby', address: '720 Steiner St', latitude: 37.77645, longitude: -122.43277, distanceMiles: 0.03 },
   { id: 'far', address: '100 Far Comparison Street', latitude: 37.8, longitude: -122.47, distanceMiles: 2.5 },
 ].map(comp => ({ ...comp, bedrooms: 3, bathrooms: 2, squareFeet: 1500, yearBuilt: 1900, salePrice: 800000, adjustedPrice: 800000, saleDate: '2026-06-01', photos: [], isEnabled: true }))
-const report = { jobId: 'map-report', address: subject.address, createdAt: new Date().toISOString(), analysis: { evaluationEngine: 'python-v4', subject, valuation: { arv: 800000, buyPrice: 500000, rehabCost: 40000, projectedProfit: 100000, projectedROI: 20 }, comps: { items: comps, count: comps.length } } }
+const report = { jobId: 'map-report', address: subject.address, createdAt: new Date().toISOString(), analysis: { evaluationEngine: 'eval-v4', subject, valuation: { arv: 800000, buyPrice: 500000, rehabCost: 40000, projectedProfit: 100000, projectedROI: 20 }, comps: { items: comps, count: comps.length } } }
 const user = { id: 'map-fixture', name: 'Map Test', email: 'map@example.test', emailVerified: true, plan: 'free', role: 'user', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
 const session = { user, session: { id: 'map-session', userId: user.id, token: 'fixture', expiresAt: new Date(Date.now() + 86400000).toISOString() } }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))

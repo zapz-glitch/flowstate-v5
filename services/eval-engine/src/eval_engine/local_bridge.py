@@ -29,7 +29,7 @@ async def lifespan(_: FastAPI):
 
 
 class BridgeResponse(BaseModel):
-    engine: Literal["python-v4"] = "python-v4"
+    engine: Literal["eval-v4"] = "eval-v4"
     result: EvaluationResultV4
 
 
@@ -40,7 +40,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1
 @app.get("/health")
 def health():
     configured_token()
-    return {"status": "ok", "engine": "python-v4", "profile": "local-evidence-bridge"}
+    return {"status": "ok", "engine": "eval-v4", "profile": "local-evidence-bridge"}
 
 
 @app.post("/evaluate", response_model=BridgeResponse)

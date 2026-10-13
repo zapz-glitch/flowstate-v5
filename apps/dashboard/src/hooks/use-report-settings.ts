@@ -14,6 +14,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
+import { isV4Engine } from '@/lib/evaluation-engine'
 import {
   getOrCreateDefaultPreset,
   getAppraisalDefaults,
@@ -111,7 +112,7 @@ export interface UseReportSettingsReturn {
 }
 
 export function useReportSettings(data: AnalyzeData | null): UseReportSettingsReturn {
-  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
+  const pythonAuthoritative = isV4Engine(data?.evaluationEngine)
   const [loading, setLoading] = useState(true)
   const [labels, setLabels] = useState<AppraisalDefaults | null>(null)
 

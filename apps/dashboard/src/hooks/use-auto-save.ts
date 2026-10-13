@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { updateSavedReport } from '@/lib/client-api'
+import { isV4Engine } from '@/lib/evaluation-engine'
 import type { ValuationData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { UseReportSettingsReturn } from '@/hooks/use-report-settings'
 import type { RecalcResult } from '@/lib/recalc'
@@ -59,9 +60,9 @@ export function useAutoSave({
   onSavedRef.current = onSaved
 
   useEffect(() => {
-    const pythonAuth = (analysisData as { evaluationEngine?: string } | null)?.evaluationEngine === 'python-v4'
+    const pythonAuth = isV4Engine((analysisData as { evaluationEngine?: string } | null)?.evaluationEngine)
     if (!jobId || !analysisData || !displayValuation) return
-    // python-v4 reports skip recalcData — but report-local ARV overrides /
+    // V4 reports skip recalcData — but report-local ARV overrides /
     // adjustments still need persisting (that's the whole point of the edit).
     if (!pythonAuth && !recalcData) return
 
@@ -111,7 +112,7 @@ export function useAutoSave({
           // Server-computed reports already carry the server's own comp
           // set and roles — the page saves that copy as-is. Only the older
           // browser-calculated reports get their selection patched in.
-          const serverComputed = String((patched as { evaluationEngine?: string }).evaluationEngine ?? '') === 'python-v4'
+          const serverComputed = isV4Engine((patched as { evaluationEngine?: string }).evaluationEngine)
           if (!serverComputed && compOverride?.selectedCompKeys && (patched.comps as { items?: CompItem[] })?.items) {
             const comps = patched.comps as { items: CompItem[]; [k: string]: unknown }
             patched.comps = {

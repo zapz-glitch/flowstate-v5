@@ -44,6 +44,7 @@ test('Python display preserves server values and rejects manual comparable chang
     sonner: { toast: { info: (message) => notices.push(message), error: (message) => notices.push(message) } },
     '@/lib/client-api': { recalculateReportComps: () => assert.fail('Missing IDs must not submit') },
     '@/components/analysis/format-helpers': { getCompKey: (comp) => comp.clip },
+    '@/lib/evaluation-engine': { isV4Engine: engine => engine === 'eval-v4' || engine === 'python-v4' },
     '@/hooks/use-report-settings': {
       useReportSettings: () => ({
         settings: {},
@@ -77,6 +78,7 @@ for (const evaluationEngine of ['python-v4', undefined]) {
       react,
       sonner: { toast: { info: (message) => notices.push(message) } },
       '@/lib/client-api': {},
+      '@/lib/evaluation-engine': { isV4Engine: engine => engine === 'eval-v4' || engine === 'python-v4' },
       '@/lib/recalc': {
         DEFAULT_REHAB_TABLE: {},
         MAJOR_ITEMS_LIST: [],

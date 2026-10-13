@@ -19,6 +19,7 @@ import type {
   CompItem,
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { getCompKey } from '@/components/analysis/format-helpers'
+import { isV4Engine } from '@/lib/evaluation-engine'
 import { useReportSettings, type UseReportSettingsReturn } from '@/hooks/use-report-settings'
 import { recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
 import { recalculateReportComps } from '@/lib/client-api'
@@ -101,7 +102,7 @@ export function useAnalysisEvaluation({
   currentInputRef.current = inputData
   const activeSelection = serverSelection?.source === inputData ? serverSelection : null
   const data = activeSelection?.analysis ?? inputData
-  const pythonAuthoritative = data?.evaluationEngine === 'python-v4' || data?.evaluationEngine === 'ts-v5'
+  const pythonAuthoritative = data?.evaluationEngine === 'ts-v5' || isV4Engine(data?.evaluationEngine)
 
   // Optimistic comp selection — the click flips the box (and the map pin)
   // the same frame; the server recalculation settles the authoritative
@@ -159,7 +160,7 @@ export function useAnalysisEvaluation({
       const valued = analysis?.valuation?.resultGrade !== 'withheld' && analysis?.valuation != null
         && typeof analysis.valuation.arv === 'number' && Number.isFinite(analysis.valuation.arv) && analysis.valuation.arv > 0
         && Number.isFinite(analysis.valuation.buyPrice)
-      if (!['python-v4', 'ts-v5'].includes(analysis?.evaluationEngine ?? '') || !validComps || (!insufficient && !valued)
+      if (!(isV4Engine(analysis?.evaluationEngine) || analysis?.evaluationEngine === 'ts-v5') || !validComps || (!insufficient && !valued)
         || analysis.meta?.analysisId !== jobId || analysis.evaluationRevision !== expectedRevision + 1) {
         throw new Error('The server returned an incomplete evaluation. Your previous result is unchanged.')
       }

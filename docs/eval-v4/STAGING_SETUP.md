@@ -21,7 +21,7 @@ synthetic canary credential was removed. Login/password are in the ignored0600 f
 | 4648 Piedmont Ct | job_1788994233197_armyzrcs | $317,000 | $198,000 | 2 |
 | 16049 Magnolia Hill St | job_1788994366613_45jvwspt | $384,000 | $246,000 | 1 |
 
-All saved reports explicitly use python-v4/provider_authoritative_upper_half_v2
+All saved reports explicitly use eval-v4 (formerly python-v4)/provider_authoritative_upper_half_v2
 and remain REVIEW_REQUIRED/preliminary, including honest missing-style/hazard
 limitations. Heritage has9 permit records/6 assets; Piedmont2 permits/3 assets.
 Magnolia has9 permit records/6 assets. Heritage/Piedmont PDFs downloaded.
