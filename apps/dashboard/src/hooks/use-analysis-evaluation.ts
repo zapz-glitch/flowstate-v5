@@ -21,7 +21,6 @@ import type {
 import { getCompKey } from '@/components/analysis/format-helpers'
 import { useReportSettings, type UseReportSettingsReturn } from '@/hooks/use-report-settings'
 import { recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
-import { recalculateReportComps } from '@/lib/client-api'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -89,46 +88,61 @@ function isCheckedForArv(
   return hasRoles ? comp.bRole === 'anchor' || comp.bRole === 'driver' : true
 }
 
+/** Restamp items for a manual selection — picked comps get compGroup 'arv',
+ *  unpicked lose a stale 'arv' tag — and recompute the section stats from
+ *  the picks. Keys read index-stable, so the original items drive them. */
+function markManualSelection(items: CompItem[], selectedCompKeys: Set<string>) {
+  const markedItems = items.map((comp, i) => {
+    const picked = selectedCompKeys.has(getCompKey(comp, i))
+    return picked
+      ? { ...comp, compGroup: 'arv' as const }
+      : comp.compGroup === 'arv' ? { ...comp, compGroup: null } : comp
+  })
+  const selected = markedItems.filter((comp, i) => selectedCompKeys.has(getCompKey(comp, i)))
+  const enabledCount = selected.length
+  const disabledCount = items.length - enabledCount
+
+  let avgPricePerSqft: number | null = null
+  let medianPrice: number | null = null
+  if (selected.length > 0) {
+    const ppsqft = selected
+      .map((c) => {
+        const price = c.adjustedPrice ?? c.salePrice
+        const sqft = c.squareFeet
+        return price != null && price > 0 && sqft != null && sqft > 0 ? price / sqft : null
+      })
+      .filter((v): v is number => v != null)
+    avgPricePerSqft = ppsqft.length > 0
+      ? Math.round(ppsqft.reduce((a, b) => a + b, 0) / ppsqft.length)
+      : null
+
+    const prices = selected
+      .map((c) => c.salePrice)
+      .filter((p): p is number => p != null)
+      .sort((a, b) => a - b)
+    if (prices.length > 0) {
+      const mid = Math.floor(prices.length / 2)
+      medianPrice = prices.length % 2 !== 0
+        ? prices[mid]!
+        : Math.round((prices[mid - 1]! + prices[mid]!) / 2)
+    }
+  }
+  return { markedItems, enabledCount, disabledCount, avgPricePerSqft, medianPrice }
+}
+
 export function useAnalysisEvaluation({
   data: inputData,
   stickyBarRootMargin = '-60px 0px 0px 0px',
   aiAnalyzing = false,
 }: UseAnalysisEvaluationInput): UseAnalysisEvaluationReturn {
-  const [serverSelection, setServerSelection] = useState<{ source: AnalyzeData; analysis: AnalyzeData; isManual: boolean } | null>(null)
-  const [selectionPending, setSelectionPending] = useState(false)
-  const selectionRequestRef = useRef(false)
-  const currentInputRef = useRef(inputData)
-  currentInputRef.current = inputData
-  const activeSelection = serverSelection?.source === inputData ? serverSelection : null
-  const data = activeSelection?.analysis ?? inputData
+  const data = inputData
   const pythonAuthoritative = data?.evaluationEngine === 'python-v4' || data?.evaluationEngine === 'ts-v5'
 
-  // Optimistic comp selection — the click flips the box (and the map pin)
-  // the same frame; the server recalculation settles the authoritative
-  // result behind it. A second click while one is in flight queues —
-  // the latest selection wins, nothing is dropped.
-  const [optimisticSel, setOptimisticSel] = useState<{ source: AnalyzeData; ids: Set<string>; isManual: boolean } | null>(null)
-  // Ref mirror — click handlers can run before the state re-render; the
-  // next click must chain on what the user just did, not on a stale read.
-  const optimisticSelRef = useRef<{ source: AnalyzeData; ids: Set<string>; isManual: boolean } | null>(null)
-  const applyOptimistic = useCallback((sel: { source: AnalyzeData; ids: Set<string>; isManual: boolean } | null) => {
-    optimisticSelRef.current = sel
-    setOptimisticSel(sel)
-  }, [])
-  const queuedSelRef = useRef<{ ids: string[] | null; source: AnalyzeData } | undefined>(undefined)
-  const [settleTick, setSettleTick] = useState(0)
-  // Revision/jobId reads must reflect the newest settled data — a queued
-  // call fires after the previous response landed, so the expected
-  // revision has already moved.
-  const dataRef = useRef(data)
-  dataRef.current = data
-  // Optimistic overlay only applies to the report it was made on — a new
-  // input (navigation, SSE swap) makes the queued/optimistic state stale.
-  const activeOptimistic = optimisticSel?.source === inputData ? optimisticSel : null
   // Settings panel open/close
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  // Comp override state
+  // Comp override state — a click writes this and the shared package
+  // recalculates the deal in the same render; no server round-trip.
   const [compOverride, setCompOverride] = useState<OverrideState | null>(null)
   // Ref tracks isManual to avoid stale closures in the sync effect
   const isManualRef = useRef(false)
@@ -136,66 +150,6 @@ export function useAnalysisEvaluation({
   // Compose useReportSettings
   const settingsHook = useReportSettings(data)
   const { recalcData, settingsChanged } = settingsHook
-
-  const applyServerSelection = useCallback(async (selectedCompIds: string[] | null) => {
-    if (selectionRequestRef.current || !inputData) return
-    const base = dataRef.current
-    if (!base) return
-    const jobId = base.meta?.analysisId
-    if (!jobId) {
-      applyOptimistic(null)
-      toast.error('This report cannot be recalculated. Run a new analysis first.')
-      return
-    }
-    const expectedRevision = base.evaluationRevision ?? 0
-    selectionRequestRef.current = true
-    setSelectionPending(true)
-    try {
-      const analysis = await recalculateReportComps(jobId, selectedCompIds, expectedRevision)
-      const validComps = Array.isArray(analysis?.comps?.items)
-        && analysis.comps.items.every(comp => comp != null && typeof comp.id === 'string' && typeof comp.isEnabled === 'boolean')
-      const insufficient = (analysis?.valuation?.resultGrade === 'withheld' || analysis?.valuation == null)
-        && validComps && analysis.comps!.items!.every(comp => !comp.isEnabled)
-      const valued = analysis?.valuation?.resultGrade !== 'withheld' && analysis?.valuation != null
-        && typeof analysis.valuation.arv === 'number' && Number.isFinite(analysis.valuation.arv) && analysis.valuation.arv > 0
-        && Number.isFinite(analysis.valuation.buyPrice)
-      if (!['python-v4', 'ts-v5'].includes(analysis?.evaluationEngine ?? '') || !validComps || (!insufficient && !valued)
-        || analysis.meta?.analysisId !== jobId || analysis.evaluationRevision !== expectedRevision + 1) {
-        throw new Error('The server returned an incomplete evaluation. Your previous result is unchanged.')
-      }
-      // Settled — drop the overlay unless a newer selection is already
-      // queued behind this response.
-      if (queuedSelRef.current === undefined) applyOptimistic(null)
-      if (currentInputRef.current === inputData) {
-        setServerSelection({ source: inputData, analysis, isManual: selectedCompIds !== null })
-        toast.info(selectedCompIds === null
-          ? 'Automatic comparable selection restored.'
-          : 'Operator-selected comparables. The server recalculated this evaluation.')
-      }
-    } catch (error) {
-      // Failed while nothing newer is queued → drop the optimistic overlay,
-      // the UI reverts to the last settled server state.
-      if (queuedSelRef.current === undefined) applyOptimistic(null)
-      if (currentInputRef.current === inputData) toast.error(error instanceof Error ? error.message : 'Comp selection could not be saved. Your previous result is unchanged.')
-    } finally {
-      selectionRequestRef.current = false
-      setSelectionPending(false)
-      setSettleTick((t) => t + 1)
-    }
-  }, [inputData, applyOptimistic])
-
-  // Drain the queued selection after the in-flight call settles — by the
-  // time this runs the response's data has committed, so the queued call
-  // sends the fresh expectedRevision (a stale one earns a 409).
-  useEffect(() => {
-    if (selectionRequestRef.current) return
-    const next = queuedSelRef.current
-    queuedSelRef.current = undefined
-    // Navigated to a different report while in flight — drop the queued
-    // selection; it names comps that don't exist here.
-    if (next === undefined || next.source !== inputData) return
-    void applyServerSelection(next.ids)
-  }, [settleTick, inputData, applyServerSelection])
 
   // Default selection = ARV evidence only — transitional/floor comps stay
   // listed but unselected (they never feed the ARV number).
@@ -206,17 +160,27 @@ export function useAnalysisEvaluation({
       .map(({ c, i }) => getCompKey(c, i))
   )
 
+  /** The comp keys the boxes currently show as checked — for server-seated
+   *  reports that is the anchor/driver rule (or every enabled comp once the
+   *  saved selection is manual); legacy reports use the ARV-evidence set. */
+  const checkedKeys = useCallback((items: CompItem[]): Set<string> => {
+    if (pythonAuthoritative) {
+      const manual = data?.manualCompSelection != null
+      return new Set(items.flatMap((comp, i) => (isCheckedForArv(comp, items, manual) ? [getCompKey(comp, i)] : [])))
+    }
+    return arvDefaultKeys(items)
+  }, [pythonAuthoritative, data?.manualCompSelection])
+
   // Initialize comp override when data arrives
   useEffect(() => {
     if (data?.comps?.items) {
       isManualRef.current = false
-      // Keep the optimistic overlay while a newer selection is still in
-      // flight or queued — clearing here would flicker the user's latest
-      // click back to an older server state before the final one lands.
-      if (!selectionRequestRef.current && queuedSelRef.current === undefined) applyOptimistic(null)
-      setCompOverride({ selectedCompKeys: arvDefaultKeys(data.comps.items), isManual: false })
+      // Server-seated reports derive their checked boxes from the saved
+      // report until the user touches one — no override object at rest.
+      if (pythonAuthoritative) setCompOverride(null)
+      else setCompOverride({ selectedCompKeys: arvDefaultKeys(data.comps.items), isManual: false })
     }
-  }, [data?.comps?.items])
+  }, [data?.comps?.items, pythonAuthoritative])
 
   // Sync comp selection when user changes evaluation settings (recalc produces new filter results)
   // Skip when: manual selection active, or when data just changed (init effect handles that)
@@ -240,63 +204,30 @@ export function useAnalysisEvaluation({
     setCompOverride({ selectedCompKeys: keys, isManual: false })
   }, [recalcData, data?.comps?.items])
 
-  // Toggle a single comp
+  // Toggle a single comp — writes the override; the recalc is the same
+  // shared math the server runs, so the deal updates in this render.
   const handleToggleComp = useCallback((key: string) => {
-    if (pythonAuthoritative) {
-      const items = data?.comps?.items ?? []
-      const target = items.find((comp, index) => getCompKey(comp, index) === key)
-      if (!target?.id || items.some(comp => comp.isEnabled && !comp.id)) {
-        toast.error('This report has no saved comparable IDs. Run a new analysis first.')
-        return
-      }
-      // Start from the boxes that are checked now — the comps in the ARV —
-      // then add or remove the one the user clicked. The optimistic set is
-      // the base so a fast second click builds on the first, not on stale
-      // server state.
-      const opt = optimisticSelRef.current && optimisticSelRef.current.source === inputData ? optimisticSelRef.current : null
-      const selected = new Set(opt?.ids ?? items.filter(comp => isCheckedForArv(comp, items, data?.manualCompSelection != null)).map(comp => comp.id!))
-      if (selected.has(target.id)) selected.delete(target.id)
-      else selected.add(target.id)
-      if (!selected.size) {
-        toast.error('Keep at least one comparable selected for ARV.')
-        return
-      }
-      const ids = [...selected]
-      applyOptimistic({ source: inputData!, ids: selected, isManual: true })
-      if (selectionRequestRef.current) queuedSelRef.current = { ids, source: inputData! }
-      else void applyServerSelection(ids)
-      return
-    }
-    isManualRef.current = true
+    const items = data?.comps?.items ?? []
     setCompOverride((prev) => {
-      if (!prev) return prev
-      const next = new Set(prev.selectedCompKeys)
+      const next = new Set(prev?.selectedCompKeys ?? checkedKeys(items))
       if (next.has(key)) next.delete(key)
       else next.add(key)
-      return { selectedCompKeys: next, isManual: true }
+      if (next.size === 0) {
+        toast.error('Keep at least one comparable selected for ARV.')
+        return prev
+      }
+      isManualRef.current = true
+      return { selectedCompKeys: next, isManual: true, tierPins: prev?.tierPins }
     })
-  }, [pythonAuthoritative, data, inputData, applyServerSelection, applyOptimistic])
+  }, [data?.comps?.items, checkedKeys])
 
-  // Reset to original enabled comps
+  // Reset to the report's automatic selection
   const handleResetComps = useCallback(() => {
-    if (pythonAuthoritative) {
-      // Optimistic reset mirrors the server's auto rule (anchor/driver —
-      // all enabled when no roles) so the boxes move now, not on settle.
-      const items = data?.comps?.items ?? []
-      const hasRoles = items.some((c) => c.bRole === 'anchor' || c.bRole === 'driver')
-      const auto = new Set(
-        items.filter((c) => c.isEnabled === true && (!hasRoles || c.bRole === 'anchor' || c.bRole === 'driver')).map((c) => c.id!)
-      )
-      applyOptimistic({ source: inputData!, ids: auto, isManual: false })
-      if (selectionRequestRef.current) queuedSelRef.current = { ids: null, source: inputData! }
-      else void applyServerSelection(null)
-      return
-    }
+    const items = data?.comps?.items
+    if (!items) return
     isManualRef.current = false
-    if (data?.comps?.items) {
-      setCompOverride({ selectedCompKeys: arvDefaultKeys(data.comps.items), isManual: false })
-    }
-  }, [data?.comps?.items, inputData, pythonAuthoritative, applyServerSelection])
+    setCompOverride({ selectedCompKeys: checkedKeys(items), isManual: false })
+  }, [data?.comps?.items, checkedKeys])
 
   // Reviewer tier pin — 'arv' admits the comp into the ARV pool (and selects
   // it), 'as_is' excludes it from ARV evidence, null clears. Persistence to
@@ -307,11 +238,9 @@ export function useAnalysisEvaluation({
     isManualRef.current = true
     setCompOverride((prev) => {
       const base = prev ?? {
-        selectedCompKeys: new Set(
-          items.map((c, i) => ({ c, i }))
-            .filter(({ c }) => c.isEnabled === true)
-            .map(({ c, i }) => getCompKey(c, i))
-        ),
+        // Seed from the boxes currently checked — the report's own auto rule,
+        // not every enabled comp.
+        selectedCompKeys: checkedKeys(items),
         isManual: false,
         tierPins: {},
       }
@@ -326,21 +255,67 @@ export function useAnalysisEvaluation({
       const hasPins = Object.keys(tierPins).length > 0
       return { selectedCompKeys, isManual: base.isManual || hasPins, tierPins }
     })
-  }, [data?.comps?.items])
+  }, [data?.comps?.items, checkedKeys])
 
   // Freeze valuation ref: snapshot the valuation when AI analysis starts
   const frozenValuationRef = useRef<ValuationData | undefined>(undefined)
   const wasAiAnalyzingRef = useRef(false)
 
-  // Build display valuation: always use recalcData, then apply manual comp override
+  // Build display valuation: recalcData base, then manual comp override
   const computedValuation = useMemo((): ValuationData | undefined => {
     if (!data?.valuation) return undefined
+
+    // Start from recalcData (always available once data loads) or original.
+    // Server-seated engines have no client recalcData — their base is the
+    // saved valuation.
+    let base: ValuationData = data.valuation
+    if (!pythonAuthoritative && recalcData) {
+      const v = recalcData.valuation
+      base = {
+        ...data.valuation,
+        arv: v.arv,
+        arvPerSqft: v.arvPerSqft,
+        buyPrice: v.buyPrice,
+        buyPricePercent: v.buyPricePercent,
+        rehabCost: v.rehabCost,
+        baseRehabCost: v.baseRehabCost,
+        majorItemsCost: v.majorItemsCost,
+        rehabLevel: v.rehabLevel,
+        rehabPerSqft: v.rehabPerSqft,
+        totalCosts: v.totalCosts,
+        totalInvestment: v.totalInvestment,
+        projectedProfit: v.projectedProfit,
+        projectedROI: v.projectedROI,
+        wholesalePrice: v.wholesalePrice,
+        closingCosts: v.closingCosts,
+        carryingCosts: v.carryingCosts,
+        rehabLevelEstimates: v.rehabLevelEstimates,
+        arvAdjustments: v.arvAdjustments,
+      }
+    }
+
+    // A manual comp selection recalcs client-side on every engine — the
+    // shared package's evaluateB is the same math the server ran.
+    if (compOverride?.isManual && data?.comps?.items && data?.subject) {
+      const pins = compOverride.tierPins
+      const items = pins && Object.keys(pins).length > 0
+        ? data.comps.items.map((c) => (c.id && pins[c.id] ? { ...c, userTier: pins[c.id] } : c))
+        : data.comps.items
+      return recalculateValuationFromComps(
+        items,
+        data.subject,
+        compOverride.selectedCompKeys,
+        base,
+        settingsHook.settings
+      )
+    }
+
     if (pythonAuthoritative) {
       // Server-authoritative report — only an explicit manual ARV override
       // may alter the displayed deal. Stored percent-of-ARV rules are inert.
       const ov = settingsHook.settings.arvOverride
-      if (ov == null || ov <= 0) return data.valuation
-      const v0 = data.valuation
+      if (ov == null || ov <= 0) return base
+      const v0 = base
       const newArv = Math.max(0, Math.round(ov))
       const ref = Math.max(1, v0.arv ?? 0)
       const closingPct = (v0.closingCosts ?? 0) / ref
@@ -372,50 +347,6 @@ export function useAnalysisEvaluation({
       }
     }
 
-    // Start from recalcData (always available once data loads) or original
-    let base: ValuationData
-    if (recalcData) {
-      const v = recalcData.valuation
-      base = {
-        ...data.valuation,
-        arv: v.arv,
-        arvPerSqft: v.arvPerSqft,
-        buyPrice: v.buyPrice,
-        buyPricePercent: v.buyPricePercent,
-        rehabCost: v.rehabCost,
-        baseRehabCost: v.baseRehabCost,
-        majorItemsCost: v.majorItemsCost,
-        rehabLevel: v.rehabLevel,
-        rehabPerSqft: v.rehabPerSqft,
-        totalCosts: v.totalCosts,
-        totalInvestment: v.totalInvestment,
-        projectedProfit: v.projectedProfit,
-        projectedROI: v.projectedROI,
-        wholesalePrice: v.wholesalePrice,
-        closingCosts: v.closingCosts,
-        carryingCosts: v.carryingCosts,
-        rehabLevelEstimates: v.rehabLevelEstimates,
-        arvAdjustments: v.arvAdjustments,
-      }
-    } else {
-      base = data.valuation
-    }
-
-    // If comp override is manual, recalculate on top using user's full settings
-    if (compOverride?.isManual && data?.comps?.items && data?.subject) {
-      const pins = compOverride.tierPins
-      const items = pins && Object.keys(pins).length > 0
-        ? data.comps.items.map((c) => (c.id && pins[c.id] ? { ...c, userTier: pins[c.id] } : c))
-        : data.comps.items
-      return recalculateValuationFromComps(
-        items,
-        data.subject,
-        compOverride.selectedCompKeys,
-        base,
-        settingsHook.settings
-      )
-    }
-
     return base
   }, [data, recalcData, compOverride, settingsHook.settings, pythonAuthoritative])
 
@@ -436,9 +367,14 @@ export function useAnalysisEvaluation({
 
   // Build display comps: map recalcData comp evaluations onto original items
   const displayComps = useMemo((): CompsData | undefined => {
-    if (pythonAuthoritative) return selectionPending && data?.comps
-      ? { ...data.comps, items: data.comps.items?.map(comp => ({ ...comp, selectionPending: true })) }
-      : data?.comps
+    // Server-seated reports show the saved comps until the user picks a
+    // different set — then the picks restamp compGroup and the stats.
+    if (pythonAuthoritative) {
+      if (!data?.comps || !compOverride?.isManual) return data?.comps
+      const { markedItems, enabledCount, disabledCount, avgPricePerSqft, medianPrice } =
+        markManualSelection(data.comps.items ?? [], compOverride.selectedCompKeys)
+      return { ...data.comps, count: markedItems.length, enabledCount, disabledCount, avgPricePerSqft, medianPrice, items: markedItems }
+    }
     if (!recalcData || !data?.comps) return data?.comps
 
     const items = (data.comps.items || []).map((comp, i) => {
@@ -475,76 +411,29 @@ export function useAnalysisEvaluation({
     // When user manually selects comps, recompute stats from selected comps
     // and restamp compGroup so "Selected for ARV" (PDF + saved report)
     // means the user's picks, not the classification-derived tags.
-    let { avgPricePerSqft, medianPrice, enabledCount, disabledCount } = recalcData
-    const markedItems = compOverride?.isManual
-      ? items.map((comp, i) => {
-          const picked = compOverride.selectedCompKeys.has(getCompKey(comp, i))
-          return picked
-            ? { ...comp, compGroup: 'arv' as const }
-            : comp.compGroup === 'arv' ? { ...comp, compGroup: null } : comp
-        })
-      : items
-    if (compOverride?.isManual) {
-      const compsItems = data.comps?.items || []
-      const selected = markedItems.filter((_, i) => compOverride.selectedCompKeys.has(getCompKey(compsItems[i], i)))
-      enabledCount = selected.length
-      disabledCount = items.length - enabledCount
-
-      if (selected.length > 0) {
-        // Avg $/sqft from selected comps
-        const ppsqft = selected
-          .map((c) => {
-            const price = c.adjustedPrice ?? c.salePrice
-            const sqft = c.squareFeet
-            return price != null && price > 0 && sqft != null && sqft > 0 ? price / sqft : null
-          })
-          .filter((v): v is number => v != null)
-        avgPricePerSqft = ppsqft.length > 0
-          ? Math.round(ppsqft.reduce((a, b) => a + b, 0) / ppsqft.length)
-          : null
-
-        // Median sale price from selected comps
-        const prices = selected
-          .map((c) => c.salePrice)
-          .filter((p): p is number => p != null)
-          .sort((a, b) => a - b)
-        if (prices.length > 0) {
-          const mid = Math.floor(prices.length / 2)
-          medianPrice = prices.length % 2 !== 0
-            ? prices[mid]
-            : Math.round((prices[mid - 1] + prices[mid]) / 2)
-        } else {
-          medianPrice = null
-        }
-      } else {
-        avgPricePerSqft = null
-        medianPrice = null
-      }
-    }
+    const manual = compOverride?.isManual
+      ? markManualSelection(items, compOverride.selectedCompKeys)
+      : null
 
     return {
       ...data.comps,
       count: items.length,
-      enabledCount,
-      disabledCount,
-      avgPricePerSqft,
-      medianPrice,
-      items: markedItems,
+      enabledCount: manual?.enabledCount ?? recalcData.enabledCount,
+      disabledCount: manual?.disabledCount ?? recalcData.disabledCount,
+      avgPricePerSqft: manual?.avgPricePerSqft ?? recalcData.avgPricePerSqft,
+      medianPrice: manual?.medianPrice ?? recalcData.medianPrice,
+      items: manual?.markedItems ?? items,
     }
-  }, [recalcData, data?.comps, compOverride, pythonAuthoritative, selectionPending])
+  }, [recalcData, data?.comps, compOverride, pythonAuthoritative])
 
-  const isRecalculated = !pythonAuthoritative && (settingsChanged || (compOverride?.isManual ?? false))
+  const isRecalculated = (!pythonAuthoritative && settingsChanged) || (compOverride?.isManual ?? false)
   const effectiveComps = displayComps ?? data?.comps
-  const authoritativeOverride = useMemo(() => pythonAuthoritative && data?.comps?.items ? {
-    // The optimistic selection (set the instant the user clicks) wins over
-    // the server-derived set until the recalc settles.
-    selectedCompKeys: new Set(data.comps.items.flatMap((comp, index) =>
-      (activeOptimistic
-        ? comp.id != null && activeOptimistic.ids.has(comp.id)
-        : isCheckedForArv(comp, data.comps!.items!, data.manualCompSelection != null))
-        ? [getCompKey(comp, index)] : [])),
-    isManual: activeOptimistic?.isManual ?? activeSelection?.isManual ?? data.manualCompSelection != null,
-  } : null, [pythonAuthoritative, data?.comps?.items, data?.manualCompSelection, activeSelection?.isManual, activeOptimistic])
+  // Server-seated reports derive their checked boxes from the saved report
+  // until the user touches one — then compOverride (non-null) takes over.
+  const authoritativeOverride = useMemo(() => pythonAuthoritative && compOverride == null && data?.comps?.items ? {
+    selectedCompKeys: checkedKeys(data.comps.items),
+    isManual: data.manualCompSelection != null,
+  } : null, [pythonAuthoritative, compOverride, data?.comps?.items, data?.manualCompSelection, checkedKeys])
 
   // Sticky bar IntersectionObserver
   const valuationCardRef = useRef<HTMLDivElement>(null)
@@ -569,7 +458,7 @@ export function useAnalysisEvaluation({
     authoritativeData: data,
     settingsHook,
     recalcData,
-    compOverride: authoritativeOverride ?? compOverride,
+    compOverride: compOverride ?? authoritativeOverride,
     handleToggleComp,
     handleResetComps,
     handlePinTier,
