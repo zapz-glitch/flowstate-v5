@@ -207,6 +207,8 @@ export interface BoardItem {
   note: string | null
   /** Cleared rows — only present when fetched with all=1 */
   dismissed?: boolean
+  /** Newest saved report for this lead/address — the address links here */
+  reportJobId?: string | null
   createdAt: string
   updatedAt: string
 }
