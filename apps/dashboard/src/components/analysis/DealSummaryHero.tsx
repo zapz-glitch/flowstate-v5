@@ -199,7 +199,7 @@ export function DealSummaryHero({ valuation, isRecalculated, disposition }: Deal
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Rehab</div>
           <div className="text-base font-bold tabular-nums mt-0.5">${fmtK(valuation.rehabCost)}</div>
-          {valuation.rehabLevel && <div className="text-[10px] text-foreground-tertiary mt-0.5">{valuation.rehabLevel}</div>}
+          {valuation.rehabLevel && <div className="text-[10px] text-foreground-tertiary mt-0.5">{valuation.rehabLevelSource === 'default' ? `${valuation.rehabLevel} (assumed)` : valuation.rehabLevel}</div>}
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Profit</div>

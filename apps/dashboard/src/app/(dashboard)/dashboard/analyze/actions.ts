@@ -434,6 +434,9 @@ export interface ValuationData {
   baseRehabCost?: number
   majorItemsCost?: number
   rehabLevel?: string | null
+  /** Where the level came from — 'default' means the pipeline assumed it,
+   *  no vision/classification read landed. */
+  rehabLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default' | null
   rehabPerSqft?: number
   /** All rehab level estimates with costs calculated for the current ARV */
   rehabLevelEstimates?: RehabLevelEstimate[]
@@ -743,6 +746,9 @@ export interface ValuationData {
   baseRehabCost?: number
   majorItemsCost?: number
   rehabLevel?: string | null
+  /** Where the level came from — 'default' means the pipeline assumed it,
+   *  no vision/classification read landed. */
+  rehabLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default' | null
   rehabPerSqft?: number
   /** All rehab level estimates with costs calculated for the current ARV */
   rehabLevelEstimates?: RehabLevelEstimate[]
