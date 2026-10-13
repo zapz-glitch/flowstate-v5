@@ -40,6 +40,9 @@ export function OfferBoard() {
   const [items, setItems] = useState<BoardItem[]>([])
   const [loaded, setLoaded] = useState(false)
   const [showAll, setShowAll] = useState(false)
+  const [view, setView] = useState<'board' | 'list'>('board')
+  const [listStage, setListStage] = useState<string>('all')
+  const [listQuery, setListQuery] = useState('')
 
   const load = useCallback(async (all: boolean) => {
     const r = await getOfferBoard(all).catch(() => null)
@@ -69,6 +72,17 @@ export function OfferBoard() {
     return [...groups.entries()].filter(([, arr]) => arr.length > 0)
   }, [items])
 
+  // Airtable-style list — same items, filter by stage + free text.
+  const listRows = useMemo(() => {
+    const q = listQuery.trim().toLowerCase()
+    return items.filter((i) => {
+      if (listStage !== 'all' && i.status !== listStage) return false
+      if (!q) return true
+      return [i.address, i.displayName, i.note]
+        .filter(Boolean).some((v) => String(v).toLowerCase().includes(q))
+    })
+  }, [items, listStage, listQuery])
+
   if (loaded && items.length === 0) return null
 
   return (
@@ -78,16 +92,126 @@ export function OfferBoard() {
           Campaign board
         </span>
         <span className="text-[10px] text-foreground-tertiary tabular-nums">{live.length} live</span>
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          className={`ml-auto text-[10px] px-2 py-0.5 rounded border transition-colors ${
-            showAll ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
-          }`}
-        >
-          {showAll ? 'All time' : 'Live only'}
-        </button>
+        <span className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setView('board')}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              view === 'board' ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
+            }`}
+          >
+            Board
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('list')}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              view === 'list' ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
+            }`}
+          >
+            List
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              showAll ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
+            }`}
+          >
+            {showAll ? 'All time' : 'Live only'}
+          </button>
+        </span>
       </div>
+
+      {view === 'list' ? (
+        <div className="p-2 space-y-1.5">
+          {/* Filter bar — stage chips + free text */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {['all', ...STAGES.map((s) => s.key)].map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setListStage(s)}
+                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  listStage === s ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
+                }`}
+              >
+                {s === 'all' ? 'All' : stageLabel(s)}
+              </button>
+            ))}
+            <input
+              value={listQuery}
+              onChange={(e) => setListQuery(e.target.value)}
+              placeholder="Filter…"
+              className="ml-auto w-36 bg-secondary/50 border border-border/50 rounded-md px-2 py-0.5 text-[11px] text-foreground placeholder:text-foreground-tertiary outline-none focus:border-primary/50"
+            />
+          </div>
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-foreground-tertiary border-b border-border/40">
+                <th className="py-1 pr-3 font-medium">Address</th>
+                <th className="py-1 pr-3 font-medium">Contact</th>
+                <th className="py-1 pr-3 font-medium">Stage</th>
+                <th className="py-1 pr-3 font-medium text-right">Offer</th>
+                <th className="py-1 pr-3 font-medium text-right">Counter</th>
+                <th className="py-1 pr-3 font-medium">Note</th>
+                <th className="py-1 font-medium text-right">Updated</th>
+                <th className="py-1" />
+              </tr>
+            </thead>
+            <tbody>
+              {listRows.map((i) => {
+                const contact = closeLeadUrl(i.leadId)
+                return (
+                  <tr key={i.id} className={`border-b border-border/20 group ${i.dismissed ? 'opacity-50' : ''}`}>
+                    <td className="py-1.5 pr-3 max-w-[220px] truncate">
+                      {i.reportJobId ? (
+                        <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="hover:underline text-foreground">
+                          {i.address}
+                        </Link>
+                      ) : (
+                        <span className="text-foreground">{i.address}</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-3 text-foreground-tertiary">
+                      {contact ? (
+                        <a href={contact} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                          <ExternalLink size={10} />
+                          {i.displayName ?? 'Open'}
+                        </a>
+                      ) : (i.displayName ?? '—')}
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <span className={`${STAGES.find((s) => s.key === i.status)?.tint ?? 'text-foreground-tertiary'}`}>
+                        {stageLabel(i.status)}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-foreground-secondary">{fmtPrice(i.offerAmount) ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-orange-500">{fmtPrice(i.counterAmount) ?? '—'}</td>
+                    <td className="py-1.5 pr-3 max-w-[200px] truncate text-foreground-secondary" title={i.note ?? ''}>{i.note ?? '—'}</td>
+                    <td className="py-1.5 text-right tabular-nums text-foreground-tertiary">{fmtAge(i.updatedAt)}</td>
+                    <td className="py-1.5 pl-2">
+                      {!i.dismissed && (
+                        <button
+                          type="button"
+                          onClick={() => remove(i.id)}
+                          title="Remove from board"
+                          className="opacity-0 group-hover:opacity-100 text-foreground-tertiary hover:text-foreground transition-opacity"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+              {listRows.length === 0 && (
+                <tr><td colSpan={8} className="py-4 text-center text-foreground-tertiary">No items match</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
       <div className="flex gap-2 overflow-x-auto p-2">
         {columns.map(([status, arr]) => {
           const stage = STAGES.find((s) => s.key === status)
@@ -151,6 +275,7 @@ export function OfferBoard() {
         })}
         {!loaded && <div className="text-xs text-foreground-tertiary px-2 py-4">Loading board…</div>}
       </div>
+      )}
     </div>
   )
 }
