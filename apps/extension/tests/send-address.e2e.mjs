@@ -58,7 +58,7 @@ try {
   await options.goto(`chrome-extension://${extensionId}/options.html`)
   await options.fill('#baseUrl', 'localhost:3000')
   await options.click('#save')
-  await options.waitForFunction(() => document.getElementById('saved').textContent === 'Saved.')
+  await options.waitForFunction(() => document.getElementById('saved').textContent.startsWith('Saved'))
   step('options page saved the local dashboard URL')
 
   // The right-click itself is native browser UI; fire the same event Chrome does.

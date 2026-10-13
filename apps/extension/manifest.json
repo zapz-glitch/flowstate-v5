@@ -1,20 +1,28 @@
 {
   "manifest_version": 3,
   "name": "Flowstate — Send Address",
-  "version": "1.1.1",
-  "description": "Right-click any selected address to send it to Flowstate Property Research.",
-  "permissions": ["contextMenus", "storage"],
+  "version": "1.2.0",
+  "description": "Send a property address from any page to Flowstate for an evaluation: right-click, Alt+Shift+F, or the toolbar button.",
+  "permissions": ["contextMenus", "storage", "activeTab", "scripting", "notifications", "alarms"],
+  "host_permissions": ["https://*.flowstate.homes/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
-    "default_title": "Open Flowstate Property Search",
+    "default_title": "Send to Flowstate",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/action-16.png",
       "24": "icons/action-24.png",
       "32": "icons/action-32.png",
       "48": "icons/action-48.png"
+    }
+  },
+  "commands": {
+    "send-to-flowstate": {
+      "suggested_key": { "default": "Alt+Shift+F" },
+      "description": "Send this page's address to Flowstate"
     }
   },
   "options_page": "options.html",

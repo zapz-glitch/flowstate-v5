@@ -5,9 +5,10 @@
   <title>Flowstate Extension Settings</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #e5e5e5; background: #0a0a0a; }
-    label { display: block; font-size: 13px; margin-bottom: 6px; color: #a3a3a3; }
+    label { display: block; font-size: 13px; margin: 18px 0 6px; color: #a3a3a3; }
+    label:first-of-type { margin-top: 0; }
     input { width: 100%; padding: 8px 10px; font-size: 14px; border: 1px solid #333; background: #141414; color: #e5e5e5; border-radius: 4px; box-sizing: border-box; }
-    button { margin-top: 12px; padding: 8px 16px; font-size: 13px; background: #fff; color: #000; border: none; border-radius: 4px; cursor: pointer; }
+    button { margin-top: 16px; padding: 8px 16px; font-size: 13px; background: #fff; color: #000; border: none; border-radius: 4px; cursor: pointer; }
     #saved { font-size: 12px; color: #4ade80; margin-top: 8px; display: none; }
     .hint { font-size: 12px; color: #737373; margin-top: 6px; }
   </style>
@@ -16,6 +17,15 @@
   <label for="baseUrl">Flowstate dashboard URL</label>
   <input id="baseUrl" type="url" placeholder="https://app.flowstate.homes">
   <p class="hint">Use http://localhost:3000 for local development.</p>
+
+  <label for="apiKey">API key (optional)</label>
+  <input id="apiKey" type="password" placeholder="fs_…" autocomplete="off">
+  <p class="hint">With a key, sends run in the background and you get a notice when the evaluation is done. Without one, a send opens Flowstate in a new tab. Make a key in Flowstate under API Hub. It is stored on this computer only.</p>
+
+  <label for="apiUrl">API URL (optional)</label>
+  <input id="apiUrl" type="url" placeholder="Worked out from the dashboard URL">
+  <p class="hint">Leave blank unless your API lives somewhere unusual.</p>
+
   <button id="save">Save</button>
   <div id="saved">Saved.</div>
   <script type="module" src="options.js"></script>
