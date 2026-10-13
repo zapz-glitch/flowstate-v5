@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Flowstate — Send Address",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Right-click any selected address to send it to Flowstate Property Research.",
   "permissions": ["contextMenus", "storage"],
   "background": {
