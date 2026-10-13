@@ -521,7 +521,8 @@ export interface CompsData {
 
 export interface CompBadges {
   price: 'renovated' | 'median' | 'as_is' | null
-  condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
+  condition: 'reno' | 'dated' | 'distressed' | 'lipstick' | 'light_cosmetic' | 'full_cosmetic' | 'heavy_rehab' | 'full_gut' | 'unverified' | null
+  marketPosition: 'at_market' | 'above_market' | 'below_market' | 'unverified' | null
   pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
   /** How the pocket match was earned — tract | block | name; null when out */
   pocketVia: 'tract' | 'block' | 'name' | null
@@ -829,7 +830,8 @@ export interface CompsData {
 
 export interface CompBadges {
   price: 'renovated' | 'median' | 'as_is' | null
-  condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
+  condition: 'reno' | 'dated' | 'distressed' | 'lipstick' | 'light_cosmetic' | 'full_cosmetic' | 'heavy_rehab' | 'full_gut' | 'unverified' | null
+  marketPosition: 'at_market' | 'above_market' | 'below_market' | 'unverified' | null
   pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
   /** How the pocket match was earned — tract | block | name; null when out */
   pocketVia: 'tract' | 'block' | 'name' | null

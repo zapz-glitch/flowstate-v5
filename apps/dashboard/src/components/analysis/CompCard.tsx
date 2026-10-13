@@ -203,9 +203,9 @@ function CompCardInner({
                     : 'text-red-400'
                 )}
                 title={
-                  comp.badges.trust === 'verified' ? 'Verified — evidence checks passed'
-                    : comp.badges.trust === 'partial' ? 'Partially verified — some checks missing'
-                    : 'Unverified — an evidence check failed'
+                  comp.badges.trust === 'verified' ? 'Verified — condition and price both confirmed'
+                    : comp.badges.trust === 'partial' ? 'Partially verified — one check confirmed, one could not verify'
+                    : 'Unverified — checks could not confirm'
                 }
               >
                 {comp.badges.trust === 'verified' ? <CheckCircle2 className="w-4 h-4" />

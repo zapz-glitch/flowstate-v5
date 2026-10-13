@@ -21,6 +21,7 @@ import {
   formatLotSize,
   formatShortDate,
   lotMatchColor,
+  marketPositionLabel,
   priceClassLabel,
   roleTitle,
   roleWord,
@@ -85,7 +86,9 @@ function CompGridCardInner({
 
   const verdict = verdictOf(comp.bRole, isEnabled)
   const role = roleWord(comp.bRole)
-  const priceClass = priceClassLabel(comp.badges?.price)
+  const marketPosition = marketPositionLabel(comp.badges?.marketPosition)
+  const priceClass = marketPosition ?? priceClassLabel(comp.badges?.price)
+  const priceTitle = marketPosition != null ? 'Code-assigned price position vs the pocket median band' : comp.classification?.reasoning || undefined
   const trust = trustLabel(comp.badges?.trust)
   const widened = widenedRules(comp.badges)
   const conflict = conflictNote(comp)
@@ -232,8 +235,8 @@ function CompGridCardInner({
 
         {/* Server verdicts · each on its own axis */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1.5">
-          <Pair label="Condition" value={conditionLabel(comp.badges?.condition)} title={comp.curbAppeal?.summary ?? undefined} />
-          {priceClass && <Pair label="Price" value={priceClass} title={comp.classification?.reasoning || undefined} />}
+          <Pair label="Condition" value={conditionLabel(comp.badges?.condition)} title={marketPosition != null ? 'Decisions renovation-tier call' : comp.curbAppeal?.summary ?? undefined} />
+          {priceClass && <Pair label="Price" value={priceClass} title={priceTitle} />}
           {trust && <Pair label="Trust" value={trust} title={trustTitle(comp.badges?.trust)} />}
         </div>
 

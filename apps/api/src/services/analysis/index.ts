@@ -565,6 +565,9 @@ export interface ResponseContext {
     summary: string | null
     photosExamined: number
   }>
+  /** Decisions comp answers per comp (by comp ID) — the card's condition,
+   *  market-position, and trust badges read these when present. */
+  compObservables?: Record<string, import('./comp-badges').CompBadgeObservables | null>
   /** External API call statistics */
   apiCallStats?: ApiCallStats
   /** LLM-selected best matching comp */
@@ -1595,6 +1598,7 @@ export function buildAnalysisResponse(
         condition: ctx.compCurbAppeal?.[comp.id] ?? null,
         classification: compClassification?.classification ?? null,
         expansionApplied: appraisalResult.expansionApplied ?? [],
+        observables: ctx.compObservables?.[comp.id] ?? null,
       }),
       curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
