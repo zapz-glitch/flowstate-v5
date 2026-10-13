@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import { ReportPageView } from '../../reports/[jobId]/report-page-view'
-import { getOfferQueue, type PipelineItem } from '../actions'
+import { getOfferQueue, getOfferBoard, type BoardItem, type PipelineItem } from '../actions'
+import { stageLabel, stageTint } from '@/components/analysis/OfferBoard'
 import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOffersViewCached, type DecidedEntry, type ServerDisposition, type OfferWorkflow } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
 import { cn } from '@/lib/utils'
@@ -52,8 +53,9 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   const router = useRouter()
   const searchParams = useSearchParams()
   const rawCat = searchParams.get('cat')
+  const boardStage = searchParams.get('board')
   const cat: Cat = CATS.has(rawCat as Cat) ? (rawCat as Cat) : 'waiting'
-  const isQueueCat = QUEUE_CATS.has(cat)
+  const isQueueCat = QUEUE_CATS.has(cat) && !boardStage
 
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [queueLoaded, setQueueLoaded] = useState(getCachedQueue() != null)
@@ -117,10 +119,25 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     return sortedQueue(raw, filter).filter((i) => !excluded.has(i.leadId))
   }, [raw, filter, serverDisp])
 
+  // Board context — opened from a campaign-board stage column, prev/next
+  // and auto-advance walk that column's reports.
+  const [boardItems, setBoardItems] = useState<BoardItem[]>([])
+  useEffect(() => {
+    if (!boardStage) return
+    let cancelled = false
+    getOfferBoard().then((r) => { if (!cancelled && r.ok) setBoardItems(r.items) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [boardStage])
+
   // The active category's nav order — prev/next, position, and auto-advance
-  // all walk this list. Queue categories sort by the wait filter; outcome
-  // categories keep the decided list's newest-first order.
+  // all walk this list. Board stage = board order; queue categories sort by
+  // the wait filter; outcome categories keep the decided list's order.
   const orderedJobIds = useMemo<string[]>(() => {
+    if (boardStage) {
+      return boardItems
+        .filter((i) => i.status === boardStage && i.reportJobId)
+        .map((i) => i.reportJobId!)
+    }
     if (isQueueCat) {
       const scoped = cat === 'hot' ? queueItems.filter((i) => hotIds.has(i.leadId)) : queueItems
       return scoped.map(jobIdForItem).filter((j): j is string => !!j)
@@ -129,7 +146,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
       .filter((d) => (cat === 'failed' ? !d.ok : d.ok && d.workflow === cat))
       .map((d) => d.jobId ?? jobIdByLead.get(d.leadId) ?? null)
       .filter((j): j is string => !!j)
-  }, [queueItems, decided, cat, hotIds, isQueueCat, jobIdByLead])
+  }, [queueItems, decided, cat, hotIds, isQueueCat, jobIdByLead, boardStage, boardItems])
 
   const index = orderedJobIds.indexOf(jobId)
   // Queue fields (fallback card, notes, wait timer) resolve against the raw
@@ -155,10 +172,10 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         // Same covered swap as auto-advance — arrows read as a crossfade.
         veilFromJob.current = jobId
         setVeil(true)
-        router.push(`/dashboard/give-offer/${jid}?cat=${cat}`)
+        router.push(`/dashboard/give-offer/${jid}?${boardStage ? `board=${boardStage}` : `cat=${cat}`}`)
       } else router.push('/dashboard/give-offer')
     },
-    [router, cat, jobId],
+    [router, cat, jobId, boardStage],
   )
 
   // Remember where we were — the Offers dashboard's Resume button jumps
@@ -213,8 +230,13 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   // states) and the compact cluster rendered inside the header card.
   const controls = (
     <>
+      {boardStage && (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border border-border/60 ${stageTint(boardStage)}`}>
+          {stageLabel(boardStage)}
+        </span>
+      )}
       <span className="text-foreground-tertiary tabular-nums">
-        {index >= 0 ? `${index + 1} of ${orderedJobIds.length}` : `${orderedJobIds.length} in ${cat}`}
+        {index >= 0 ? `${index + 1} of ${orderedJobIds.length}` : `${orderedJobIds.length} in ${boardStage ? stageLabel(boardStage) : cat}`}
       </span>
       {isQueueCat && current && <WaitChip queuedAt={current.queuedAt} />}
       {/* Sort lives in the item view — changing it re-orders the queue and
