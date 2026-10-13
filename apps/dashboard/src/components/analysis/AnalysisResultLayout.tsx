@@ -208,14 +208,6 @@ export function AnalysisResultLayout({
       {/* Properties grid (subject + comps) */}
       {comps ? (
         <div className="relative">
-        {/* During a rerun the step label floats over the held comps instead of pushing them down */}
-        {refreshing && statusLabel && (
-          <div role="status" className="absolute left-1/2 top-12 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sm border border-border bg-background px-3 py-1.5 shadow-sm animate-in fade-in duration-300">
-            <Loader2 className="w-3 h-3 text-primary animate-spin" />
-            <span className="text-caption text-foreground-secondary whitespace-nowrap">{statusLabel}</span>
-            <EvalTimer />
-          </div>
-        )}
         <div
           aria-busy={refreshing}
           className={cn('transition-opacity duration-300', refreshing && 'opacity-60 pointer-events-none select-none')}
