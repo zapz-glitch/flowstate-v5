@@ -1040,3 +1040,13 @@ export const offerBoard = sqliteTable(
     index('idx_offer_board_lead').on(table.leadId),
   ]
 )
+
+
+/** Durable copy of the last engine queue/metrics payload — KV expires,
+ *  this doesn't. Serves the Offers page instantly on cold paths while a
+ *  background engine refresh lands. */
+export const pipelineSnapshot = sqliteTable('pipeline_snapshot', {
+  path: text('path').primaryKey(),
+  bodyJson: text('body_json').notNull(),
+  refreshedAt: text('refreshed_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
