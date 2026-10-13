@@ -794,37 +794,53 @@ userReports.get('/:jobId', async (c) => {
   const jobId = c.req.param('jobId')
   const db = drizzle(c.env.DB)
 
-  const report = await db
+  const saved = await db
     .select()
     .from(savedReports)
     .where(eq(savedReports.jobId, jobId))
     .limit(1)
     .then((rows) => rows[0] ?? null)
 
-  if (!report) {
-    return c.json({ error: 'Report not found' }, 404)
-  }
+  const report = saved && saved.userId === session.user.id ? saved : null
 
-  // Verify the report belongs to the authenticated user
-  if (report.userId !== session.user.id) {
+  // A rerun replaces the saved row under a fresh jobId, while queue links
+  // and bookmarks still point at the original — fall back to this user's
+  // immutable run record before declaring the report missing.
+  const fallbackRun = report ? null : await db
+    .select({
+      propertyAddress: runRecords.propertyAddress,
+      createdAt: runRecords.createdAt,
+      payloadJson: runRecords.payloadJson,
+    })
+    .from(runRecords)
+    .where(and(eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .orderBy(desc(runRecords.createdAt))
+    .limit(1)
+    .then((rows) => rows[0] ?? null)
+
+  if (!report && !fallbackRun) {
     return c.json({ error: 'Report not found' }, 404)
   }
 
   let analysis = null
-  if (report.fullResponseJson) {
+  if (report?.fullResponseJson) {
     try {
       analysis = JSON.parse(report.fullResponseJson)
     } catch {
       return c.json({ error: 'Report data is corrupted' }, 500)
     }
+  } else if (fallbackRun) {
+    try {
+      analysis = (JSON.parse(fallbackRun.payloadJson) as { result?: { response?: unknown } } | null)?.result?.response ?? null
+    } catch { /* payload unreadable — analysis stays null */ }
   }
 
   // Manual comp-tier assignments ride the stored payload — applied at read
   // time so saved reports show the reviewer's pins next to the evidence class.
   await applyCompTierOverrides(c.env, session.user.id, jobId, analysis)
-  const outcomes = await db.select().from(reportOutcomes)
+  const outcomes = report ? await db.select().from(reportOutcomes)
     .where(eq(reportOutcomes.reportId, report.id))
-    .orderBy(desc(reportOutcomes.createdAt))
+    .orderBy(desc(reportOutcomes.createdAt)) : []
   const [latestRun] = await db.select({
     id: runRecords.id,
     status: runRecords.status,
@@ -874,12 +890,12 @@ userReports.get('/:jobId', async (c) => {
     : null
 
   return c.json({
-    jobId: report.jobId,
-    address: report.propertyAddress,
-    createdAt: report.createdAt,
+    jobId,
+    address: report?.propertyAddress ?? fallbackRun?.propertyAddress ?? null,
+    createdAt: report?.createdAt ?? fallbackRun?.createdAt,
     analysis,
-    feedbackStatus: report.feedbackStatus ?? null,
-    feedbackAt: report.feedbackAt ?? null,
+    feedbackStatus: report?.feedbackStatus ?? null,
+    feedbackAt: report?.feedbackAt ?? null,
     outcomes,
     runRecord,
   })
