@@ -36,13 +36,22 @@ function reactHarness() {
   }
 }
 
-test('Python display preserves server values and rejects manual comparable changes', () => {
-  const { react, stateWrites } = reactHarness()
-  const notices = []
+test('Python display preserves server values until the user picks a comp, then recalcs client-side', () => {
+  const states = [], refs = [], notices = [], recalcs = []
+  let stateIndex = 0, refIndex = 0
+  const react = {
+    useState(initial) {
+      const index = stateIndex++
+      if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial
+      return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value }]
+    },
+    useRef(initial) { const index = refIndex++; return refs[index] ??= { current: initial } },
+    useEffect() {}, useMemo: fn => fn(), useCallback: fn => fn,
+  }
   const { useAnalysisEvaluation } = loadHook('./use-analysis-evaluation.ts', {
     react,
     sonner: { toast: { info: (message) => notices.push(message), error: (message) => notices.push(message) } },
-    '@/lib/client-api': { recalculateReportComps: () => assert.fail('Missing IDs must not submit') },
+    '@/lib/client-api': { recalculateReportComps: () => assert.fail('No server call — comp math is client-side now') },
     '@/components/analysis/format-helpers': { getCompKey: (comp) => comp.clip },
     '@/hooks/use-report-settings': {
       useReportSettings: () => ({
@@ -51,21 +60,26 @@ test('Python display preserves server values and rejects manual comparable chang
         recalcData: { valuation: { arv: 1 }, compEvaluations: [] },
       }),
     },
-    '@/lib/recalc': { recalculateValuationFromComps: () => assert.fail('TS recalculation ran') },
+    '@/lib/recalc': { recalculateValuationFromComps: (...args) => { recalcs.push(args); return { arv: 999, marker: 'client' } } },
   })
   const data = {
     evaluationEngine: 'python-v4',
+    subject: { clip: 'subject' },
     valuation: { arv: 612345.67, buyPrice: 401234.56 },
     comps: { items: [{ clip: 'one', isEnabled: true }, { clip: 'two', isEnabled: false }] },
   }
-  const result = useAnalysisEvaluation({ data })
+  const render = () => { stateIndex = 0; refIndex = 0; return useAnalysisEvaluation({ data }) }
+  let result = render()
   assert.equal(result.displayValuation, data.valuation)
   assert.equal(result.displayComps, data.comps)
   assert.equal(result.effectiveComps, data.comps)
   assert.equal(result.isRecalculated, false)
   result.handleToggleComp('two')
-  assert.equal(stateWrites.length, 0)
-  assert.match(notices[0], /no saved comparable IDs/)
+  result = render()
+  assert.equal(notices.length, 0)
+  assert.equal(recalcs.length, 1)
+  assert.equal(result.displayValuation.marker, 'client')
+  assert.equal(result.isRecalculated, true)
 })
 
 for (const evaluationEngine of ['python-v4', undefined]) {
