@@ -252,6 +252,9 @@ export async function runDecisionsSeat(
         descCondition: ob.descCondition, coverEvidence: ob.coverPhotoEvidence,
         conditionTier: ob.conditionTier, renoClaimP: ob.renoClaimP,
         premium: ob.premiumAttributes, premiumP: ob.premiumProbabilities ?? null,
+        // Yes/no site facts — waterfront, lakefront, riverfront, corner,
+        // cul-de-sac, busy-road edges, commercial, infill, pool.
+        siteFacts: ob.siteFacts ?? null,
         exposure: ob.siteExposure, vintage: ob.developmentVintage,
         physicalMatchP: ob.physicalMatchP, exteriorMatchP: ob.exteriorMatchP, arvFitnessP: ob.arvFitnessP,
         unexplainedPremiumP: ob.unexplainedPremiumP,
