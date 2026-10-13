@@ -19,9 +19,12 @@ export function normalizeBaseUrl(input) {
   }
 }
 
+export function propertySearchUrl(baseUrl) {
+  return `${normalizeBaseUrl(baseUrl) ?? DEFAULT_BASE_URL}/dashboard/analyze`
+}
+
 export function buildAnalyzeUrl(baseUrl, selection) {
   const address = cleanAddress(selection)
   if (!address) return null
-  const base = normalizeBaseUrl(baseUrl) ?? DEFAULT_BASE_URL
-  return `${base}/dashboard/analyze?address=${encodeURIComponent(address)}`
+  return `${propertySearchUrl(baseUrl)}?address=${encodeURIComponent(address)}`
 }

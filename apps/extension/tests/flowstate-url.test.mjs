@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildAnalyzeUrl, cleanAddress, normalizeBaseUrl } from '../flowstate-url.js'
+import { buildAnalyzeUrl, cleanAddress, normalizeBaseUrl, propertySearchUrl } from '../flowstate-url.js'
 
 test('a selected address is flattened to one clean line', () => {
   assert.equal(cleanAddress(' 123 Main St,\n\tHouston, TX   77002 '), '123 Main St, Houston, TX 77002')
@@ -25,4 +25,9 @@ test('the link opens the analyze page with the address', () => {
   // A broken saved URL falls back to the live site instead of opening nothing.
   assert.equal(buildAnalyzeUrl('not a url', '1 A St'), 'https://app.flowstate.homes/dashboard/analyze?address=1%20A%20St')
   assert.equal(buildAnalyzeUrl('http://localhost:3000', '  \n'), null)
+})
+
+test('the toolbar button opens Property Search on the saved dashboard', () => {
+  assert.equal(propertySearchUrl('localhost:3000'), 'http://localhost:3000/dashboard/analyze')
+  assert.equal(propertySearchUrl('not a url'), 'https://app.flowstate.homes/dashboard/analyze')
 })

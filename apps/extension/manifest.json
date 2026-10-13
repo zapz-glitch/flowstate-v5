@@ -1,12 +1,21 @@
 {
   "manifest_version": 3,
   "name": "Flowstate — Send Address",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Right-click any selected address to send it to Flowstate Property Research.",
   "permissions": ["contextMenus", "storage"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "action": {
+    "default_title": "Open Flowstate Property Search",
+    "default_icon": {
+      "16": "icons/action-16.png",
+      "24": "icons/action-24.png",
+      "32": "icons/action-32.png",
+      "48": "icons/action-48.png"
+    }
   },
   "options_page": "options.html",
   "icons": {
