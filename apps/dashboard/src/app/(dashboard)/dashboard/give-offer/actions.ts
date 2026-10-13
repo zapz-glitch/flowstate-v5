@@ -191,3 +191,32 @@ export async function getOffersView(): Promise<{
     _perf: { authMs, readsMs, totalMs: Date.now() - t0 },
   }
 }
+
+/* ── Offer board — the campaign status board the Devin session writes ── */
+
+export interface BoardItem {
+  id: string
+  opportunityId: string | null
+  leadId: string | null
+  address: string
+  displayName: string | null
+  status: string
+  offerAmount: number | null
+  counterAmount: number | null
+  terms: Record<string, unknown> | null
+  note: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export async function getOfferBoard(): Promise<{ ok: boolean; items: BoardItem[] }> {
+  const res = await internalFetch('/v1/offers/board')
+  if (!res?.ok) return { ok: false, items: [] }
+  const data = (await res.json()) as { items?: BoardItem[] }
+  return { ok: true, items: data.items ?? [] }
+}
+
+export async function removeOfferBoardItem(id: string): Promise<{ ok: boolean }> {
+  const res = await internalFetch(`/v1/offers/board/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  return { ok: res?.ok === true }
+}

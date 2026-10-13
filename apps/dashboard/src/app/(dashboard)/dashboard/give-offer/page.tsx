@@ -30,6 +30,7 @@ import {
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRows } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/states'
+import { OfferBoard } from '@/components/analysis/OfferBoard'
 
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
 const POLL_MS = 5000
@@ -375,6 +376,9 @@ export default function GiveOfferPage() {
               )}
             </div>
           )}
+
+          {/* Campaign board — the session-posted offer pipeline */}
+          {!query && <OfferBoard />}
 
           {/* Category tiles — click into a bucket */}
           {!query && (

@@ -378,4 +378,168 @@ offers.get('/history', async (c) => {
   return c.json({ ok: true, dispositions })
 })
 
+/* ── Offer board — the campaign status board the Devin session writes ── */
+
+const BOARD_STATUSES = new Set([
+  'terms_prep', 'sent', 'approved', 'countered',
+  'awaiting_contract', 'under_contract', 'dead',
+])
+
+const boardSchema = z.object({
+  id: z.string().optional(),
+  opportunityId: z.string().nullish(),
+  leadId: z.string().nullish(),
+  address: z.string().min(1),
+  displayName: z.string().nullish(),
+  status: z.string().min(1).default('terms_prep'),
+  offerAmount: z.number().nullish(),
+  counterAmount: z.number().nullish(),
+  terms: z.record(z.string(), z.unknown()).nullish(),
+  note: z.string().nullish(),
+})
+
+const boardPatchSchema = boardSchema.partial()
+
+interface BoardRow {
+  id: string
+  opportunity_id: string | null
+  lead_id: string | null
+  address: string
+  display_name: string | null
+  status: string
+  offer_amount: number | null
+  counter_amount: number | null
+  terms_json: string | null
+  note: string | null
+  created_at: string
+  updated_at: string
+}
+
+const boardItem = (r: BoardRow) => ({
+  id: r.id,
+  opportunityId: r.opportunity_id,
+  leadId: r.lead_id,
+  address: r.address,
+  displayName: r.display_name,
+  status: r.status,
+  offerAmount: r.offer_amount,
+  counterAmount: r.counter_amount,
+  terms: r.terms_json ? JSON.parse(r.terms_json) : null,
+  note: r.note,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+})
+
+/** The board — every live campaign item, newest activity first. Cleared
+ *  items never resurface; the user dismisses them. */
+offers.get('/board', async (c) => {
+  const userId = c.get('auth').userId
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM offer_board
+      WHERE user_id = ? AND dismissed = 0
+      ORDER BY updated_at DESC LIMIT 500`,
+  ).bind(userId).all<BoardRow>()
+  return c.json({ ok: true, items: results.map(boardItem) })
+})
+
+/** Upsert — the session posts a stage change. Match on id →
+ *  opportunityId → leadId → (address + status); insert otherwise. */
+offers.post('/board', async (c) => {
+  const userId = c.get('auth').userId
+  let body: z.infer<typeof boardSchema>
+  try {
+    body = boardSchema.parse(await c.req.json())
+  } catch {
+    return c.json({ ok: false, error: 'Invalid request body' }, 400)
+  }
+  if (!BOARD_STATUSES.has(body.status) && !body.status.startsWith('custom_')) {
+    // Free-text stages tolerated — they render in their own column.
+    console.log(`[Offers] board: unlisted stage '${body.status}'`)
+  }
+  const existing = await c.env.DB.prepare(
+    `SELECT id FROM offer_board WHERE user_id = ? AND dismissed = 0 AND (
+       id = ? OR (opportunity_id IS NOT NULL AND opportunity_id = ?)
+       OR (lead_id IS NOT NULL AND lead_id = ?)
+       OR (address = ?))
+     ORDER BY updated_at DESC LIMIT 1`,
+  ).bind(userId, body.id ?? '', body.opportunityId ?? '', body.leadId ?? '', body.address)
+    .first<{ id: string }>()
+
+  const now = new Date().toISOString()
+  const termsJson = body.terms ? JSON.stringify(body.terms) : null
+  if (existing) {
+    await c.env.DB.prepare(
+      `UPDATE offer_board SET
+         status = ?, offer_amount = COALESCE(?, offer_amount),
+         counter_amount = COALESCE(?, counter_amount),
+         terms_json = COALESCE(?, terms_json), note = COALESCE(?, note),
+         display_name = COALESCE(?, display_name),
+         opportunity_id = COALESCE(?, opportunity_id),
+         lead_id = COALESCE(?, lead_id), updated_at = ?
+       WHERE id = ?`,
+    ).bind(
+      body.status, body.offerAmount ?? null, body.counterAmount ?? null,
+      termsJson, body.note ?? null, body.displayName ?? null,
+      body.opportunityId ?? null, body.leadId ?? null, now, existing.id,
+    ).run()
+    return c.json({ ok: true, id: existing.id, updated: true })
+  }
+  const id = crypto.randomUUID()
+  await c.env.DB.prepare(
+    `INSERT INTO offer_board
+       (id, user_id, opportunity_id, lead_id, address, display_name, status,
+        offer_amount, counter_amount, terms_json, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    id, userId, body.opportunityId ?? null, body.leadId ?? null,
+    body.address, body.displayName ?? null, body.status,
+    body.offerAmount ?? null, body.counterAmount ?? null,
+    termsJson, body.note ?? null, now, now,
+  ).run()
+  return c.json({ ok: true, id })
+})
+
+/** Partial update — stage moves, counter terms, notes. */
+offers.patch('/board/:id', async (c) => {
+  const userId = c.get('auth').userId
+  let body: z.infer<typeof boardPatchSchema>
+  try {
+    body = boardPatchSchema.parse(await c.req.json())
+  } catch {
+    return c.json({ ok: false, error: 'Invalid request body' }, 400)
+  }
+  const id = c.req.param('id')
+  const sets: string[] = []
+  const binds: unknown[] = []
+  if (body.status !== undefined) { sets.push('status = ?'); binds.push(body.status) }
+  if (body.offerAmount !== undefined) { sets.push('offer_amount = ?'); binds.push(body.offerAmount) }
+  if (body.counterAmount !== undefined) { sets.push('counter_amount = ?'); binds.push(body.counterAmount) }
+  if (body.terms !== undefined) { sets.push('terms_json = ?'); binds.push(body.terms ? JSON.stringify(body.terms) : null) }
+  if (body.note !== undefined) { sets.push('note = ?'); binds.push(body.note) }
+  if (body.address !== undefined) { sets.push('address = ?'); binds.push(body.address) }
+  if (body.displayName !== undefined) { sets.push('display_name = ?'); binds.push(body.displayName) }
+  if (body.opportunityId !== undefined) { sets.push('opportunity_id = ?'); binds.push(body.opportunityId) }
+  if (body.leadId !== undefined) { sets.push('lead_id = ?'); binds.push(body.leadId) }
+  if (!sets.length) return c.json({ ok: false, error: 'Nothing to update' }, 400)
+  sets.push('updated_at = ?'); binds.push(new Date().toISOString())
+  binds.push(userId, id)
+  const r = await c.env.DB.prepare(
+    `UPDATE offer_board SET ${sets.join(', ')} WHERE user_id = ? AND id = ?`,
+  ).bind(...binds).run()
+  return c.json({ ok: true, updated: (r.meta.changes ?? 0) > 0 })
+})
+
+/** Remove from the board — soft-dismiss keeps the row for history. */
+offers.delete('/board/:id', async (c) => {
+  const userId = c.get('auth').userId
+  const id = c.req.param('id')
+  const hard = c.req.query('hard') === '1'
+  const r = hard
+    ? await c.env.DB.prepare(`DELETE FROM offer_board WHERE user_id = ? AND id = ?`).bind(userId, id).run()
+    : await c.env.DB.prepare(
+        `UPDATE offer_board SET dismissed = 1, updated_at = ? WHERE user_id = ? AND id = ?`,
+      ).bind(new Date().toISOString(), userId, id).run()
+  return c.json({ ok: true, removed: (r.meta.changes ?? 0) > 0 })
+})
+
 export default offers
