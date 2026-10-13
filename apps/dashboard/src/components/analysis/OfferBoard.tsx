@@ -132,41 +132,37 @@ export function OfferBoard() {
 
       {view === 'list' ? (
         <div className="p-2 space-y-1.5">
-          {/* Filter bar — stage chips + free text */}
-          <div className="flex items-center gap-1 flex-wrap">
-            {['all', ...STAGES.map((s) => s.key)].map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setListStage(s)}
-                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                  listStage === s ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
-                }`}
-              >
-                {s === 'all' ? 'All' : stageLabel(s)}
-              </button>
-            ))}
+          {/* Filter bar — stage + recency selects, free text */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={listStage}
+              onChange={(e) => setListStage(e.target.value)}
+              aria-label="Stage"
+              className="bg-secondary/50 border border-border/50 rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50"
+            >
+              <option value="all">All stages</option>
+              {STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+            <select
+              value={listDays}
+              onChange={(e) => setListDays(e.target.value)}
+              aria-label="Period"
+              className="bg-secondary/50 border border-border/50 rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50"
+            >
+              <option value="all">All time</option>
+              <option value="today">Today</option>
+              <option value="7">Last 7 days</option>
+              <option value="14">Last 14 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="ytd">Year to date</option>
+            </select>
+            <span className="text-[10px] text-foreground-tertiary tabular-nums">{listRows.length} shown</span>
             <input
               value={listQuery}
               onChange={(e) => setListQuery(e.target.value)}
               placeholder="Filter…"
-              className="ml-auto w-36 bg-secondary/50 border border-border/50 rounded-md px-2 py-0.5 text-[11px] text-foreground placeholder:text-foreground-tertiary outline-none focus:border-primary/50"
+              className="ml-auto w-36 bg-secondary/50 border border-border/50 rounded-md px-2 py-1 text-[11px] text-foreground placeholder:text-foreground-tertiary outline-none focus:border-primary/50"
             />
-          </div>
-          {/* Recency — last activity within the window */}
-          <div className="flex items-center gap-1 flex-wrap">
-            {([['all', 'All'], ['today', 'Today'], ['7', '7d'], ['14', '14d'], ['30', '30d'], ['ytd', 'YTD']] as const).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setListDays(k)}
-                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                  listDays === k ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
           </div>
           <table className="w-full text-[11px]">
             <thead>
@@ -188,7 +184,7 @@ export function OfferBoard() {
                   <tr key={i.id} className={`border-b border-border/20 group ${i.dismissed ? 'opacity-50' : ''}`}>
                     <td className="py-1.5 pr-3 max-w-[220px] truncate">
                       {i.reportJobId ? (
-                        <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="hover:underline text-foreground">
+                        <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid">
                           {i.address}
                         </Link>
                       ) : (
@@ -265,12 +261,12 @@ export function OfferBoard() {
                           <X size={12} />
                         </button>
                       )}
-                      <div className="text-xs font-medium text-foreground pr-4 truncate" title={i.address}>
+                      <div className="text-xs font-medium pr-4 truncate" title={i.address}>
                         {i.reportJobId ? (
-                          <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="hover:underline truncate">
+                          <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid truncate">
                             {i.address}
                           </Link>
-                        ) : i.address}
+                        ) : <span className="text-foreground">{i.address}</span>}
                       </div>
                       <div className="text-[10px] text-foreground-tertiary mt-0.5 flex items-center gap-2 flex-wrap">
                         {contact && (
