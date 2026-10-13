@@ -430,6 +430,44 @@ const boardItem = (r: BoardRow) => ({
   updatedAt: r.updated_at,
 })
 
+/** Newest saved report per lead/address — board cards link the address
+ *  to it. leadId match wins; property_address is the fallback. */
+async function resolveBoardReports(
+  env: Env,
+  items: { leadId: string | null; address: string }[],
+): Promise<Map<string, string>> {
+  const leadIds = [...new Set(items.map((i) => i.leadId).filter((x): x is string => !!x))]
+  const addresses = [...new Set(items.map((i) => i.address).filter(Boolean))]
+  const out = new Map<string, string>()
+  for (let i = 0; i < leadIds.length; i += 90) {
+    const chunk = leadIds.slice(i, i + 90)
+    const { results } = await env.DB.prepare(
+      `SELECT json_extract(full_response_json, '$.leadId') AS lead_id, job_id, created_at
+         FROM saved_reports
+        WHERE json_extract(full_response_json, '$.leadId') IN (${chunk.map(() => '?').join(',')})
+        ORDER BY created_at DESC`,
+    ).bind(...chunk).all<{ lead_id: string | null; job_id: string; created_at: string }>()
+      .catch(() => ({ results: [] as Array<{ lead_id: string | null; job_id: string; created_at: string }> }))
+    for (const r of results) {
+      if (r.lead_id && !out.has(`lead:${r.lead_id}`)) out.set(`lead:${r.lead_id}`, r.job_id)
+    }
+  }
+  for (let i = 0; i < addresses.length; i += 90) {
+    const chunk = addresses.slice(i, i + 90)
+    const { results } = await env.DB.prepare(
+      `SELECT property_address, job_id, created_at
+         FROM saved_reports
+        WHERE property_address IN (${chunk.map(() => '?').join(',')})
+        ORDER BY created_at DESC`,
+    ).bind(...chunk).all<{ property_address: string; job_id: string; created_at: string }>()
+      .catch(() => ({ results: [] as Array<{ property_address: string; job_id: string; created_at: string }> }))
+    for (const r of results) {
+      if (r.property_address && !out.has(`addr:${r.property_address}`)) out.set(`addr:${r.property_address}`, r.job_id)
+    }
+  }
+  return out
+}
+
 /** The board — every live campaign item, newest activity first. `all=1`
  *  includes cleared rows (marked dismissed) — the since-campaign view.
  *  Items never resurface silently; the user dismisses them. */
@@ -441,7 +479,16 @@ offers.get('/board', async (c) => {
       WHERE user_id = ? ${all ? '' : 'AND dismissed = 0'}
       ORDER BY updated_at DESC LIMIT 500`,
   ).bind(userId).all<BoardRow & { dismissed: number }>()
-  return c.json({ ok: true, items: results.map((r) => ({ ...boardItem(r), dismissed: r.dismissed === 1 })) })
+  const items = results.map((r) => boardItem(r))
+  const reports = await resolveBoardReports(c.env, items)
+  return c.json({
+    ok: true,
+    items: items.map((i, n) => ({
+      ...i,
+      dismissed: results[n]!.dismissed === 1,
+      reportJobId: reports.get(`lead:${i.leadId}`) ?? reports.get(`addr:${i.address}`) ?? null,
+    })),
+  })
 })
 
 /** Upsert — the session posts a stage change. Match on id →

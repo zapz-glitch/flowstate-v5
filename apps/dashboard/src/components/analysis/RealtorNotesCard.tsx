@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, ChevronDown, PlusCircle } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ExternalLink, PlusCircle } from 'lucide-react'
 
 // ─── Realtor notes ───────────────────────────────────────────────────────────
 //
@@ -55,11 +55,14 @@ export function RealtorNotesCard({
   advisories,
   additions,
   fetchedAt,
+  leadId,
 }: {
   notes: RealtorNoteEntry[]
   advisories?: RehabAdvisoryEntry[] | null
   additions?: RehabAdditionEntry[] | null
   fetchedAt?: string | null
+  /** Close CRM lead — renders the contact link when present */
+  leadId?: string | null
 }) {
   const [showAll, setShowAll] = useState(false)
   if (notes.length === 0 && !advisories?.length && !additions?.length) return null
@@ -74,7 +77,20 @@ export function RealtorNotesCard({
     // stay readable (secondary text), only the frame steps back.
     <section aria-label="Realtor notes" className="border-l-2 border-border pl-3 pr-1 py-0.5 space-y-1 text-foreground break-words">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-[11px] font-medium text-foreground-tertiary">Realtor notes</h3>
+        <h3 className="text-[11px] font-medium text-foreground-tertiary flex items-center gap-2">
+          Realtor notes
+          {leadId && (
+            <a
+              href={`https://app.close.com/lead/${leadId}/`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground hover:underline"
+            >
+              <ExternalLink size={10} />
+              Close contact
+            </a>
+          )}
+        </h3>
         <div className="flex items-center gap-2">
           {notes.length > 5 && (
             <button

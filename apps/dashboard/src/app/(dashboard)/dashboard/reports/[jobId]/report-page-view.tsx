@@ -7,7 +7,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import ReportLoading from './loading'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ArrowRight, Share2, RefreshCw, History, Loader2, ListChecks, FileSignature, CircleSlash, Check, X, Ban } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Share2, RefreshCw, History, Loader2, ListChecks, FileSignature, CircleSlash, Check, X, Ban, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
 import {
@@ -256,7 +256,20 @@ export function ReportPageView({ params, queue }: {
       return queue ? (
         <section aria-label="Realtor notes" className="border-l-2 border-border pl-3 pr-1 py-0.5">
           <div className="flex items-baseline justify-between gap-2">
-            <h3 className="text-[11px] font-medium text-foreground-tertiary">Realtor notes</h3>
+            <h3 className="text-[11px] font-medium text-foreground-tertiary flex items-center gap-2">
+              Realtor notes
+              {analyzeData?.leadId && (
+                <a
+                  href={`https://app.close.com/lead/${analyzeData.leadId}/`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground hover:underline"
+                >
+                  <ExternalLink size={10} />
+                  Close contact
+                </a>
+              )}
+            </h3>
             <span className="text-[10px] text-foreground-tertiary">none on file</span>
           </div>
           <p className="text-[11px] text-foreground-tertiary">
@@ -271,6 +284,7 @@ export function ReportPageView({ params, queue }: {
         advisories={analyzeData?.rehabAdvisories}
         additions={analyzeData?.rehabAdditions}
         fetchedAt={analyzeData?.sellerNotes?.fetchedAt}
+        leadId={analyzeData?.leadId}
       />
     )
   }, [analyzeData, queue?.notes])

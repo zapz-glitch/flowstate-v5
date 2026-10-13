@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { X, FileText, CheckCircle2, ArrowLeftRight, PenLine, FileCheck2, CircleDollarSign, CircleSlash2, ExternalLink } from 'lucide-react'
 import { getOfferBoard, removeOfferBoardItem, type BoardItem } from '@/app/(dashboard)/dashboard/give-offer/actions'
 
@@ -119,15 +120,20 @@ export function OfferBoard() {
                           <X size={12} />
                         </button>
                       )}
-                      <div className="text-xs font-medium text-foreground pr-4 truncate flex items-center gap-1" title={i.address}>
-                        {contact ? (
-                          <a href={contact} target="_blank" rel="noreferrer" className="hover:underline inline-flex items-center gap-1 truncate">
+                      <div className="text-xs font-medium text-foreground pr-4 truncate" title={i.address}>
+                        {i.reportJobId ? (
+                          <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="hover:underline truncate">
                             {i.address}
-                            <ExternalLink size={10} className="flex-shrink-0 text-foreground-tertiary" />
-                          </a>
+                          </Link>
                         ) : i.address}
                       </div>
                       <div className="text-[10px] text-foreground-tertiary mt-0.5 flex items-center gap-2 flex-wrap">
+                        {contact && (
+                          <a href={contact} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                            <ExternalLink size={10} className="flex-shrink-0" />
+                            Close contact
+                          </a>
+                        )}
                         {i.displayName && <span className="truncate">{i.displayName}</span>}
                         {fmtPrice(i.offerAmount) && <span>offer {fmtPrice(i.offerAmount)}</span>}
                         {fmtPrice(i.counterAmount) && <span className="text-orange-500">counter {fmtPrice(i.counterAmount)}</span>}
