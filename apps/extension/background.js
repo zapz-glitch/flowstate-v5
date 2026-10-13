@@ -1,4 +1,4 @@
-import { DEFAULT_BASE_URL, buildAnalyzeUrl } from './flowstate-url.js'
+import { DEFAULT_BASE_URL, buildAnalyzeUrl, propertySearchUrl } from './flowstate-url.js'
 
 const MENU_ID = 'flowstate-send'
 
@@ -22,4 +22,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const url = buildAnalyzeUrl(baseUrl, info.selectionText)
   if (!url) return
   chrome.tabs.create({ url, ...(tab?.index != null ? { index: tab.index + 1 } : {}) })
+})
+
+// Without an action Chrome greys the toolbar icon out; the button opens Property Search.
+chrome.action.onClicked.addListener(async () => {
+  const { baseUrl } = await chrome.storage.sync.get({ baseUrl: DEFAULT_BASE_URL })
+  chrome.tabs.create({ url: propertySearchUrl(baseUrl) })
 })

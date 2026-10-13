@@ -5,6 +5,8 @@ a new tab opens the Property Research page with the address prefilled and the
 analysis started (the existing-report dialog still applies if you've already
 analyzed it).
 
+The toolbar button opens Property Search. Pin it from the puzzle-piece menu.
+
 ## Install (load unpacked)
 
 1. `chrome://extensions` → enable **Developer mode**
