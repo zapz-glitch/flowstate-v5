@@ -10,13 +10,13 @@ const POLL_MS = 10_000
 /** Column order — the campaign stages in flow order. A stage outside
  *  this list (custom_*) appends its own column at the end. */
 const STAGES: { key: string; label: string; icon: React.ReactNode; tint: string }[] = [
-  { key: 'terms_prep', label: 'Terms in prep', icon: <PenLine size={12} />, tint: 'text-foreground-tertiary' },
-  { key: 'sent', label: 'Offer sent', icon: <FileText size={12} />, tint: 'text-blue-400' },
   { key: 'approved', label: 'Approved', icon: <CheckCircle2 size={12} />, tint: 'text-emerald-500' },
-  { key: 'countered', label: 'Countered', icon: <ArrowLeftRight size={12} />, tint: 'text-orange-500' },
   { key: 'awaiting_contract', label: 'Awaiting contract', icon: <FileCheck2 size={12} />, tint: 'text-yellow-500' },
+  { key: 'countered', label: 'Countered', icon: <ArrowLeftRight size={12} />, tint: 'text-orange-500' },
+  { key: 'sent', label: 'Offer sent', icon: <FileText size={12} />, tint: 'text-blue-400' },
   { key: 'under_contract', label: 'Under contract', icon: <CircleDollarSign size={12} />, tint: 'text-emerald-600' },
   { key: 'dead', label: 'Dead', icon: <CircleSlash2 size={12} />, tint: 'text-red-500/70' },
+  { key: 'terms_prep', label: 'Terms in prep', icon: <PenLine size={12} />, tint: 'text-foreground-tertiary' },
 ]
 
 const fmtPrice = (v: number | null | undefined) =>
@@ -43,6 +43,7 @@ export function OfferBoard() {
   const [view, setView] = useState<'board' | 'list'>('board')
   const [listStage, setListStage] = useState<string>('all')
   const [listQuery, setListQuery] = useState('')
+  const [listDays, setListDays] = useState<string>('all')
 
   const load = useCallback(async (all: boolean) => {
     const r = await getOfferBoard(all).catch(() => null)
@@ -72,16 +73,22 @@ export function OfferBoard() {
     return [...groups.entries()].filter(([, arr]) => arr.length > 0)
   }, [items])
 
-  // Airtable-style list — same items, filter by stage + free text.
+  // Airtable-style list — same items, filter by stage + recency + free text.
   const listRows = useMemo(() => {
     const q = listQuery.trim().toLowerCase()
+    const now = Date.now()
+    const since = listDays === 'all' ? null
+      : listDays === 'today' ? now - (now % 86400000) - new Date().getTimezoneOffset() * 60000
+      : listDays === 'ytd' ? new Date(new Date().getFullYear(), 0, 1).getTime()
+      : now - Number(listDays) * 86400000
     return items.filter((i) => {
       if (listStage !== 'all' && i.status !== listStage) return false
+      if (since != null && Date.parse(i.updatedAt) < since) return false
       if (!q) return true
       return [i.address, i.displayName, i.note]
         .filter(Boolean).some((v) => String(v).toLowerCase().includes(q))
     })
-  }, [items, listStage, listQuery])
+  }, [items, listStage, listQuery, listDays])
 
   if (loaded && items.length === 0) return null
 
@@ -146,6 +153,21 @@ export function OfferBoard() {
               className="ml-auto w-36 bg-secondary/50 border border-border/50 rounded-md px-2 py-0.5 text-[11px] text-foreground placeholder:text-foreground-tertiary outline-none focus:border-primary/50"
             />
           </div>
+          {/* Recency — last activity within the window */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {([['all', 'All'], ['today', 'Today'], ['7', '7d'], ['14', '14d'], ['30', '30d'], ['ytd', 'YTD']] as const).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setListDays(k)}
+                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  listDays === k ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <table className="w-full text-[11px]">
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wider text-foreground-tertiary border-b border-border/40">
@@ -173,10 +195,9 @@ export function OfferBoard() {
                         <span className="text-foreground">{i.address}</span>
                       )}
                     </td>
-                    <td className="py-1.5 pr-3 text-foreground-tertiary">
+                    <td className="py-1.5 pr-3">
                       {contact ? (
-                        <a href={contact} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
-                          <ExternalLink size={10} />
+                        <a href={contact} target="_blank" rel="noreferrer" className="text-foreground-tertiary hover:text-foreground hover:underline">
                           {i.displayName ?? 'Open'}
                         </a>
                       ) : (i.displayName ?? '—')}
@@ -253,12 +274,11 @@ export function OfferBoard() {
                       </div>
                       <div className="text-[10px] text-foreground-tertiary mt-0.5 flex items-center gap-2 flex-wrap">
                         {contact && (
-                          <a href={contact} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
-                            <ExternalLink size={10} className="flex-shrink-0" />
-                            Close contact
+                          <a href={contact} target="_blank" rel="noreferrer" className="hover:text-foreground hover:underline truncate">
+                            {i.displayName ?? 'Close contact'}
                           </a>
                         )}
-                        {i.displayName && <span className="truncate">{i.displayName}</span>}
+                        {!contact && i.displayName && <span className="truncate">{i.displayName}</span>}
                         {fmtPrice(i.offerAmount) && <span>offer {fmtPrice(i.offerAmount)}</span>}
                         {fmtPrice(i.counterAmount) && <span className="text-orange-500">counter {fmtPrice(i.counterAmount)}</span>}
                         <span className="tabular-nums ml-auto">{fmtAge(i.updatedAt)}</span>
