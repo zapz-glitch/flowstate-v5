@@ -46,7 +46,7 @@ userReports.post('/:jobId/comps', bodyLimit({ maxSize: 20000 }), async (c) => {
   const jobId = c.req.param('jobId')
   const db = drizzle(c.env.DB)
   const [report] = await db.select().from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id))).limit(1)
+    .where(eq(savedReports.jobId, jobId)).limit(1)
   if (!report) return c.json({ error: 'Report not found' }, 404)
   let saved
   try { saved = JSON.parse(report.fullResponseJson ?? '{}') } catch { return c.json({ error: 'Report data is corrupted' }, 409) }
@@ -64,10 +64,10 @@ userReports.post('/:jobId/comps', bodyLimit({ maxSize: 20000 }), async (c) => {
   const description = body.selectedCompIds === null ? 'Restored automatic comparable selection' : `Recalculated ${body.selectedCompIds.length} operator-selected comparables`
   const bm = (analysis.valuation as { bMechanics?: { source?: string; confidence?: string; healed?: boolean; anchorAddress?: string; flags?: unknown[] } } | undefined)?.bMechanics
   const results = await c.env.DB.batch([
-    c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND user_id = ? AND full_response_json = ?')
-      .bind(crypto.randomUUID(), 'comp_selection', description, changes, new Date().toISOString(), report.id, session.user.id, report.fullResponseJson),
-    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, comparables_data = ?, arv = ?, as_is_value = ?, max_allowable_offer = ?, estimated_repairs = ?, arv_source = ?, b_confidence = ?, b_healed = ?, b_anchor_address = ?, b_flag_count = ? WHERE id = ? AND user_id = ? AND full_response_json = ?')
-      .bind(nextJson, JSON.stringify(analysis.valuation), JSON.stringify(analysis.comps), analysis.valuation?.arv ?? null, analysis.valuation?.asIsValue ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, bm?.source ?? null, bm?.confidence ?? null, bm?.healed ?? null, bm?.anchorAddress ?? null, Array.isArray(bm?.flags) ? bm.flags.length : null, report.id, session.user.id, report.fullResponseJson),
+    c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND full_response_json = ?')
+      .bind(crypto.randomUUID(), 'comp_selection', description, changes, new Date().toISOString(), report.id, report.fullResponseJson),
+    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, comparables_data = ?, arv = ?, as_is_value = ?, max_allowable_offer = ?, estimated_repairs = ?, arv_source = ?, b_confidence = ?, b_healed = ?, b_anchor_address = ?, b_flag_count = ? WHERE id = ? AND full_response_json = ?')
+      .bind(nextJson, JSON.stringify(analysis.valuation), JSON.stringify(analysis.comps), analysis.valuation?.arv ?? null, analysis.valuation?.asIsValue ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, bm?.source ?? null, bm?.confidence ?? null, bm?.healed ?? null, bm?.anchorAddress ?? null, Array.isArray(bm?.flags) ? bm.flags.length : null, report.id, report.fullResponseJson),
   ])
   if (results[1].meta.changes !== 1) return c.json({ error: 'This report changed. Reload it before editing comparables.' }, 409)
   return c.json({ analysis })
@@ -87,7 +87,7 @@ userReports.post('/:jobId/permits', async (c) => {
   const jobId = c.req.param('jobId')
   const db = drizzle(c.env.DB)
   const [report] = await db.select().from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id))).limit(1)
+    .where(eq(savedReports.jobId, jobId)).limit(1)
   if (!report) return c.json({ error: 'Report not found' }, 404)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let saved: any
@@ -316,10 +316,10 @@ userReports.post('/:jobId/permits', async (c) => {
   const nextJson = JSON.stringify(analysis)
   const changes = JSON.stringify({ actor: session.user.id, before: saved, after: analysis })
   const results = await c.env.DB.batch([
-    c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND user_id = ? AND full_response_json = ?')
-      .bind(crypto.randomUUID(), 'permits_pull', `Pulled ${permits.length} building permit(s); re-derived major items and valuation`, changes, new Date().toISOString(), report.id, session.user.id, report.fullResponseJson),
-    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, arv = ?, max_allowable_offer = ?, estimated_repairs = ? WHERE id = ? AND user_id = ? AND full_response_json = ?')
-      .bind(nextJson, JSON.stringify(analysis.valuation), analysis.valuation?.arv ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, report.id, session.user.id, report.fullResponseJson),
+    c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND full_response_json = ?')
+      .bind(crypto.randomUUID(), 'permits_pull', `Pulled ${permits.length} building permit(s); re-derived major items and valuation`, changes, new Date().toISOString(), report.id, report.fullResponseJson),
+    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, arv = ?, max_allowable_offer = ?, estimated_repairs = ? WHERE id = ? AND full_response_json = ?')
+      .bind(nextJson, JSON.stringify(analysis.valuation), analysis.valuation?.arv ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, report.id, report.fullResponseJson),
   ])
   if (results[1].meta.changes !== 1) return c.json({ error: 'This report changed. Reload it and try again.' }, 409)
   return c.json({ analysis })
@@ -338,24 +338,19 @@ userReports.get('/', async (c) => {
 
   const db = drizzle(c.env.DB)
 
-  // Build where clause with optional search filter
-  const baseCondition = eq(savedReports.userId, session.user.id)
+  // Single-user deployment — no owner scoping; optional search filter only.
   const whereCondition = search
-    ? and(
-        baseCondition,
-        or(
-          like(savedReports.propertyAddress, `%${search}%`),
-          like(savedReports.propertyCity, `%${search}%`),
-          like(savedReports.propertyState, `%${search}%`)
-        )
+    ? or(
+        like(savedReports.propertyAddress, `%${search}%`),
+        like(savedReports.propertyCity, `%${search}%`),
+        like(savedReports.propertyState, `%${search}%`)
       )
-    : baseCondition
+    : undefined
 
   // One report per property — collapse legacy duplicate rows to the newest.
   const latestPerProperty = sql`${savedReports.id} IN (
     SELECT id FROM (
       SELECT id, MAX(created_at) AS mx FROM saved_reports
-      WHERE user_id = ${session.user.id}
       GROUP BY property_address
     ) latest WHERE saved_reports.id = latest.id
   )`
@@ -410,8 +405,8 @@ userReports.get('/by-property', async (c) => {
 
   // Prefer CLIP match (exact), fall back to address (fuzzy)
   const condition = clip
-    ? and(eq(savedReports.userId, session.user.id), eq(savedReports.propertyClip, clip))
-    : and(eq(savedReports.userId, session.user.id), like(savedReports.propertyAddress, `%${address!.toUpperCase()}%`))
+    ? eq(savedReports.propertyClip, clip)
+    : like(savedReports.propertyAddress, `%${address!.toUpperCase()}%`)
 
   const reports = await db.select({
     id: savedReports.id,
@@ -443,7 +438,7 @@ userReports.get('/:jobId/history', async (c) => {
   // Find the report
   const [report] = await db.select({ id: savedReports.id })
     .from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .limit(1)
 
   if (!report) return c.json({ error: 'Report not found' }, 404)
@@ -488,7 +483,7 @@ userReports.post('/:jobId/history', async (c) => {
 
   const [report] = await db.select({ id: savedReports.id })
     .from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .limit(1)
 
   if (!report) return c.json({ error: 'Report not found' }, 404)
@@ -526,7 +521,7 @@ userReports.put('/:jobId', async (c) => {
 
   const [report] = await db.select({ id: savedReports.id, fullResponseJson: savedReports.fullResponseJson })
     .from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .limit(1)
 
   if (!report) return c.json({ error: 'Report not found' }, 404)
@@ -591,7 +586,7 @@ userReports.post('/:jobId/feedback', bodyLimit({ maxSize: 100000 }), async (c) =
       feedbackReport: typeof body.report === 'string' ? body.report.slice(0, 50000) : null,
       feedbackAt: new Date().toISOString(),
     })
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .returning({ id: savedReports.id })
 
   if (updated.length === 0) {
@@ -603,7 +598,7 @@ userReports.post('/:jobId/feedback', bodyLimit({ maxSize: 100000 }), async (c) =
         arv: analysisRuns.arv,
       })
       .from(analysisRuns)
-      .where(and(eq(analysisRuns.jobId, jobId), eq(analysisRuns.userId, session.user.id)))
+      .where(eq(analysisRuns.jobId, jobId))
       .limit(1)
     if (!run?.propertyAddress) return c.json({ error: 'Report not found' }, 404)
 
@@ -657,20 +652,20 @@ userReports.post('/:jobId/outcome', bodyLimit({ maxSize: 20000 }), async (c) => 
     valuationData: savedReports.valuationData,
   })
     .from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .limit(1)
   if (!report) return c.json({ error: 'Report not found' }, 404)
 
   let runRecordId = typeof body.runRecordId === 'string' ? body.runRecordId : null
   const runQuery = db.select({ id: runRecords.id })
     .from(runRecords)
-    .where(and(eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .where(eq(runRecords.jobId, jobId))
     .orderBy(desc(runRecords.createdAt))
     .limit(1)
   if (runRecordId) {
     const [run] = await db.select({ id: runRecords.id })
       .from(runRecords)
-      .where(and(eq(runRecords.id, runRecordId), eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+      .where(and(eq(runRecords.id, runRecordId), eq(runRecords.jobId, jobId)))
       .limit(1)
     if (!run) return c.json({ error: 'Run record not found for this report' }, 404)
   } else {
@@ -712,12 +707,12 @@ userReports.get('/:jobId/outcomes', async (c) => {
   const db = drizzle(c.env.DB)
   const [report] = await db.select({ id: savedReports.id })
     .from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .limit(1)
   if (!report) return c.json({ error: 'Report not found' }, 404)
-  const outcomes = await db.select().from(reportOutcomes)
+  const outcomes = report ? await db.select().from(reportOutcomes)
     .where(eq(reportOutcomes.reportId, report.id))
-    .orderBy(desc(reportOutcomes.createdAt))
+    .orderBy(desc(reportOutcomes.createdAt)) : []
   return c.json({ outcomes })
 })
 
@@ -732,7 +727,7 @@ userReports.post('/:jobId/run-records/:recordId/archive', async (c) => {
   const recordId = c.req.param('recordId')
   const [record] = await db.select({ id: runRecords.id })
     .from(runRecords)
-    .where(and(eq(runRecords.id, recordId), eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .where(and(eq(runRecords.id, recordId), eq(runRecords.jobId, jobId)))
     .limit(1)
   if (!record) return c.json({ error: 'Run record not found' }, 404)
   try {
@@ -750,7 +745,7 @@ userReports.get('/:jobId/run-records', async (c) => {
   const db = drizzle(c.env.DB)
   const [report] = await db.select({ id: savedReports.id })
     .from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .limit(1)
   if (!report) return c.json({ error: 'Report not found' }, 404)
 
@@ -774,7 +769,7 @@ userReports.get('/:jobId/run-records', async (c) => {
     payloadJson: runRecords.payloadJson,
     createdAt: runRecords.createdAt,
   }).from(runRecords)
-    .where(and(eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .where(eq(runRecords.jobId, jobId))
     .orderBy(desc(runRecords.createdAt))
 
   const withIntegrity = await Promise.all(records.map(async ({ payloadJson, ...record }) => {
@@ -801,30 +796,45 @@ userReports.get('/:jobId', async (c) => {
     .limit(1)
     .then((rows) => rows[0] ?? null)
 
-  if (!report) {
-    return c.json({ error: 'Report not found' }, 404)
-  }
+  // A rerun replaces the saved row under a fresh jobId, while queue links
+  // and bookmarks still point at the original — fall back to the immutable
+  // run record before declaring the report missing. Single-user app:
+  // neither lookup is owner-scoped.
+  const fallbackRun = report ? null : await db
+    .select({
+      propertyAddress: runRecords.propertyAddress,
+      createdAt: runRecords.createdAt,
+      payloadJson: runRecords.payloadJson,
+    })
+    .from(runRecords)
+    .where(eq(runRecords.jobId, jobId))
+    .orderBy(desc(runRecords.createdAt))
+    .limit(1)
+    .then((rows) => rows[0] ?? null)
 
-  // Verify the report belongs to the authenticated user
-  if (report.userId !== session.user.id) {
+  if (!report && !fallbackRun) {
     return c.json({ error: 'Report not found' }, 404)
   }
 
   let analysis = null
-  if (report.fullResponseJson) {
+  if (report?.fullResponseJson) {
     try {
       analysis = JSON.parse(report.fullResponseJson)
     } catch {
       return c.json({ error: 'Report data is corrupted' }, 500)
     }
+  } else if (fallbackRun) {
+    try {
+      analysis = (JSON.parse(fallbackRun.payloadJson) as { result?: { response?: unknown } } | null)?.result?.response ?? null
+    } catch { /* payload unreadable — analysis stays null */ }
   }
 
   // Manual comp-tier assignments ride the stored payload — applied at read
   // time so saved reports show the reviewer's pins next to the evidence class.
   await applyCompTierOverrides(c.env, session.user.id, jobId, analysis)
-  const outcomes = await db.select().from(reportOutcomes)
+  const outcomes = report ? await db.select().from(reportOutcomes)
     .where(eq(reportOutcomes.reportId, report.id))
-    .orderBy(desc(reportOutcomes.createdAt))
+    .orderBy(desc(reportOutcomes.createdAt)) : []
   const [latestRun] = await db.select({
     id: runRecords.id,
     status: runRecords.status,
@@ -843,7 +853,7 @@ userReports.get('/:jobId', async (c) => {
     enabledCompCount: runRecords.enabledCompCount,
     createdAt: runRecords.createdAt,
   }).from(runRecords)
-    .where(and(eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .where(eq(runRecords.jobId, jobId))
     .orderBy(desc(runRecords.createdAt))
     .limit(1)
   let latestRunIntegrity = false
@@ -874,12 +884,12 @@ userReports.get('/:jobId', async (c) => {
     : null
 
   return c.json({
-    jobId: report.jobId,
-    address: report.propertyAddress,
-    createdAt: report.createdAt,
+    jobId,
+    address: report?.propertyAddress ?? fallbackRun?.propertyAddress ?? null,
+    createdAt: report?.createdAt ?? fallbackRun?.createdAt,
     analysis,
-    feedbackStatus: report.feedbackStatus ?? null,
-    feedbackAt: report.feedbackAt ?? null,
+    feedbackStatus: report?.feedbackStatus ?? null,
+    feedbackAt: report?.feedbackAt ?? null,
     outcomes,
     runRecord,
   })
@@ -905,7 +915,7 @@ userReports.get('/:jobId/share', async (c) => {
     .limit(1)
     .then((rows) => rows[0] ?? null)
 
-  if (!report || report.userId !== session.user.id) {
+  if (!report) {
     return c.json({ error: 'Report not found' }, 404)
   }
 
@@ -939,7 +949,7 @@ userReports.put('/:jobId/share', async (c) => {
     .limit(1)
     .then((rows) => rows[0] ?? null)
 
-  if (!report || report.userId !== session.user.id) {
+  if (!report) {
     return c.json({ error: 'Report not found' }, 404)
   }
 
@@ -989,7 +999,7 @@ userReports.delete('/:jobId', async (c) => {
     .limit(1)
     .then((rows) => rows[0] ?? null)
 
-  if (!report || report.userId !== session.user.id) {
+  if (!report) {
     return c.json({ error: 'Report not found' }, 404)
   }
 
@@ -999,7 +1009,7 @@ userReports.delete('/:jobId', async (c) => {
   } catch {
     return c.json({ error: 'Report cleanup incomplete. The report was retained; retry deletion.', retriable: true }, 503)
   }
-  await db.delete(savedReports).where(and(eq(savedReports.id, report.id), eq(savedReports.userId, session.user.id)))
+  await db.delete(savedReports).where(eq(savedReports.id, report.id))
 
   return c.json({ success: true })
 })
@@ -1054,7 +1064,7 @@ userReports.post('/:jobId/update-crm', bodyLimit({ maxSize: 20000 }), async (c) 
   const [report] = await db
     .select({ fullResponseJson: savedReports.fullResponseJson })
     .from(savedReports)
-    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .where(eq(savedReports.jobId, jobId))
     .limit(1)
   if (!report) return c.json({ error: 'Report not found' }, 404)
 
