@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { transformSync } from 'esbuild'
 
 const require = createRequire(import.meta.url)
-function harness(recalcResult = { arv: 700000, marker: 'client' }) {
+function harness(recalcResult = { arv: 700000, marker: 'client' }, settingsChanged = false) {
   const states = [], refs = [], notices = [], recalcs = []
   let stateIndex = 0, refIndex = 0
   const react = {
@@ -22,7 +22,7 @@ function harness(recalcResult = { arv: 700000, marker: 'client' }) {
     react,
     sonner: { toast: { error: text => notices.push(text), info: text => notices.push(text) } },
     '@/components/analysis/format-helpers': { getCompKey: comp => comp.address },
-    '@/hooks/use-report-settings': { useReportSettings: () => ({ settings: {}, settingsChanged: false, recalcData: null }) },
+    '@/hooks/use-report-settings': { useReportSettings: () => ({ settings: {}, settingsChanged, recalcData: null }) },
     '@/lib/recalc': { recalculateValuationFromComps: (...args) => { recalcs.push(args); return recalcResult } },
     '@/lib/client-api': { recalculateReportComps: () => assert.fail('No server call — comp math is client-side now') },
   }
@@ -101,4 +101,17 @@ test('a reloaded manual report keeps its saved selection checked', () => {
   assert.equal(view.compOverride.isManual, true)
   assert.equal(view.compOverride.selectedCompKeys.has('b'), true)
   assert.equal(view.compOverride.selectedCompKeys.has('a'), false)
+})
+
+test('changed settings (rehab tier pick) recalc client-side on a server-seated report — no manual pick needed', () => {
+  const h = harness({ arv: 700000, marker: 'client' }, true)
+  const original = analysis(['a', 'b'], { a: 'anchor' })
+  const view = h.render(original)
+  // No manual override — the auto anchor selection feeds the recalc
+  assert.equal(view.compOverride.isManual, false)
+  assert.equal(h.recalcs.length, 1)
+  const selectedKeys = h.recalcs[0][2]
+  assert.equal(selectedKeys.has('a'), true)
+  assert.equal(selectedKeys.has('b'), false)
+  assert.equal(view.displayValuation.marker, 'client')
 })
