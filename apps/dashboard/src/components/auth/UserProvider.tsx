@@ -1,8 +1,9 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from '@/lib/auth-client'
+import { stashPendingAddress } from '@/lib/pending-address'
 import { Loader2 } from 'lucide-react'
 import { getImpersonatedUserId } from './ImpersonationProvider'
 
@@ -47,15 +48,20 @@ export function UserProvider({ children, requireAuth = true }: UserProviderProps
   const session = useSession()
   const [isChecking, setIsChecking] = useState(true)
   const [enrichedUser, setEnrichedUser] = useState<User | null>(null)
+  const hadSessionRef = useRef(false)
 
   useEffect(() => {
     // Wait for session to load
     if (session.isPending) return
 
     setIsChecking(false)
+    if (session.data?.user) hadSessionRef.current = true
 
     // If auth required and no session, redirect to home (sign in)
     if (requireAuth && !session.data?.user) {
+      // Arrived signed out on an ?address= link — keep it for after sign-in.
+      // A sign-out from this page must not re-run it for the next person.
+      if (!hadSessionRef.current) stashPendingAddress(window.location.pathname, window.location.search)
       router.replace('/')
     }
   }, [session.isPending, session.data, router, requireAuth])

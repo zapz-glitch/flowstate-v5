@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signIn, useSession } from '@/lib/auth-client'
 import { offlineClear } from '@/lib/offline-cache'
+import { takePostSignInPath } from '@/lib/pending-address'
 import { LogoIcon } from '@/components/ui/Logo'
 import { Loader2 } from 'lucide-react'
 
@@ -33,7 +34,7 @@ export default function LoginPage() {
       // route can mount before Better Auth's signal update lands.
       await refreshSession()
       void offlineClear()
-      router.push('/dashboard/analyze')
+      router.push(takePostSignInPath())
     } catch {
       setError('Failed to sign in. Please try again.')
       setIsLoading(false)
