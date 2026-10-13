@@ -32,7 +32,8 @@ import { gradeVerdict } from '../services/evaluation/verdict-grade'
 import { consultOnSelection } from '../services/evaluation/consult'
 import { runAssistShadowSelection, runOpusAppraiser } from '../services/evaluation/appraiser'
 import { runDeterministicSelector } from '../services/evaluation/selector'
-import { runDecisionsSeat } from '../services/evaluation/decisions-seat'
+import { runDecisionsSeat, runCompSitePass, orderSiteCandidates } from '../services/evaluation/decisions-seat'
+import { isDecisionsAvailable } from '../services/decisions'
 import { runTypeSelector } from '../services/evaluation/type-selector'
 import { ratePocketDesirability } from '../services/evaluation/pocket-desirability'
 import { fetchRedfinPropertyDetails } from '../services/redfin-details'
@@ -1821,7 +1822,21 @@ export class AnalysisJobDO {
               // apples-to-apples fit, highest-probability picks drive the
               // deterministic ARV.
               ? await runDecisionsSeat(this.env, ctx, evidence).catch(() => null)
-              : await runOpusAppraiser(this.reasoningEnv, ctx, evidence).catch(() => null)
+              : await (async () => {
+                  // Satellite site pass on the top candidates before the
+                  // appraiser reads the sheet — pool/lot/exposure priors the
+                  // comp lane skips ({ site: false } saves the far tail).
+                  if (isDecisionsAvailable(this.env)) {
+                    await runCompSitePass(
+                      this.env, ctx, evidence,
+                      orderSiteCandidates(evidence).map((c) => ({
+                        comp: c,
+                        ppsf: c.pricePerSqft ?? (c.salePrice && c.squareFeet ? c.salePrice / c.squareFeet : null),
+                      })),
+                    ).catch(() => 0)
+                  }
+                  return runOpusAppraiser(this.reasoningEnv, ctx, evidence).catch(() => null)
+                })()
         const shadowSelection = await shadowPromise
         const appraiserMs = Date.now() - appraiserStart
         const decision = appraisal?.selection ?? null
