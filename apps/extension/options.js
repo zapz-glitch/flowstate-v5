@@ -1,14 +1,27 @@
-const DEFAULT_BASE_URL = 'https://app.flowstate.homes'
+import { DEFAULT_BASE_URL, normalizeBaseUrl } from './flowstate-url.js'
+
+const input = document.getElementById('baseUrl')
+const status = document.getElementById('saved')
+
+function showStatus(text, ok) {
+  status.textContent = text
+  status.style.color = ok ? '#4ade80' : '#f87171'
+  status.style.display = 'block'
+  if (ok) setTimeout(() => { status.style.display = 'none' }, 1500)
+}
 
 chrome.storage.sync.get({ baseUrl: DEFAULT_BASE_URL }, ({ baseUrl }) => {
-  document.getElementById('baseUrl').value = baseUrl
+  input.value = baseUrl
 })
 
 document.getElementById('save').addEventListener('click', () => {
-  const baseUrl = document.getElementById('baseUrl').value.trim() || DEFAULT_BASE_URL
+  const baseUrl = normalizeBaseUrl(input.value)
+  if (!baseUrl) {
+    showStatus('That is not a web address. Try https://app.flowstate.homes', false)
+    return
+  }
   chrome.storage.sync.set({ baseUrl }, () => {
-    const el = document.getElementById('saved')
-    el.style.display = 'block'
-    setTimeout(() => { el.style.display = 'none' }, 1500)
+    input.value = baseUrl
+    showStatus('Saved.', true)
   })
 })

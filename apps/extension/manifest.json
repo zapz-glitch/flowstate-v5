@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Flowstate — Analyze Address",
-  "version": "1.0.0",
-  "description": "Right-click any selected address to open it in Flowstate Property Research.",
+  "name": "Flowstate — Send Address",
+  "version": "1.1.0",
+  "description": "Right-click any selected address to send it to Flowstate Property Research.",
   "permissions": ["contextMenus", "storage"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "options_page": "options.html",
   "icons": {
