@@ -205,12 +205,14 @@ export interface BoardItem {
   counterAmount: number | null
   terms: Record<string, unknown> | null
   note: string | null
+  /** Cleared rows — only present when fetched with all=1 */
+  dismissed?: boolean
   createdAt: string
   updatedAt: string
 }
 
-export async function getOfferBoard(): Promise<{ ok: boolean; items: BoardItem[] }> {
-  const res = await internalFetch('/v1/offers/board')
+export async function getOfferBoard(all = false): Promise<{ ok: boolean; items: BoardItem[] }> {
+  const res = await internalFetch(`/v1/offers/board${all ? '?all=1' : ''}`)
   if (!res?.ok) return { ok: false, items: [] }
   const data = (await res.json()) as { items?: BoardItem[] }
   return { ok: true, items: data.items ?? [] }

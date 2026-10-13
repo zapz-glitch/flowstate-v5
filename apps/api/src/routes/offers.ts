@@ -430,16 +430,18 @@ const boardItem = (r: BoardRow) => ({
   updatedAt: r.updated_at,
 })
 
-/** The board — every live campaign item, newest activity first. Cleared
- *  items never resurface; the user dismisses them. */
+/** The board — every live campaign item, newest activity first. `all=1`
+ *  includes cleared rows (marked dismissed) — the since-campaign view.
+ *  Items never resurface silently; the user dismisses them. */
 offers.get('/board', async (c) => {
   const userId = c.get('auth').userId
+  const all = c.req.query('all') === '1'
   const { results } = await c.env.DB.prepare(
     `SELECT * FROM offer_board
-      WHERE user_id = ? AND dismissed = 0
+      WHERE user_id = ? ${all ? '' : 'AND dismissed = 0'}
       ORDER BY updated_at DESC LIMIT 500`,
-  ).bind(userId).all<BoardRow>()
-  return c.json({ ok: true, items: results.map(boardItem) })
+  ).bind(userId).all<BoardRow & { dismissed: number }>()
+  return c.json({ ok: true, items: results.map((r) => ({ ...boardItem(r), dismissed: r.dismissed === 1 })) })
 })
 
 /** Upsert — the session posts a stage change. Match on id →
@@ -457,7 +459,7 @@ offers.post('/board', async (c) => {
     console.log(`[Offers] board: unlisted stage '${body.status}'`)
   }
   const existing = await c.env.DB.prepare(
-    `SELECT id FROM offer_board WHERE user_id = ? AND dismissed = 0 AND (
+    `SELECT id FROM offer_board WHERE user_id = ? AND (
        id = ? OR (opportunity_id IS NOT NULL AND opportunity_id = ?)
        OR (lead_id IS NOT NULL AND lead_id = ?)
        OR (address = ?))
@@ -475,7 +477,7 @@ offers.post('/board', async (c) => {
          terms_json = COALESCE(?, terms_json), note = COALESCE(?, note),
          display_name = COALESCE(?, display_name),
          opportunity_id = COALESCE(?, opportunity_id),
-         lead_id = COALESCE(?, lead_id), updated_at = ?
+         lead_id = COALESCE(?, lead_id), dismissed = 0, updated_at = ?
        WHERE id = ?`,
     ).bind(
       body.status, body.offerAmount ?? null, body.counterAmount ?? null,

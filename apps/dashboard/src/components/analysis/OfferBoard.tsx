@@ -1,10 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { X, FileText, CheckCircle2, ArrowLeftRight, PenLine, FileCheck2, CircleDollarSign, CircleSlash2 } from 'lucide-react'
+import { X, FileText, CheckCircle2, ArrowLeftRight, PenLine, FileCheck2, CircleDollarSign, CircleSlash2, ExternalLink } from 'lucide-react'
 import { getOfferBoard, removeOfferBoardItem, type BoardItem } from '@/app/(dashboard)/dashboard/give-offer/actions'
 
-const POLL_MS = 30_000
+const POLL_MS = 10_000
 
 /** Column order — the campaign stages in flow order. A stage outside
  *  this list (custom_*) appends its own column at the end. */
@@ -31,27 +31,33 @@ const fmtAge = (iso: string) => {
 const stageLabel = (key: string) =>
   STAGES.find((s) => s.key === key)?.label ?? key.replace(/^(custom_)?/, '').replace(/_/g, ' ')
 
+/** Close CRM deep link — the contact record behind the address. */
+const closeLeadUrl = (leadId: string | null | undefined) =>
+  leadId ? `https://app.close.com/lead/${leadId}/` : null
+
 export function OfferBoard() {
   const [items, setItems] = useState<BoardItem[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [showAll, setShowAll] = useState(false)
 
-  const load = useCallback(async () => {
-    const r = await getOfferBoard().catch(() => null)
+  const load = useCallback(async (all: boolean) => {
+    const r = await getOfferBoard(all).catch(() => null)
     if (r?.ok) setItems(r.items)
     setLoaded(true)
   }, [])
 
   useEffect(() => {
-    load()
-    const t = setInterval(load, POLL_MS)
+    load(showAll)
+    const t = setInterval(() => load(showAll), POLL_MS)
     return () => clearInterval(t)
-  }, [load])
+  }, [load, showAll])
 
   const remove = useCallback((id: string) => {
-    setItems((prev) => prev.filter((i) => i.id !== id))
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, dismissed: true } : i))
     removeOfferBoardItem(id).catch(() => null)
   }, [])
 
+  const live = items.filter((i) => !i.dismissed)
   const columns = useMemo(() => {
     const groups = new Map<string, BoardItem[]>()
     for (const s of STAGES) groups.set(s.key, [])
@@ -59,7 +65,6 @@ export function OfferBoard() {
       if (!groups.has(i.status)) groups.set(i.status, [])
       groups.get(i.status)!.push(i)
     }
-    // Known stages first (in order), then any custom stages alphabetically.
     return [...groups.entries()].filter(([, arr]) => arr.length > 0)
   }, [items])
 
@@ -71,7 +76,16 @@ export function OfferBoard() {
         <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">
           Campaign board
         </span>
-        <span className="text-[10px] text-foreground-tertiary tabular-nums">{items.length} live</span>
+        <span className="text-[10px] text-foreground-tertiary tabular-nums">{live.length} live</span>
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className={`ml-auto text-[10px] px-2 py-0.5 rounded border transition-colors ${
+            showAll ? 'border-primary/60 text-foreground bg-primary/10' : 'border-border/60 text-foreground-tertiary hover:text-foreground'
+          }`}
+        >
+          {showAll ? 'All time' : 'Live only'}
+        </button>
       </div>
       <div className="flex gap-2 overflow-x-auto p-2">
         {columns.map(([status, arr]) => {
@@ -84,33 +98,47 @@ export function OfferBoard() {
                 <span className="ml-auto tabular-nums text-foreground-tertiary">{arr.length}</span>
               </div>
               <div className="space-y-1.5">
-                {arr.map((i) => (
-                  <div
-                    key={i.id}
-                    className="group border border-border/50 rounded-md bg-secondary/30 px-2.5 py-2 relative"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => remove(i.id)}
-                      title="Remove from board"
-                      className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 text-foreground-tertiary hover:text-foreground transition-opacity"
+                {arr.map((i) => {
+                  const contact = closeLeadUrl(i.leadId)
+                  return (
+                    <div
+                      key={i.id}
+                      className={`group border rounded-md px-2.5 py-2 relative ${
+                        i.dismissed
+                          ? 'border-border/30 bg-secondary/10 opacity-50'
+                          : 'border-border/50 bg-secondary/30'
+                      }`}
                     >
-                      <X size={12} />
-                    </button>
-                    <div className="text-xs font-medium text-foreground pr-4 truncate" title={i.address}>
-                      {i.address}
+                      {!i.dismissed && (
+                        <button
+                          type="button"
+                          onClick={() => remove(i.id)}
+                          title="Remove from board"
+                          className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 text-foreground-tertiary hover:text-foreground transition-opacity"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                      <div className="text-xs font-medium text-foreground pr-4 truncate flex items-center gap-1" title={i.address}>
+                        {contact ? (
+                          <a href={contact} target="_blank" rel="noreferrer" className="hover:underline inline-flex items-center gap-1 truncate">
+                            {i.address}
+                            <ExternalLink size={10} className="flex-shrink-0 text-foreground-tertiary" />
+                          </a>
+                        ) : i.address}
+                      </div>
+                      <div className="text-[10px] text-foreground-tertiary mt-0.5 flex items-center gap-2 flex-wrap">
+                        {i.displayName && <span className="truncate">{i.displayName}</span>}
+                        {fmtPrice(i.offerAmount) && <span>offer {fmtPrice(i.offerAmount)}</span>}
+                        {fmtPrice(i.counterAmount) && <span className="text-orange-500">counter {fmtPrice(i.counterAmount)}</span>}
+                        <span className="tabular-nums ml-auto">{fmtAge(i.updatedAt)}</span>
+                      </div>
+                      {i.note && (
+                        <div className="text-[10px] text-foreground-secondary mt-1 line-clamp-2">{i.note}</div>
+                      )}
                     </div>
-                    <div className="text-[10px] text-foreground-tertiary mt-0.5 flex items-center gap-2 flex-wrap">
-                      {i.displayName && <span className="truncate">{i.displayName}</span>}
-                      {fmtPrice(i.offerAmount) && <span>offer {fmtPrice(i.offerAmount)}</span>}
-                      {fmtPrice(i.counterAmount) && <span className="text-orange-500">counter {fmtPrice(i.counterAmount)}</span>}
-                      <span className="tabular-nums ml-auto">{fmtAge(i.updatedAt)}</span>
-                    </div>
-                    {i.note && (
-                      <div className="text-[10px] text-foreground-secondary mt-1 line-clamp-2">{i.note}</div>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )

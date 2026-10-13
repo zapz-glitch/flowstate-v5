@@ -54,10 +54,25 @@ async function refreshProxy(env: Env, path: string, transform?: ProxyTransform):
     let body = await res.json().catch(() => null)
     if (body == null) return
     if (transform) body = await transform(env, body)
+    const json = JSON.stringify(body)
     await env.API_CACHE.put(proxyKey(path), JSON.stringify({ t: Date.now(), body }))
+    // Durable snapshot — KV expiry can't cold-start the queue again;
+    // the D1 copy serves instantly while the next refresh lands.
+    await env.DB.prepare(
+      `INSERT INTO pipeline_snapshot (path, body_json, refreshed_at) VALUES (?, ?, ?)
+       ON CONFLICT(path) DO UPDATE SET body_json = excluded.body_json, refreshed_at = excluded.refreshed_at`,
+    ).bind(path, json, new Date().toISOString()).run().catch(() => {})
   } finally {
     await env.API_CACHE.delete(refreshLockKey(path)).catch(() => {})
   }
+}
+
+/** Last known payload from D1 — survives KV expiry and worker restarts. */
+async function durableSnapshot(env: Env, path: string): Promise<unknown | null> {
+  const row = await env.DB.prepare(
+    `SELECT body_json FROM pipeline_snapshot WHERE path = ?`,
+  ).bind(path).first<{ body_json: string }>().catch(() => null)
+  return row ? JSON.parse(row.body_json) : null
 }
 
 /** Non-blocking lock acquire — true when this caller owns the refresh. */
@@ -82,11 +97,13 @@ async function engineJsonCached(
   }
   // Cold path: the engine fan-out (~80s at ~500 queue items) outlives any
   // sane inline timeout — blocking here would 502 anyway AND stall every
-  // concurrent poll behind the same lock. Kick the real refresh into
-  // waitUntil and fail fast; the next poll serves the snapshot it lands.
-  if (!await acquireRefresh(c.env, path)) return { ok: false, body: null }
-  c.executionCtx.waitUntil(refreshProxy(c.env, path, transform))
-  return { ok: false, body: null }
+  // concurrent poll behind the same lock. Serve the durable D1 snapshot
+  // when we have one, kick the refresh, fail fast only when both are dry.
+  const snap = await durableSnapshot(c.env, path)
+  if (await acquireRefresh(c.env, path)) {
+    c.executionCtx.waitUntil(refreshProxy(c.env, path, transform))
+  }
+  return snap != null ? { ok: true, body: snap } : { ok: false, body: null }
 }
 
 /** Attach each queue item's asking price — the engine only sends
