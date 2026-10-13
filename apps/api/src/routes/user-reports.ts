@@ -829,6 +829,13 @@ userReports.get('/:jobId', async (c) => {
     } catch { /* payload unreadable — analysis stays null */ }
   }
 
+  // Older payloads carry the level source only at the root — backfill it
+  // onto the valuation so defaulted tiers still show the 'assumed' flag.
+  const analysisObj = analysis as { valuation?: { rehabLevelSource?: string | null }; renovationLevelSource?: string | null } | null
+  if (analysisObj?.valuation && analysisObj.valuation.rehabLevelSource == null) {
+    analysisObj.valuation.rehabLevelSource = analysisObj.renovationLevelSource ?? null
+  }
+
   // Manual comp-tier assignments ride the stored payload — applied at read
   // time so saved reports show the reviewer's pins next to the evidence class.
   await applyCompTierOverrides(c.env, session.user.id, jobId, analysis)

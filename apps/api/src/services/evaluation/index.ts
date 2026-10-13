@@ -2040,6 +2040,7 @@ export async function performAnalysisPhase2(
   }
   response.visionAssessment = renovation
   response.renovationLevelSource = derivedBuybox.rehabLevelSource
+  if (response.valuation) response.valuation.rehabLevelSource = derivedBuybox.rehabLevelSource
   if (sellerNotes.length > 0) {
     response.sellerNotes = { fetchedAt: new Date().toISOString(), notes: sellerNotes }
     if (rehabAdditions.length > 0) response.rehabAdditions = rehabAdditions

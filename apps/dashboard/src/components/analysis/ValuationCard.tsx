@@ -221,8 +221,8 @@ export function ValuationCard({
               <div className="text-heading-sm font-semibold">${safeFmt(valuation.rehabCost)}</div>
               <div className="mt-1.5 flex items-center gap-2">
                 {valuation.rehabLevel && (
-                  <Badge variant="outline">
-                    {valuation.rehabLevel}
+                  <Badge variant="outline" title={valuation.rehabLevelSource === 'default' ? 'No photo read landed — the pipeline assumed this tier' : undefined}>
+                    {valuation.rehabLevelSource === 'default' ? `${valuation.rehabLevel} (assumed)` : valuation.rehabLevel}
                   </Badge>
                 )}
                 <EvalTimer />

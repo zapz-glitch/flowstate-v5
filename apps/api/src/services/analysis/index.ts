@@ -844,6 +844,9 @@ export interface AnalysisResponse {
     locationPenaltyPercent: number
     rehabCost: number
     rehabLevel: string
+    /** Where the level came from — 'default' means no vision/classification
+     *  read landed and the pipeline assumed a tier. */
+    rehabLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default' | null
     rehabPerSqft: number
     /** All rehab level estimates with costs calculated for the current ARV */
     rehabLevelEstimates: Array<{
