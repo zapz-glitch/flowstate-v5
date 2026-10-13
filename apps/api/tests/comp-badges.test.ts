@@ -90,4 +90,32 @@ const opts = { subjectCensusTract: 'T1', subjectPpsfMedians: { SD: 200 } }
   assert.deepEqual(b.widenedOn, ['sqft_diff'])
   assert.equal(b.checks.size, false)
 }
+// decisions observables — model's tier + code's position drive the badges
+{
+  const b = compBadges(comp(), { ...opts, observables: { conditionTier: 'LIGHT_COSMETIC', codePosition: 'MEDIAN' } })
+  assert.equal(b.condition, 'light_cosmetic')
+  assert.equal(b.marketPosition, 'at_market')
+  assert.equal(b.trust, 'verified')
+}
+// decisions couldn't call condition but the code placed the price → partial
+{
+  const b = compBadges(comp(), { ...opts, observables: { conditionTier: 'UNVERIFIED', codePosition: 'ABOVE_MEDIAN' } })
+  assert.equal(b.condition, 'unverified')
+  assert.equal(b.marketPosition, 'above_market')
+  assert.equal(b.trust, 'partial')
+}
+// condition confirmed but code couldn't place the price → still partial
+{
+  const b = compBadges(comp(), { ...opts, observables: { conditionTier: 'HEAVY_REHAB', codePosition: 'UNVERIFIED' } })
+  assert.equal(b.condition, 'heavy_rehab')
+  assert.equal(b.marketPosition, 'unverified')
+  assert.equal(b.trust, 'partial')
+}
+// observables ran but neither side answered → unverified
+{
+  const b = compBadges(comp(), { ...opts, observables: { conditionTier: null, codePosition: 'UNVERIFIED' } })
+  assert.equal(b.condition, 'unverified')
+  assert.equal(b.marketPosition, 'unverified')
+  assert.equal(b.trust, 'unverified')
+}
 console.log('comp-badges: price/condition/pocket/trust/widened checks passed')

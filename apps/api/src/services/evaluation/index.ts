@@ -1995,6 +1995,7 @@ export async function performAnalysisPhase2(
       groupACompIds,
       groupBCompIds: new Set(groupBResult?.compIds ?? []),
       compCurbAppeal,
+      compObservables: ctx.compObservables,
     }
   )
 

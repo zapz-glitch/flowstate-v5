@@ -203,8 +203,19 @@ export function scopeRank(scope: Pick<ScopeLabel, 'word'>): number {
   return scope.word === 'Block' ? 0 : scope.word === 'Tract' ? 1 : scope.word === 'Tract/Block' ? 2 : scope.word === 'Neighborhood' ? 3 : 4
 }
 
-/** Photo condition · missing evidence stays Unverified, never a guess */
-export function conditionLabel(c: CompBadges['condition'] | undefined): 'Reno' | 'Dated' | 'Distressed' | 'Unverified' {
+const CONDITION_TIER_LABELS: Record<string, string> = {
+  lipstick: 'Lipstick',
+  light_cosmetic: 'Light Cosmetic',
+  full_cosmetic: 'Full Cosmetic',
+  heavy_rehab: 'Heavy Rehab',
+  full_gut: 'Full Gut',
+}
+
+/** Condition · the decisions model's renovation tier when it ran, else the
+ *  legacy photo read · missing evidence stays Unverified, never a guess */
+export function conditionLabel(c: CompBadges['condition'] | undefined): string {
+  if (c == null) return 'Unverified'
+  if (c in CONDITION_TIER_LABELS) return CONDITION_TIER_LABELS[c]!
   return c === 'reno' ? 'Reno' : c === 'dated' ? 'Dated' : c === 'distressed' ? 'Distressed' : 'Unverified'
 }
 
@@ -212,14 +223,19 @@ export function priceClassLabel(p: CompBadges['price'] | undefined): 'Renovated'
   return p === 'renovated' ? 'Renovated' : p === 'median' ? 'Median' : p === 'as_is' ? 'As-is' : null
 }
 
+/** Price position · the code-assigned tier vs the pocket band */
+export function marketPositionLabel(m: CompBadges['marketPosition'] | undefined): 'At market' | 'Above market' | 'Below market' | 'Unverified' | null {
+  return m === 'at_market' ? 'At market' : m === 'above_market' ? 'Above market' : m === 'below_market' ? 'Below market' : m === 'unverified' ? 'Unverified' : null
+}
+
 export function trustLabel(t: CompBadges['trust'] | undefined): 'Verified' | 'Partial' | 'Unverified' | null {
   return t === 'verified' ? 'Verified' : t === 'partial' ? 'Partial' : t === 'unverified' ? 'Unverified' : null
 }
 
 export function trustTitle(t: CompBadges['trust'] | undefined): string | undefined {
-  return t === 'verified' ? 'Every evidence check passed'
-    : t === 'partial' ? 'Partially verified · some checks missing'
-    : t === 'unverified' ? 'Unverified · an evidence check failed'
+  return t === 'verified' ? 'Verified · condition and price both confirmed'
+    : t === 'partial' ? 'Partial · one check confirmed, one could not verify'
+    : t === 'unverified' ? 'Unverified · checks could not confirm'
     : undefined
 }
 

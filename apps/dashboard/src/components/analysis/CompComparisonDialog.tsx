@@ -25,6 +25,7 @@ import {
   formatLotSize,
   formatShortDate,
   lotMatchColor,
+  marketPositionLabel,
   priceClassLabel,
   scopeLabel,
   scopeToneClass,
@@ -157,7 +158,9 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
 
   // Same words and tones as the comp card
   const scope = scopeLabel(comp, subject, featureMatches)
-  const priceClass = priceClassLabel(comp.badges?.price)
+  const marketPosition = marketPositionLabel(comp.badges?.marketPosition)
+  const priceClass = marketPosition ?? priceClassLabel(comp.badges?.price)
+  const priceTitle = marketPosition != null ? 'Code-assigned price position vs the pocket median band' : comp.classification?.reasoning || undefined
   const trust = trustLabel(comp.badges?.trust)
   const widened = widenedRules(comp.badges)
   const conflict = conflictNote(comp)
@@ -256,8 +259,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
 
             {/* Server verdicts · each on its own axis, same words as the card */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-2">
-              <Pair label="Condition" value={conditionLabel(comp.badges?.condition)} title={comp.curbAppeal?.summary ?? undefined} />
-              {priceClass && <Pair label="Price" value={priceClass} title={comp.classification?.reasoning || undefined} />}
+              <Pair label="Condition" value={conditionLabel(comp.badges?.condition)} title={marketPosition != null ? 'Decisions renovation-tier call' : comp.curbAppeal?.summary ?? undefined} />
+              {priceClass && <Pair label="Price" value={priceClass} title={priceTitle} />}
               {trust && <Pair label="Trust" value={trust} title={trustTitle(comp.badges?.trust)} />}
               {widened.length > 0 && (
                 <span className="font-medium text-amber-600 dark:text-amber-400" title={widenedTitle(widened)}>Widened</span>

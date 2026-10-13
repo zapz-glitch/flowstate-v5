@@ -7,18 +7,25 @@
  *
  *   price     — the comp's evidence class (what the sale says):
  *               renovated | median | as_is
- *   condition — the vision read (what the photos say):
- *               reno | dated | distressed | unverified
+ *   condition — the decisions model's renovation tier when the observable
+ *               lane ran (lipstick … full_gut | unverified), else the
+ *               vision read (reno | dated | distressed | unverified)
+ *   marketPosition — the code-assigned price tier (at/above/below market
+ *               vs the pocket band) — null on runs without observables
  *   pocket    — in the subject's census pocket (tract/block-group), or
  *               outside it priced equal/above/below (±15% scope $/sf)
- *   trust     — verified | partial | unverified — the run's stamps
+ *   trust     — verified | partial | unverified — with observables:
+ *               verified = model confirmed condition + code confirmed
+ *               price, partial = one confirmed, unverified = neither;
+ *               without observables: the run's evidence checks
  *   checks    — pocket · size · fresh · price-fit · market-fit · transaction
  *   widenedOn — which relaxed rules admitted the comp (empty = strict)
  */
 
 export interface CompBadges {
   price: 'renovated' | 'median' | 'as_is' | null
-  condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
+  condition: 'reno' | 'dated' | 'distressed' | 'lipstick' | 'light_cosmetic' | 'full_cosmetic' | 'heavy_rehab' | 'full_gut' | 'unverified' | null
+  marketPosition: 'at_market' | 'above_market' | 'below_market' | 'unverified' | null
   pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
   /** How the pocket match was earned — tightest scope wins:
    *  block (block group) | tract | name (neighborhood label) | null (out) */
@@ -42,6 +49,33 @@ function classToPrice(cls: string | null | undefined): CompBadges['price'] {
   if (cls === 'transitional') return 'median'
   if (cls === 'as_is') return 'as_is'
   return null
+}
+
+/** Decisions comp answers (structural — the wire shape is CompObservables). */
+export interface CompBadgeObservables {
+  /** c13 — the model's renovation-tier call: LIPSTICK … FULL_GUT | UNVERIFIED */
+  conditionTier?: string | null
+  /** Code-assigned price tier from the pocket band: MEDIAN | ABOVE_MEDIAN | BELOW_MEDIAN | UNVERIFIED */
+  codePosition?: string | null
+}
+
+const TIER_TO_CONDITION: Record<string, NonNullable<CompBadges['condition']>> = {
+  LIPSTICK: 'lipstick',
+  LIGHT_COSMETIC: 'light_cosmetic',
+  FULL_COSMETIC: 'full_cosmetic',
+  HEAVY_REHAB: 'heavy_rehab',
+  FULL_GUT: 'full_gut',
+}
+
+function tierToCondition(tier: string | null | undefined): NonNullable<CompBadges['condition']> {
+  return tier != null ? TIER_TO_CONDITION[tier.toUpperCase()] ?? 'unverified' : 'unverified'
+}
+
+function positionToMarket(pos: string | null | undefined): NonNullable<CompBadges['marketPosition']> {
+  if (pos === 'MEDIAN') return 'at_market'
+  if (pos === 'ABOVE_MEDIAN') return 'above_market'
+  if (pos === 'BELOW_MEDIAN') return 'below_market'
+  return 'unverified'
 }
 
 function condToBadge(cond: string | null | undefined): CompBadges['condition'] {
@@ -95,6 +129,10 @@ export function compBadges(
     /** The run's relaxed filters — a failed comp filter named here was
      *  admitted by that rung. */
     expansionApplied?: string[]
+    /** Decisions comp answers — when present, the condition/price slots and
+     *  the trust verdict come from the model's tier call and the code's
+     *  price position, not the legacy vision/evidence path. */
+    observables?: CompBadgeObservables | null
   } = {},
 ): CompBadges {
   const filters = comp.evaluation?.filterResults ?? []
@@ -134,7 +172,13 @@ export function compBadges(
     (stale === 'above_pocket' ? 'above_pocket' : stale === 'stale' ? 'below_pocket' : null)
   const premiumExplained = opts.classification === 'after_renovation' || opts.condition?.condition === 'renovated'
   let trust: CompBadges['trust'] = null
-  if (ev) {
+  if (opts.observables != null) {
+    // Decisions lane ran: verified = model's condition tier + code's price
+    // position both landed; partial = exactly one landed; unverified = none.
+    const condConfirmed = opts.observables.conditionTier != null && TIER_TO_CONDITION[opts.observables.conditionTier.toUpperCase()] != null
+    const priceConfirmed = opts.observables.codePosition === 'MEDIAN' || opts.observables.codePosition === 'ABOVE_MEDIAN' || opts.observables.codePosition === 'BELOW_MEDIAN'
+    trust = condConfirmed && priceConfirmed ? 'verified' : condConfirmed || priceConfirmed ? 'partial' : 'unverified'
+  } else if (ev) {
     const failedPrice = priceVerdict != null && FAIL_VERDICTS.has(priceVerdict)
     const failedMarket = FAIL_MARKET_FIT.has(marketFit ?? '') || (marketFit === 'above_pocket' && !premiumExplained)
     const failedTransaction = FAIL_TRANSACTION.has(ev.transactionCheck ?? '')
@@ -150,7 +194,8 @@ export function compBadges(
   return {
     price: classToPrice(opts.classification),
     pocketVia,
-    condition: condToBadge(opts.condition?.condition),
+    condition: opts.observables != null ? tierToCondition(opts.observables.conditionTier) : condToBadge(opts.condition?.condition),
+    marketPosition: opts.observables != null ? positionToMarket(opts.observables.codePosition) : null,
     pocket,
     trust,
     checks: {
