@@ -36,6 +36,16 @@ const stageLabel = (key: string) =>
 const closeLeadUrl = (leadId: string | null | undefined) =>
   leadId ? `https://app.close.com/lead/${leadId}/` : null
 
+/** Address → the offer report when one exists, else Property Search
+ *  prefilled with the address (kicks off the eval). Every address
+ *  is a link. */
+const reportHref = (i: BoardItem) =>
+  i.reportJobId ? `/dashboard/give-offer/${i.reportJobId}` : `/dashboard/analyze?address=${encodeURIComponent(i.address)}`
+
+/** Legit link feel — color shift on hover (the Property Search
+ *  transition), no underline. */
+const ADDR_LINK = 'text-foreground hover:text-primary transition-colors truncate'
+
 export function OfferBoard() {
   const [items, setItems] = useState<BoardItem[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -185,13 +195,9 @@ export function OfferBoard() {
                 return (
                   <tr key={i.id} className={`border-b border-border/20 group ${i.dismissed ? 'opacity-50' : ''}`}>
                     <td className="py-1.5 pr-3 max-w-[220px] truncate">
-                      {i.reportJobId ? (
-                        <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid">
-                          {i.address}
-                        </Link>
-                      ) : (
-                        <span className="text-foreground">{i.address}</span>
-                      )}
+                      <Link href={reportHref(i)} className={ADDR_LINK}>
+                        {i.address}
+                      </Link>
                     </td>
                     <td className="py-1.5 pr-3">
                       {contact ? (
@@ -264,11 +270,9 @@ export function OfferBoard() {
                         </button>
                       )}
                       <div className="text-xs font-medium pr-4 truncate" title={i.address}>
-                        {i.reportJobId ? (
-                          <Link href={`/dashboard/give-offer/${i.reportJobId}`} className="text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid truncate">
-                            {i.address}
-                          </Link>
-                        ) : <span className="text-foreground">{i.address}</span>}
+                        <Link href={reportHref(i)} className={ADDR_LINK}>
+                          {i.address}
+                        </Link>
                       </div>
                       <div className="text-[10px] text-foreground-tertiary mt-0.5 flex items-center gap-2 flex-wrap">
                         {contact && (
