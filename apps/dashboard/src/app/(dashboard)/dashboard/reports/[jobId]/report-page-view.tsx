@@ -460,8 +460,30 @@ export function ReportPageView({ params, queue }: {
     }
     switch (eventType) {
       case 'subject_found':
+        // Intermediate streaming event — refresh spinner stays
+        break
       case 'comps_found':
-        // Intermediate streaming events — refresh spinner stays
+        // Comps land before any enrichment — swap them in immediately so the
+        // map and cards show raw sale evidence while the run continues.
+        if (data.comps && report) {
+          setReport((prev) => prev ? {
+            ...prev,
+            analysis: {
+              ...prev.analysis,
+              comps: {
+                count: data.compCount as number,
+                enabledCount: 0,
+                disabledCount: data.compCount as number,
+                items: (data.comps as Record<string, unknown>[]).map((c) => ({
+                  ...c,
+                  class: 'UNIDENTIFIED' as const,
+                  probabilities: null,
+                  isEnabled: false,
+                })),
+              },
+            },
+          } : prev)
+        }
         break
       case 'evaluation_complete':
         if (data.updatedResult && report) {

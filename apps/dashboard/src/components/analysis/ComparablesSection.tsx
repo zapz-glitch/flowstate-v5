@@ -69,12 +69,12 @@ export interface CompSelectionStats {
 /** 'default' = what the rules selected · 'price' = a tier, highest sale first */
 type SortOption = 'default' | 'price'
 
-type Tier = 'all' | 'arv' | 'market' | 'floor'
+type Tier = 'all' | 'above' | 'at' | 'below'
 /** Thin line between pills · the same mark the valuation box uses */
 const DIVIDER = 'w-px h-3 bg-border mx-1 flex-shrink-0'
 
 /** Tier words · shared by the pills and the empty state */
-const TIER_LABEL: Record<Tier, string> = { all: 'All', arv: 'ARV', market: 'Median', floor: 'Investor' }
+const TIER_LABEL: Record<Tier, string> = { all: 'All', above: 'Above market', at: 'At market', below: 'Below market' }
 
 export function ComparablesSection({
   comps,
@@ -96,6 +96,8 @@ export function ComparablesSection({
 }: ComparablesSectionProps) {
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [tierFilter, setTierFilter] = useState<Tier>('all')
+  const [minSale, setMinSale] = useState('')
+  const [maxSale, setMaxSale] = useState('')
   const [reportOpen, setReportOpen] = useState(false)
   const [reportNotes, setReportNotes] = useState('')
   const [reportSubmitting, setReportSubmitting] = useState<FeedbackKind | null>(null)
@@ -178,15 +180,25 @@ export function ComparablesSection({
   const hasInteractiveSelection = !!selectedCompKeys
 
   // Sorted items keep their original index for stable keys & map marker numbering.
-  // Evidence-tier filter — ARV (after_renovation) / Median (transitional)
-  // / Investor (as_is). Drives the card list, not the map colors.
-  const tierOf = (c: CompItem) =>
-    c.classification?.type === 'after_renovation' ? 'arv'
-      : c.classification?.type === 'as_is' ? 'floor'
-      : 'market'
+  // Market-position tiers — the code-assigned price band vs the pocket
+  // median. Unverified comps show under All only; drives the card list,
+  // not the map colors.
+  const tierOf = (c: CompItem): Tier | null =>
+    c.badges?.marketPosition === 'above_market' ? 'above'
+      : c.badges?.marketPosition === 'below_market' ? 'below'
+      : c.badges?.marketPosition === 'at_market' ? 'at'
+      : null
+  const bandMin = minSale.trim() ? Number(minSale) : null
+  const bandMax = maxSale.trim() ? Number(maxSale) : null
   const filteredCompItems = useMemo(
-    () => tierFilter === 'all' ? compItems : compItems.filter((c) => tierOf(c) === tierFilter),
-    [compItems, tierFilter]
+    () => compItems.filter((c) => {
+      if (tierFilter !== 'all' && tierOf(c) !== tierFilter) return false
+      const p = c.salePrice
+      if (bandMin != null && (p == null || p < bandMin)) return false
+      if (bandMax != null && (p == null || p > bandMax)) return false
+      return true
+    }),
+    [compItems, tierFilter, bandMin, bandMax]
   )
 
   const sortedItems = useMemo(() => {
@@ -229,9 +241,11 @@ export function ComparablesSection({
       })
     }
 
-    // A tier view: tract matches first, then highest sale · no selected-first pinning.
+    // A tier view: neighborhood matches always lead, then tract/block
+    // scope, then highest sale · no selected-first pinning.
     return [...indexed].sort((a, b) =>
-      (geoRank(a.comp) - geoRank(b.comp))
+      (subdivMatch(b.comp) - subdivMatch(a.comp))
+      || (geoRank(a.comp) - geoRank(b.comp))
       || ((b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0))
       || (a.originalIndex - b.originalIndex))
   }, [filteredCompItems, compItems, sortBy, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
@@ -313,19 +327,37 @@ export function ComparablesSection({
         className="sticky z-[9] bg-background pb-2 mb-2 space-y-2 border-b border-border/60"
         style={{ top: stickyTop }}
       >
-        {/* Evidence tiers · ARV evidence / median / investor floor */}
+        {/* Price-position tiers · code-assigned band vs the pocket median */}
         <div ref={tierRowRef} className="flex items-center gap-1 no-print flex-wrap scroll-mt-24">
           {/* A thin line between every tier */}
-          {(['all', 'arv', 'market'] as const).map((t, i) => (
+          {(['all', 'above', 'at', 'below'] as const).map((t, i) => (
             <span key={t} className="inline-flex items-center gap-1">
               {i > 0 && <span className={DIVIDER} aria-hidden />}
               <TierPill tier={t} active={tierFilter === t} onSelect={selectTier} />
             </span>
           ))}
-          {/* Investor and Report travel together · they never wrap apart */}
+          {/* Sale-price band · narrows whichever tier is showing */}
           <span className="inline-flex items-center gap-1">
             <span className={DIVIDER} aria-hidden />
-            <TierPill tier="floor" active={tierFilter === 'floor'} onSelect={selectTier} />
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="Min $"
+              value={minSale}
+              onChange={(e) => setMinSale(e.target.value)}
+              className="w-16 text-[11px] px-1.5 py-0.5 rounded border border-border bg-background text-foreground"
+            />
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="Max $"
+              value={maxSale}
+              onChange={(e) => setMaxSale(e.target.value)}
+              className="w-16 text-[11px] px-1.5 py-0.5 rounded border border-border bg-background text-foreground"
+            />
+          </span>
+          {/* Report travels with the filters · they never wrap apart */}
+          <span className="inline-flex items-center gap-1">
             {jobId && (
               <>
                 <span className={DIVIDER} aria-hidden />
@@ -522,9 +554,9 @@ export function ComparablesSection({
 function TierPill({ tier, active, onSelect }: { tier: Tier; active: boolean; onSelect: (tier: Tier) => void }) {
   const activeClass: Record<Tier, string> = {
     all: 'bg-secondary text-foreground font-medium',
-    arv: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium',
-    market: 'bg-orange-500/15 text-orange-500 font-medium',
-    floor: 'bg-red-500/15 text-red-400 font-medium',
+    above: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium',
+    at: 'bg-orange-500/15 text-orange-500 font-medium',
+    below: 'bg-red-500/15 text-red-400 font-medium',
   }
   return (
     <button
