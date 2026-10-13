@@ -29,8 +29,11 @@ const fmtAge = (iso: string) => {
   return `${Math.round(mins / 1440)}d`
 }
 
-const stageLabel = (key: string) =>
+export const stageLabel = (key: string) =>
   STAGES.find((s) => s.key === key)?.label ?? key.replace(/^(custom_)?/, '').replace(/_/g, ' ')
+
+export const stageTint = (key: string) =>
+  STAGES.find((s) => s.key === key)?.tint ?? 'text-foreground-tertiary'
 
 /** Close CRM deep link — the contact record behind the address. */
 const closeLeadUrl = (leadId: string | null | undefined) =>
@@ -40,7 +43,7 @@ const closeLeadUrl = (leadId: string | null | undefined) =>
  *  prefilled with the address (kicks off the eval). Every address
  *  is a link. */
 const reportHref = (i: BoardItem) =>
-  i.reportJobId ? `/dashboard/give-offer/${i.reportJobId}` : `/dashboard/analyze?address=${encodeURIComponent(i.address)}`
+  i.reportJobId ? `/dashboard/give-offer/${i.reportJobId}?board=${i.status}` : `/dashboard/analyze?address=${encodeURIComponent(i.address)}`
 
 /** Legit link feel — color shift on hover (the Property Search
  *  transition), no underline. */
