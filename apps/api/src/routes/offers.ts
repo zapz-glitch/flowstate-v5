@@ -453,16 +453,18 @@ async function resolveBoardReports(
     }
   }
   for (let i = 0; i < addresses.length; i += 90) {
-    const chunk = addresses.slice(i, i + 90)
+    const chunk = addresses.slice(i, i + 90).map((a) => a.toLowerCase())
     const { results } = await env.DB.prepare(
       `SELECT property_address, job_id, created_at
          FROM saved_reports
-        WHERE property_address IN (${chunk.map(() => '?').join(',')})
+        WHERE LOWER(property_address) IN (${chunk.map(() => '?').join(',')})
         ORDER BY created_at DESC`,
     ).bind(...chunk).all<{ property_address: string; job_id: string; created_at: string }>()
       .catch(() => ({ results: [] as Array<{ property_address: string; job_id: string; created_at: string }> }))
     for (const r of results) {
-      if (r.property_address && !out.has(`addr:${r.property_address}`)) out.set(`addr:${r.property_address}`, r.job_id)
+      if (r.property_address && !out.has(`addr:${r.property_address.toLowerCase()}`)) {
+        out.set(`addr:${r.property_address.toLowerCase()}`, r.job_id)
+      }
     }
   }
   return out
@@ -486,7 +488,7 @@ offers.get('/board', async (c) => {
     items: items.map((i, n) => ({
       ...i,
       dismissed: results[n]!.dismissed === 1,
-      reportJobId: reports.get(`lead:${i.leadId}`) ?? reports.get(`addr:${i.address}`) ?? null,
+      reportJobId: reports.get(`lead:${i.leadId}`) ?? reports.get(`addr:${i.address.toLowerCase()}`) ?? null,
     })),
   })
 })
