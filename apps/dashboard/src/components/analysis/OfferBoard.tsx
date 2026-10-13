@@ -43,11 +43,17 @@ export function OfferBoard() {
   const [view, setView] = useState<'board' | 'list'>('board')
   const [listStage, setListStage] = useState<string>('all')
   const [listQuery, setListQuery] = useState('')
-  const [listDays, setListDays] = useState<string>('all')
+  const [listDays, setListDays] = useState<string>('ytd')
 
   const load = useCallback(async (all: boolean) => {
     const r = await getOfferBoard(all).catch(() => null)
-    if (r?.ok) setItems(r.items)
+    // Only swap state when the data changed — an identical poll result
+    // re-rendering the board is the offers-page flicker.
+    if (r?.ok) {
+      const sig = (arr: BoardItem[]) =>
+        arr.map((i) => `${i.id}:${i.status}:${i.updatedAt}:${i.counterAmount}:${i.note ?? ''}:${i.dismissed ? 1 : 0}`).join('|')
+      setItems((prev) => sig(prev) === sig(r.items) ? prev : r.items)
+    }
     setLoaded(true)
   }, [])
 
@@ -138,7 +144,7 @@ export function OfferBoard() {
               value={listStage}
               onChange={(e) => setListStage(e.target.value)}
               aria-label="Stage"
-              className="bg-secondary/50 border border-border/50 rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50"
+              className="bg-secondary border border-border rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50 [color-scheme:dark]"
             >
               <option value="all">All stages</option>
               {STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
@@ -147,14 +153,10 @@ export function OfferBoard() {
               value={listDays}
               onChange={(e) => setListDays(e.target.value)}
               aria-label="Period"
-              className="bg-secondary/50 border border-border/50 rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50"
+              className="bg-secondary border border-border rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50 [color-scheme:dark]"
             >
-              <option value="all">All time</option>
-              <option value="today">Today</option>
-              <option value="7">Last 7 days</option>
-              <option value="14">Last 14 days</option>
-              <option value="30">Last 30 days</option>
               <option value="ytd">Year to date</option>
+              <option value="all">All time</option>
             </select>
             <span className="text-[10px] text-foreground-tertiary tabular-nums">{listRows.length} shown</span>
             <input

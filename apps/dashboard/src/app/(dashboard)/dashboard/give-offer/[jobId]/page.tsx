@@ -232,7 +232,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
               const scoped = cat === 'hot' ? reordered.filter((i) => hotIds.has(i.leadId)) : reordered
               goToId(scoped[0] ? jobIdForItem(scoped[0]) : null)
             }}
-            className="bg-transparent text-foreground-secondary text-[11px] outline-none cursor-pointer"
+            className="bg-transparent text-foreground-secondary text-[11px] outline-none cursor-pointer [color-scheme:dark]"
           >
             {Object.entries(WAIT_FILTER_LABELS).map(([v, label]) => (
               <option key={v} value={v}>{label}</option>
