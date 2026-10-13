@@ -1005,3 +1005,38 @@ export const harnessQueue = sqliteTable(
     index('idx_harness_queue_lease').on(table.leaseExpiresAt),
   ]
 )
+
+
+export const offerBoard = sqliteTable(
+  'offer_board',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Close opportunity the campaign item came from — the writer's
+     *  preferred upsert key. */
+    opportunityId: text('opportunity_id'),
+    leadId: text('lead_id'),
+    address: text('address').notNull(),
+    displayName: text('display_name'),
+    /** Campaign stage — terms_prep | sent | approved | countered |
+     *  awaiting_contract | under_contract | dead. Free-text tolerated —
+     *  a stage we don't know still renders in its own board column. */
+    status: text('status').notNull().default('terms_prep'),
+    offerAmount: real('offer_amount'),
+    counterAmount: real('counter_amount'),
+    /** Free-form terms blob the writer posts (json string). */
+    termsJson: text('terms_json'),
+    note: text('note'),
+    /** Cleared items stay in history, off the board. */
+    dismissed: integer('dismissed', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_offer_board_user').on(table.userId, table.dismissed, table.updatedAt),
+    index('idx_offer_board_opp').on(table.opportunityId),
+    index('idx_offer_board_lead').on(table.leadId),
+  ]
+)
