@@ -295,16 +295,18 @@ export function useAnalysisEvaluation({
     }
 
     // A manual comp selection recalcs client-side on every engine — the
-    // shared package's evaluateB is the same math the server ran.
-    if (compOverride?.isManual && data?.comps?.items && data?.subject) {
-      const pins = compOverride.tierPins
+    // shared package's evaluateB is the same math the server ran. Changed
+    // settings (rehab level, deal params, major items) take the same path
+    // on server-seated reports — without this the tier pick did nothing.
+    if (data?.comps?.items && data?.subject && (compOverride?.isManual || (pythonAuthoritative && settingsChanged))) {
+      const pins = compOverride?.tierPins
       const items = pins && Object.keys(pins).length > 0
         ? data.comps.items.map((c) => (c.id && pins[c.id] ? { ...c, userTier: pins[c.id] } : c))
         : data.comps.items
       return recalculateValuationFromComps(
         items,
         data.subject,
-        compOverride.selectedCompKeys,
+        compOverride?.selectedCompKeys ?? checkedKeys(data.comps.items),
         base,
         settingsHook.settings
       )

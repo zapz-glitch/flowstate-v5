@@ -56,7 +56,7 @@ test('Python display preserves server values until the user picks a comp, then r
     '@/hooks/use-report-settings': {
       useReportSettings: () => ({
         settings: {},
-        settingsChanged: true,
+        settingsChanged: false,
         recalcData: { valuation: { arv: 1 }, compEvaluations: [] },
       }),
     },
