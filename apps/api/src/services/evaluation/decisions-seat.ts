@@ -472,8 +472,36 @@ export async function runDecisionsSeat(
           pocketValueGate: true,
           excludeIds: failedIds,
         })
+        // The failed sales also come off the saved pool — Set-B prices
+        // from enabled comparables, so a seat-rejected sale staying
+        // enabled could still drive ARV downstream of a pick-less retry.
+        for (const c of ctx.appraisalResult?.comparables ?? []) {
+          if (!failedIds.has(String(c.id))) continue
+          c.isEnabled = false
+          const reasons = [...((c as { disableReasons?: string[] }).disableReasons ?? []), 'seat-rejected q_final']
+          ;(c as { disableReasons?: string[] }).disableReasons = reasons
+          if (c.evaluation) c.evaluation.disableReasons = reasons
+        }
+        // Retry drivers get the same seat treatment as a normal pick:
+        // enabled + seatPick on the saved pool so the card and the
+        // enabled-comp Set-B path see the selection.
+        for (const id of retry.selection?.selectedCompIds ?? []) {
+          const appraised = ctx.appraisalResult?.comparables?.find((c) => String(c.id) === String(id))
+          if (appraised) {
+            appraised.isEnabled = true
+            ;(appraised as { seatPick?: boolean }).seatPick = true
+            if (appraised.evaluation) appraised.evaluation.disableReasons = []
+          }
+        }
         retry.debugNotes = [...base.debugNotes, ...retry.debugNotes]
-        if (retry.selection) retry.selection.flags = [...(retry.selection.flags ?? []), 'seat_all_failed']
+        if (retry.selection) {
+          const retryFlags = [...(retry.selection.flags ?? []), 'seat_all_failed']
+          // A retry that lands on below-market evidence prices a floor,
+          // not ARV — flag it the same way the forced pick path does.
+          const belowIds = new Set(rankedByPref.filter((x) => belowMarket(x)).map((x) => String(x.r.id)))
+          if (retry.selection.selectedCompIds?.some((id) => belowIds.has(String(id)))) retryFlags.push('below_market_pick')
+          retry.selection.flags = retryFlags
+        }
         return retry
       }
       // Every candidate reads below-market — the seat still must answer.

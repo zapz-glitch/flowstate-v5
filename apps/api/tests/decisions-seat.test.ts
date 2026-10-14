@@ -162,7 +162,8 @@ describe('decisions-seat pick rules', () => {
       },
       'top1',
     ))
-    const res = await runDecisionsSeat(env, buildCtx(comps), buildEvidence(comps))
+    const ctx = buildCtx(comps)
+    const res = await runDecisionsSeat(env, ctx, buildEvidence(comps))
     // The seat pick didn't land — and the seat-failed comps are excluded
     // from the deterministic re-run too (seat_all_failed flag, no
     // decisions_seat flag).
@@ -170,6 +171,15 @@ describe('decisions-seat pick rules', () => {
     assert.ok(res.selection?.flags?.includes('seat_all_failed'))
     assert.ok(res.debugNotes.some((n) => n.includes('failed q_final')))
     assert.ok(!ids(res).includes('top1') && !ids(res).includes('top2') && !ids(res).includes('mid1') && !ids(res).includes('mid2'))
+    // Failed sales are disabled on the saved pool — Set-B prices from
+    // enabled comps, so they can never drive ARV downstream.
+    for (const c of ctx.appraisalResult.comparables) {
+      if (['top1', 'top2', 'mid1', 'mid2'].includes(String(c.id))) assert.equal(c.isEnabled, false)
+    }
+    // The retry landed on the one remaining below-market sale — a floor
+    // pick, flagged as such (never unflagged ARV evidence).
+    assert.ok(ids(res).includes('low1'))
+    assert.ok(res.selection?.flags?.includes('below_market_pick'))
   })
 
   it('in-pocket at-market comps pick before foreign top-band comps', async () => {
