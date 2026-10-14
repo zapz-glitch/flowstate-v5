@@ -209,7 +209,7 @@ export interface BResult {
 // ── Helpers ───────────────────────────────────────────────────────────────
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 
-export const HARNESS_VERSION = 'og-2026.10.05.6'
+export const HARNESS_VERSION = 'og-2026.10.14.1'
 
 export function bSubjectAvm(s: BSubject): number | null {
   return s.avmValue ?? s.avm?.value ?? null

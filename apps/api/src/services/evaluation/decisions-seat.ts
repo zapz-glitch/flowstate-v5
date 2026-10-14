@@ -447,21 +447,34 @@ export async function runDecisionsSeat(
       pricePoint(x.r) === 'below_market' || (x.market != null && x.market < 0.5)
     const rankedByPref = [...scored].sort((a, b) => (b.pref - a.pref) || (b.p - a.p))
     const qualified = rankedByPref.filter((x) => !belowMarket(x) && x.p >= 0.5)
-    // Top-of-pocket evidence outranks at-market evidence: when any
-    // qualified comp sits in the ARV band it picks first; median-band
-    // comps only fill the pool out to 3.
-    const aboveBand = qualified.filter((x) => pricePoint(x.r) === 'above_market')
-    const atBand = qualified.filter((x) => pricePoint(x.r) === 'at_market')
+    // Pick order = the deterministic seat's own lexicographic order,
+    // band-aware inside each tier: geo first (a foreign top-band sale
+    // can never displace a local comp), then price band (top-of-pocket
+    // evidence outranks at-market evidence), then model preference.
+    const bandRank = (x: { r: RankedComp }) => pricePoint(x.r) === 'above_market' ? 0 : 1
+    const byGeoBandPref = [...qualified].sort((a, b) =>
+      (GEO_RANK[a.r.profile.geoTier] ?? 9) - (GEO_RANK[b.r.profile.geoTier] ?? 9)
+      || bandRank(a) - bandRank(b)
+      || (b.pref - a.pref) || (b.p - a.p))
     let forcedBelowMarket = false
-    let picks = [...aboveBand, ...atBand].slice(0, 3)
+    let picks = byGeoBandPref.slice(0, 3)
     if (!picks.length && scored.length) {
       const nonBelow = rankedByPref.filter((x) => !belowMarket(x))
       if (nonBelow.length) {
         // Every non-below-market candidate failed the seat's final call —
-        // a failed comp can never set the price; the deterministic seat
-        // keeps its own honestly-labeled answer.
-        base.debugNotes.push(`decisions-seat: all ${nonBelow.length} non-below-market candidates failed q_final — deterministic seat`)
-        return base
+        // a failed comp can never set the price, and it can't ride the
+        // deterministic fallback either: re-run the deterministic seat
+        // with the seat-rejected comps excluded.
+        const failedIds = new Set(nonBelow.map((x) => String(x.r.id)))
+        base.debugNotes.push(`decisions-seat: all ${nonBelow.length} non-below-market candidates failed q_final — re-running deterministic seat without them`)
+        const retry = runDeterministicSelector(ctx, evidence, {
+          priceBand: { upper: 2.0, lower: 0.5 },
+          pocketValueGate: true,
+          excludeIds: failedIds,
+        })
+        retry.debugNotes = [...base.debugNotes, ...retry.debugNotes]
+        if (retry.selection) retry.selection.flags = [...(retry.selection.flags ?? []), 'seat_all_failed']
+        return retry
       }
       // Every candidate reads below-market — the seat still must answer.
       // Least-bad is the highest-preference distressed comp; it prices the

@@ -198,6 +198,9 @@ export function runDeterministicSelector(
     /** R9: pocket = block group AND neighborhood; foreign groups must
      *  prove a similar median value before their comps can price. */
     pocketValueGate?: boolean
+    /** Comps a model seat already rejected — they can never re-enter
+     *  pricing through a deterministic fallback re-run. */
+    excludeIds?: ReadonlySet<string>
     onRanked?: (ranked: RankedComp[], pocket: PocketValues | null) => void
   },
 ): AppraiserResult {
@@ -230,6 +233,16 @@ export function runDeterministicSelector(
 
     const profile = compMatchProfile(subject, comp)
     const group = priceGroupOf(comp)
+
+    // A comp a model seat already failed on its final call can never
+    // re-enter pricing — seat rejection is a hard exclusion.
+    if (opts?.excludeIds?.has(String(comp.id))) {
+      audit.verdict = 'excluded'
+      audit.rules.push('R-seat')
+      audit.reasons.push('seat-rejected — the model seat failed this comp on the final call')
+      ranked.push({ id: comp.id!, comp, profile, group, ppsf, audit })
+      continue
+    }
 
     // R1 geo — off-pocket excludes; tract is the pocket floor, ranked last.
     if (profile.geoTier === 'OFF_POCKET') {

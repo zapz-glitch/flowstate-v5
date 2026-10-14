@@ -45,6 +45,24 @@ const mixedPool = () => [
   comp({ id: 'low1', salePrice: 150000 }),
 ]
 
+// 3 local median-band comps (ppsf 180/210/230) + 3 FOREIGN top-band
+// comps (ppsf 270, same tract, different pocket) — the foreign group is
+// inside the R9 band (270/210 ≈ 1.29x ≤ 1.33x) so it stays eligible and
+// lands the natural-break top group. Local at-market evidence must fill
+// picks before foreign top-band sales (d1 pocket-first ordering).
+const foreign = (id: string, salePrice: number) => comp({
+  id, salePrice, sameBlockGroup: false, censusBlockGroup: 'BG9',
+  subdivision: 'River Oaks', neighborhoodName: 'River Oaks',
+})
+const foreignTopPool = () => [
+  comp({ id: 'mid1', salePrice: 270000 }),
+  comp({ id: 'mid2', salePrice: 315000 }),
+  comp({ id: 'mid3', salePrice: 345000 }),
+  foreign('ft1', 405000),
+  foreign('ft2', 405000),
+  foreign('ft3', 405000),
+]
+
 const asIsPool = () => [
   comp({ id: 'a1', salePrice: 150000, classification: { type: 'as_is' } }),
   comp({ id: 'a2', salePrice: 155000, classification: { type: 'as_is' } }),
@@ -145,10 +163,33 @@ describe('decisions-seat pick rules', () => {
       'top1',
     ))
     const res = await runDecisionsSeat(env, buildCtx(comps), buildEvidence(comps))
-    // The seat pick didn't land — the deterministic engine's own pick
-    // (its own rules, honestly labeled) is what survives.
+    // The seat pick didn't land — and the seat-failed comps are excluded
+    // from the deterministic re-run too (seat_all_failed flag, no
+    // decisions_seat flag).
     assert.ok(!res.selection?.flags?.includes('decisions_seat'))
+    assert.ok(res.selection?.flags?.includes('seat_all_failed'))
     assert.ok(res.debugNotes.some((n) => n.includes('failed q_final')))
+    assert.ok(!ids(res).includes('top1') && !ids(res).includes('top2') && !ids(res).includes('mid1') && !ids(res).includes('mid2'))
+  })
+
+  it('in-pocket at-market comps pick before foreign top-band comps', async () => {
+    const comps = foreignTopPool()
+    stubSeat(seatAnswers(
+      comps.map((c) => String(c.id)),
+      {
+        mid1: { final: 0.7, market: 0.8, pref: 0.1 },
+        mid2: { final: 0.75, market: 0.8, pref: 0.1 },
+        mid3: { final: 0.6, market: 0.8, pref: 0.1 },
+        ft1: { final: 0.9, market: 0.9, pref: 0.3 },
+        ft2: { final: 0.85, market: 0.9, pref: 0.25 },
+        ft3: { final: 0.8, market: 0.9, pref: 0.15 },
+      },
+      'ft1',
+    ))
+    const res = await runDecisionsSeat(env, buildCtx(comps), buildEvidence(comps))
+    // Local at-market evidence fills the pool before foreign top-band
+    // sales — a foreign pick can never displace an in-pocket comp.
+    assert.deepEqual([...ids(res)].sort(), ['mid1', 'mid2', 'mid3'])
   })
 
   it('the best_comp head-to-head never rescues a failing final call', async () => {
