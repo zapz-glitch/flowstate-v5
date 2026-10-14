@@ -17,6 +17,14 @@ export interface DecisionsEnv {
   OPENAI_API_KEY?: string
   /** Decisions model — default gpt-6-luna (the only supported model today) */
   DECISIONS_MODEL?: string
+  /** Evidence lane backend: 'decisions' (default) or 'jev' (TypeSafe JEV).
+   *  'jev' routes every decisionsRun call in the run to api.typesafe.ai. */
+  EVIDENCE_BACKEND?: string
+  JEV_API_KEY?: string
+  /** JEV endpoint — default TypeSafe systemone */
+  TYPESAFE_URL?: string
+  /** JEV model — default jev-latest */
+  JEV_MODEL?: string
 }
 
 interface ClefStyleQuestion {
@@ -28,8 +36,10 @@ interface ClefStyleQuestion {
 
 const DECISIONS_URL = 'https://api.openai.com/v1/decisions'
 
+/** True when the run's evidence backend can answer — Decisions by default,
+ *  JEV when the run is pinned to the JEV lane. */
 export function isDecisionsAvailable(env: DecisionsEnv): boolean {
-  return !!env.OPENAI_API_KEY
+  return env.EVIDENCE_BACKEND === 'jev' ? !!env.JEV_API_KEY : !!env.OPENAI_API_KEY
 }
 
 export async function decisionsRun(
@@ -44,6 +54,7 @@ export async function decisionsRun(
     sections?: Array<{ text?: string; images?: Array<{ content_type?: string; base64: string }> }>
   },
 ): Promise<{ answers?: Record<string, unknown> }> {
+  if (env.EVIDENCE_BACKEND === 'jev') return jevRun(env, params)
   if (!env.OPENAI_API_KEY) throw new Error('DECISIONS: no OPENAI_API_KEY')
 
   const content: Array<Record<string, unknown>> = [
@@ -151,6 +162,105 @@ export async function decisionsRun(
       answers[a.name] = { choice: a.choice, probabilities: probMap, confidence: a.confidence }
     } else if (a.type === 'score') {
       answers[a.name] = { score: a.score ?? 0, probabilities: probMap, confidence: a.confidence }
+    }
+  }
+  return { answers }
+}
+
+/**
+ * TypeSafe JEV backend — same question contract ({state, questions} →
+ * {answers}) as the Decisions lane, different vendor. Images ride along as
+ * `assets` reference strings in the state text (TypeSafe-Danger-Zone-Images
+ * opt-in header on image-bearing calls).
+ *
+ * JEV answers come back keyed by question name:
+ *   noul   → { noul: 0-1 }            → { probability }
+ *   choice → { choice: "<value>" }    → { choice, probabilities?, confidence }
+ *   score  → { score: number }        → { score, probabilities?, confidence }
+ * Any extra fields (a `probabilities` map, confidence) pass through so
+ * downstream readers degrade the same way they do on a sparse Decisions
+ * answer.
+ */
+async function jevRun(
+  env: DecisionsEnv,
+  params: Parameters<typeof decisionsRun>[1],
+): Promise<{ answers?: Record<string, unknown> }> {
+  if (!env.JEV_API_KEY) throw new Error('JEV: no JEV_API_KEY')
+  const url = env.TYPESAFE_URL || 'https://api.typesafe.ai/v1/systemone'
+
+  // JEV images: each is an `assets` entry keyed by a reference string placed
+  // anywhere in the request text (state/instructions/criteria). Rebuild the
+  // state so sections keep their text-then-photos order: base state, then
+  // each section's text followed by its image refs, then flat images.
+  const assets: Record<string, { type: 'image'; format: string; data_base64: string }> = {}
+  let n = 0
+  const img = (i: { content_type?: string; base64: string }): string => {
+    const ref = `jev-img-${n++}-${Math.random().toString(36).slice(2, 10)}`
+    const format = (i.content_type || 'image/jpeg').split('/')[1]?.toLowerCase() || 'jpg'
+    assets[ref] = { type: 'image', format, data_base64: i.base64 }
+    return ref
+  }
+  let state = typeof params.state === 'string' ? params.state : JSON.stringify(params.state)
+  for (const s of params.sections ?? []) {
+    state += `\n\n${s.text ?? ''}\n${(s.images ?? []).map(img).join('\n')}`
+  }
+  const flat = (params.images ?? []).map(img).join('\n')
+  if (flat) state += `\n\n${flat}`
+
+  const hasImages = Object.keys(assets).length > 0
+  const call = async (): Promise<Response> =>
+    fetch(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(60_000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.JEV_API_KEY}`,
+        // Opt-in required for any request containing images or Box questions
+        ...(hasImages ? { 'TypeSafe-Danger-Zone-Images': 'true' } : {}),
+      },
+      body: JSON.stringify({
+        state,
+        model: env.JEV_MODEL || 'jev-latest',
+        questions: params.questions,
+        ...(hasImages ? { assets } : {}),
+      }),
+    })
+  let resp: Response
+  try {
+    resp = await call()
+  } catch (first) {
+    console.warn('JEV: call failed, retrying once —', first)
+    resp = await call()
+  }
+  if (!resp.ok && resp.status >= 500) {
+    const retry = await call().catch(() => null)
+    if (retry) resp = retry
+  }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '')
+    throw new Error(`JEV: HTTP ${resp.status} — ${body.slice(0, 300)}`)
+  }
+
+  const data = (await resp.json()) as {
+    answers?: Record<string, {
+      noul?: number
+      probability?: number
+      choice?: string
+      score?: number
+      confidence?: number
+      probabilities?: Record<string, number>
+    }>
+  }
+  const answers: Record<string, unknown> = {}
+  for (const [name, a] of Object.entries(data.answers ?? {})) {
+    if (!a) continue
+    const q = params.questions[name]
+    if (q?.type === 'choice') {
+      answers[name] = { choice: a.choice, probabilities: a.probabilities ?? {}, confidence: a.confidence }
+    } else if (q?.type === 'score') {
+      answers[name] = { score: a.score ?? a.noul ?? 0, probabilities: a.probabilities ?? {}, confidence: a.confidence }
+    } else {
+      answers[name] = { probability: a.noul ?? a.probability ?? 0 }
     }
   }
   return { answers }
