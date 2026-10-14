@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { X, FileText, CheckCircle2, ArrowLeftRight, PenLine, FileCheck2, CircleDollarSign, CircleSlash2, ExternalLink } from 'lucide-react'
 import { getOfferBoard, removeOfferBoardItem, type BoardItem } from '@/app/(dashboard)/dashboard/give-offer/actions'
@@ -89,8 +89,16 @@ export function OfferBoard() {
     setLoaded(true)
   }, [])
 
+  const firstLoad = useRef(true)
   useEffect(() => {
-    load(showAll)
+    if (firstLoad.current && cachedBoard() != null && !showAll) {
+      // Warm cache — zero server hit on revisit; the poll picks up
+      // new session writes on its next tick.
+      firstLoad.current = false
+    } else {
+      firstLoad.current = false
+      load(showAll)
+    }
     const t = setInterval(() => load(showAll), POLL_MS)
     return () => clearInterval(t)
   }, [load, showAll])
