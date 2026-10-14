@@ -22,7 +22,7 @@ import type { Env } from '../../types'
 import { createPhotoService, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { classifyCompCondition, isClefAvailable, CONDITION_SCALE, CONDITION_QUESTIONS, buildConditionResult, type ClefImage, type CompConditionResult } from '../clef'
 import { createReasoningProvider, createSpecialistProvider } from '../llm'
-import { decisionsRun } from '../decisions'
+import { decisionsRun, isDecisionsAvailable } from '../decisions'
 
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // Clef per-image cap
@@ -190,8 +190,8 @@ async function embedPhotos(photoUrls: string[]): Promise<ClefImage[]> {
  *  the same report replays the SAME classification instead of re-rolling
  *  Clef + the listing scrape. A new sale produces a new key → re-stamp. */
 const EVIDENCE_TTL = 90 * 86400
-const evidenceKey = (c: CompEvidenceInput) =>
-  `clef-evidence:${c.propertyId}:${c.saleDate ?? 'nosale'}:${c.salePrice ?? 0}`
+const evidenceKey = (env: Env, c: CompEvidenceInput) =>
+  `clef-evidence:${c.propertyId}:${c.saleDate ?? 'nosale'}:${c.salePrice ?? 0}${env.EVIDENCE_BACKEND === 'jev' ? ':jev' : ''}`
 
 /**
  * Luna fallback — the second reader in the comp-classification chain.
@@ -326,7 +326,7 @@ export async function gatherCompConditionEvidence(
   subject?: { squareFeet?: number; address?: string },
   opts?: { deferClassify?: boolean },
 ): Promise<CompConditionEvidence> {
-  const key = evidenceKey(comp)
+  const key = evidenceKey(env, comp)
   const cached = await env.API_CACHE.get(key, 'json').catch(() => null) as CompConditionEvidence | null
   if (cached?.condition || cached?.listing) {
     // Backfill marketedSqft on evidence pinned before the scan existed —
@@ -517,7 +517,7 @@ async function finishListing(
   // uncached so a retry can still find them.
   if (evidence.condition || evidence.listing) {
     const { _images, ...persistable } = evidence
-    void env.API_CACHE.put(key ?? evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+    void env.API_CACHE.put(key ?? evidenceKey(env, comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
   }
 
   return evidence
@@ -630,7 +630,7 @@ export async function classifyCompPoolHaiku(
       }
       if (ev.condition || ev.listing) {
         const { _images, ...persistable } = ev
-        void env.API_CACHE.put(evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+        void env.API_CACHE.put(evidenceKey(env, comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
       }
       delete ev._images
     }
@@ -740,7 +740,7 @@ export async function classifyCompBatchDecisions(
       }
       if (ev.condition || ev.listing) {
         const { _images, ...persistable } = ev
-        void env.API_CACHE.put(evidenceKey(comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
+        void env.API_CACHE.put(evidenceKey(env, comp), JSON.stringify(persistable), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
       }
       delete ev._images
     }
@@ -769,7 +769,7 @@ export async function startCompEvidenceBatch(
   // per-comp classify inside the gather. `gatherOnly` defers the batch
   // classify to the caller — used by the early prefetch, which fires
   // before census geo-stamps land on the comps.
-  const batchDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  const batchDecisions = env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)
   // gatherOnly also defers the per-comp classify: a caller passing it has a
   // post-geo classifier (haiku pool read or the decisions batch) that needs
   // census geo-stamps + pool context the early prefetch doesn't have yet.

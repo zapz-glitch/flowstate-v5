@@ -715,7 +715,7 @@ export class AnalysisJobDO {
     // ONE Decisions pass per comp — the observables lane (condition +
     // satellite exposure); the digest stages duplicated that spend.
     const digestReaderOn = this.env.CONDITION_READER === 'decisions'
-      ? !!this.env.OPENAI_API_KEY
+      ? isDecisionsAvailable(this.env)
       : isClefAvailable(this.env)
     // typescript lane: provider math only — no listing scrape or digest reads.
     const clefDigestsOn = config.harness !== 'typescript' && this.env.CLEF_COMP_CONDITION_ENABLED === 'true' && digestReaderOn
@@ -771,7 +771,7 @@ export class AnalysisJobDO {
           // this the gather's geo-less per-comp reads get model-cached and
           // classifyCompPoolHaiku skips them. Evaluation classifies after.
           gatherOnly: !!this.env.ANTHROPIC_API_KEY ||
-            (this.env.CONDITION_READER === 'decisions' && !!this.env.OPENAI_API_KEY),
+            (this.env.CONDITION_READER === 'decisions' && isDecisionsAvailable(this.env)),
         })
         // Stage-A digest on sale records — no listing data needed, runs
         // beside the listing fetch it precedes in the evidence batch.

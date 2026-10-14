@@ -187,6 +187,11 @@ async function jevRun(
 ): Promise<{ answers?: Record<string, unknown> }> {
   if (!env.JEV_API_KEY) throw new Error('JEV: no JEV_API_KEY')
   const url = env.TYPESAFE_URL || 'https://api.typesafe.ai/v1/systemone'
+  // The bearer key goes in every request — never forward it to a scheme or
+  // host that isn't the API it belongs to.
+  const u = new URL(url)
+  if (u.protocol !== 'https:' || !(u.hostname === 'typesafe.ai' || u.hostname.endsWith('.typesafe.ai')))
+    throw new Error('JEV: TYPESAFE_URL must be https on typesafe.ai')
 
   // JEV images: each is an `assets` entry keyed by a reference string placed
   // anywhere in the request text (state/instructions/criteria). Rebuild the
@@ -237,8 +242,10 @@ async function jevRun(
     if (retry) resp = retry
   }
   if (!resp.ok) {
-    const body = await resp.text().catch(() => '')
-    throw new Error(`JEV: HTTP ${resp.status} — ${body.slice(0, 300)}`)
+    // Upstream error bodies can carry request internals — log them, don't
+    // put them in the exception the job streams back to the caller.
+    console.warn('JEV: HTTP', resp.status, await resp.text().catch(() => ''))
+    throw new Error(`JEV: HTTP ${resp.status}`)
   }
 
   const data = (await resp.json()) as {

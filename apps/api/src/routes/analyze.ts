@@ -334,12 +334,13 @@ analyze.post('/', async (c) => {
     // (and vice versa) through the shared KV.
     // An A/B arm keys the cache too — arm A's report is never served as arm B's.
     const assistArm = parseAssistArm(body.arm);
-    const evidenceBackend = body.evidenceBackend === 'jev' ? 'jev'
+    const evidenceBackend = body.evidenceBackend === 'decisions' ? 'decisions'
+      : body.evidenceBackend === 'jev' ? 'jev'
       : (c.env.DEFAULT_EVIDENCE_BACKEND === 'jev' ? 'jev' : undefined)
     const resultCacheKey = evalResultKey(
       auth.userId,
       body.address ?? '',
-      evalParamsHash + (seatHarness ? `:${seatHarness}` : '') + (assistArm ? `:arm${assistArm}` : '') + (evidenceBackend ? ':jev' : ''),
+      evalParamsHash + (seatHarness ? `:${seatHarness}` : '') + (assistArm ? `:arm${assistArm}` : '') + (evidenceBackend === 'jev' ? ':jev' : ''),
     );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
