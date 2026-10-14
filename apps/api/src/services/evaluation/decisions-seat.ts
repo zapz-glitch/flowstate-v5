@@ -440,16 +440,29 @@ export async function runDecisionsSeat(
     else base.debugNotes.push(`decisions-seat: model preference → ${modelBest ?? '?'} (pref dist: ${Object.entries(pref).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([id, p]) => `${id}:${p.toFixed(2)}`).join(' ')})`)
     // Selection = Luna's relative preference over the qualified set, not a
     // TS blend: order by best_comp preference, keep comps the final call
-    // passed (q_final >= 0.5) or that the model itself ranked first, and
-    // never let a BELOW_MARKET band pick drive ARV unless nothing else
-    // exists (forced floor, flagged).
+    // passed (q_final >= 0.5 — the modelBest head-to-head never overrides
+    // a failing appraisal call), and never let a BELOW_MARKET band pick
+    // drive ARV unless nothing else exists (forced floor, flagged).
     const belowMarket = (x: { r: RankedComp; market: number | null }) =>
       pricePoint(x.r) === 'below_market' || (x.market != null && x.market < 0.5)
     const rankedByPref = [...scored].sort((a, b) => (b.pref - a.pref) || (b.p - a.p))
-    const qualified = rankedByPref.filter((x) => !belowMarket(x) && (x.p >= 0.5 || x.r.id === modelBest))
+    const qualified = rankedByPref.filter((x) => !belowMarket(x) && x.p >= 0.5)
+    // Top-of-pocket evidence outranks at-market evidence: when any
+    // qualified comp sits in the ARV band it picks first; median-band
+    // comps only fill the pool out to 3.
+    const aboveBand = qualified.filter((x) => pricePoint(x.r) === 'above_market')
+    const atBand = qualified.filter((x) => pricePoint(x.r) === 'at_market')
     let forcedBelowMarket = false
-    let picks = qualified.length ? qualified.slice(0, 3) : rankedByPref.filter((x) => !belowMarket(x)).slice(0, 1)
+    let picks = [...aboveBand, ...atBand].slice(0, 3)
     if (!picks.length && scored.length) {
+      const nonBelow = rankedByPref.filter((x) => !belowMarket(x))
+      if (nonBelow.length) {
+        // Every non-below-market candidate failed the seat's final call —
+        // a failed comp can never set the price; the deterministic seat
+        // keeps its own honestly-labeled answer.
+        base.debugNotes.push(`decisions-seat: all ${nonBelow.length} non-below-market candidates failed q_final — deterministic seat`)
+        return base
+      }
       // Every candidate reads below-market — the seat still must answer.
       // Least-bad is the highest-preference distressed comp; it prices the
       // floor, flagged so the card and the gate see what it is.
