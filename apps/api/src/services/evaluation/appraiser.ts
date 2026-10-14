@@ -540,9 +540,18 @@ export async function runOpusAppraiser(
   // then selects the comps, backs up the decision model, and answers its own
   // reasoning requests as a sub-agent. Unset keeps Sonnet 5.5 in the seat.
   // High effort on the first pass, max effort on every retry.
-  const provider = (env as { APPRAISER_SEAT?: string }).APPRAISER_SEAT === 'reasoning'
-    ? createReasoningProvider(env, 'openai/gpt-6-luna', { timeout: APPRAISER_SEAT_TIMEOUT_MS })
-    : createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
+  // Gate-rejection ladder: APPRAISER_ESCALATION_MODEL names the model the
+  // seat hands off to once any pass fails the gate (haiku pass 1 → sonnet
+  // on every retry, until the gate passes). Unset = one seat for the whole
+  // run.
+  const escalationModel = (env as { APPRAISER_ESCALATION_MODEL?: string }).APPRAISER_ESCALATION_MODEL
+  const makeProvider = (model?: string) =>
+    (env as { APPRAISER_SEAT?: string }).APPRAISER_SEAT === 'reasoning'
+      ? createReasoningProvider(
+          model ? { ...env, REASONING_MODEL: model } : env,
+          'openai/gpt-6-luna', { timeout: APPRAISER_SEAT_TIMEOUT_MS })
+      : createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
+  let provider = makeProvider()
   if (!provider) { out.unavailable = true; return out }
   out.model = provider.model
 
@@ -565,6 +574,16 @@ export async function runOpusAppraiser(
   // rejects consume revisions; a passing grade (or a plain-text answer we
   // can coerce) ends the loop.
   for (let round = 0; round <= limits.clarifications + limits.reasoning + limits.revisions + 1; round++) {
+    // A rejected pass moves the seat to the escalation model for every
+    // remaining attempt.
+    if (lastGrade && escalationModel && provider!.model !== escalationModel) {
+      const next = makeProvider(escalationModel)
+      if (next) {
+        provider = next
+        out.model = next.model
+        out.debugNotes.push(`appraiser: gate rejected — escalating seat to ${escalationModel}`)
+      }
+    }
     const state = {
       ...baseState,
       ...(clarificationBlock.length ? { clarificationFindings: clarificationBlock } : {}),

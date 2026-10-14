@@ -10,21 +10,26 @@
  *
  *   A — claude-haiku-5-5 (Anthropic direct)
  *   B — deepseek/deepseek-v4.1-flash (OpenRouter)
+ *   C — haiku seat with a sonnet ladder: pass 1 appraises on
+ *       claude-haiku-5-5; the first gate rejection escalates the seat to
+ *       claude-sonnet-5-5 for every remaining attempt.
  */
 
-export type AssistArm = 'A' | 'B'
+export type AssistArm = 'A' | 'B' | 'C'
 
-export const ASSIST_ARMS: Record<AssistArm, { provider: 'anthropic' | 'openrouter'; model: string }> = {
+export const ASSIST_ARMS: Record<AssistArm, { provider: 'anthropic' | 'openrouter'; model: string; escalationModel?: string }> = {
   A: { provider: 'anthropic', model: 'claude-haiku-5-5' },
   B: { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' },
+  C: { provider: 'anthropic', model: 'claude-haiku-5-5', escalationModel: 'claude-sonnet-5-5' },
 }
 
 export function parseAssistArm(value: unknown): AssistArm | undefined {
-  return value === 'A' || value === 'B' ? value : undefined
+  return value === 'A' || value === 'B' || value === 'C' ? value : undefined
 }
 
 interface AssistArmEnv {
   APPRAISER_SEAT?: string
+  APPRAISER_ESCALATION_MODEL?: string
   REASONING_PROVIDER?: string
   REASONING_MODEL?: string
   REASONING_OPENROUTER_MODEL?: string
@@ -32,12 +37,14 @@ interface AssistArmEnv {
 
 /**
  * The env a run of this arm sees: the same bindings and keys, with the
- * reasoning lane pinned to the arm's model. No arm → the env unchanged.
+ * reasoning lane pinned to the arm's model (plus the arm's escalation
+ * model, when it defines one). No arm → the env unchanged.
  */
 export function withAssistArm<E extends AssistArmEnv>(env: E, arm: AssistArm | undefined): E {
   if (!arm) return env
-  const { provider, model } = ASSIST_ARMS[arm]
+  const { provider, model, escalationModel } = ASSIST_ARMS[arm]
+  const ladder = escalationModel ? { APPRAISER_ESCALATION_MODEL: escalationModel } : {}
   return provider === 'anthropic'
-    ? { ...env, APPRAISER_SEAT: 'reasoning', REASONING_PROVIDER: 'anthropic', REASONING_MODEL: model }
-    : { ...env, APPRAISER_SEAT: 'reasoning', REASONING_PROVIDER: 'openrouter', REASONING_OPENROUTER_MODEL: model }
+    ? { ...env, APPRAISER_SEAT: 'reasoning', REASONING_PROVIDER: 'anthropic', REASONING_MODEL: model, ...ladder }
+    : { ...env, APPRAISER_SEAT: 'reasoning', REASONING_PROVIDER: 'openrouter', REASONING_OPENROUTER_MODEL: model, ...ladder }
 }
