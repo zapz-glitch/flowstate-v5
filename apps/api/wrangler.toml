@@ -83,6 +83,9 @@ new_sqlite_classes = ["RateLimitCoordinatorDO"]
 [observability]
 enabled = true
 
+[observability.issues]
+enabled = true
+
 [observability.logs]
 enabled = true
 invocation_logs = true
