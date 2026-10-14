@@ -447,21 +447,62 @@ export async function runDecisionsSeat(
       pricePoint(x.r) === 'below_market' || (x.market != null && x.market < 0.5)
     const rankedByPref = [...scored].sort((a, b) => (b.pref - a.pref) || (b.p - a.p))
     const qualified = rankedByPref.filter((x) => !belowMarket(x) && x.p >= 0.5)
-    // Top-of-pocket evidence outranks at-market evidence: when any
-    // qualified comp sits in the ARV band it picks first; median-band
-    // comps only fill the pool out to 3.
-    const aboveBand = qualified.filter((x) => pricePoint(x.r) === 'above_market')
-    const atBand = qualified.filter((x) => pricePoint(x.r) === 'at_market')
+    // Pick order = the deterministic seat's own lexicographic order,
+    // band-aware inside each tier: geo first (a foreign top-band sale
+    // can never displace a local comp), then price band (top-of-pocket
+    // evidence outranks at-market evidence), then model preference.
+    const bandRank = (x: { r: RankedComp }) => pricePoint(x.r) === 'above_market' ? 0 : 1
+    const byGeoBandPref = [...qualified].sort((a, b) =>
+      (GEO_RANK[a.r.profile.geoTier] ?? 9) - (GEO_RANK[b.r.profile.geoTier] ?? 9)
+      || bandRank(a) - bandRank(b)
+      || (b.pref - a.pref) || (b.p - a.p))
     let forcedBelowMarket = false
-    let picks = [...aboveBand, ...atBand].slice(0, 3)
+    let picks = byGeoBandPref.slice(0, 3)
     if (!picks.length && scored.length) {
       const nonBelow = rankedByPref.filter((x) => !belowMarket(x))
       if (nonBelow.length) {
         // Every non-below-market candidate failed the seat's final call —
-        // a failed comp can never set the price; the deterministic seat
-        // keeps its own honestly-labeled answer.
-        base.debugNotes.push(`decisions-seat: all ${nonBelow.length} non-below-market candidates failed q_final — deterministic seat`)
-        return base
+        // a failed comp can never set the price, and it can't ride the
+        // deterministic fallback either: re-run the deterministic seat
+        // with the seat-rejected comps excluded.
+        const failedIds = new Set(nonBelow.map((x) => String(x.r.id)))
+        base.debugNotes.push(`decisions-seat: all ${nonBelow.length} non-below-market candidates failed q_final — re-running deterministic seat without them`)
+        const retry = runDeterministicSelector(ctx, evidence, {
+          priceBand: { upper: 2.0, lower: 0.5 },
+          pocketValueGate: true,
+          excludeIds: failedIds,
+        })
+        // The failed sales also come off the saved pool — Set-B prices
+        // from enabled comparables, so a seat-rejected sale staying
+        // enabled could still drive ARV downstream of a pick-less retry.
+        for (const c of ctx.appraisalResult?.comparables ?? []) {
+          if (!failedIds.has(String(c.id))) continue
+          c.isEnabled = false
+          const reasons = [...((c as { disableReasons?: string[] }).disableReasons ?? []), 'seat-rejected q_final']
+          ;(c as { disableReasons?: string[] }).disableReasons = reasons
+          if (c.evaluation) c.evaluation.disableReasons = reasons
+        }
+        // Retry drivers get the same seat treatment as a normal pick:
+        // enabled + seatPick on the saved pool so the card and the
+        // enabled-comp Set-B path see the selection.
+        for (const id of retry.selection?.selectedCompIds ?? []) {
+          const appraised = ctx.appraisalResult?.comparables?.find((c) => String(c.id) === String(id))
+          if (appraised) {
+            appraised.isEnabled = true
+            ;(appraised as { seatPick?: boolean }).seatPick = true
+            if (appraised.evaluation) appraised.evaluation.disableReasons = []
+          }
+        }
+        retry.debugNotes = [...base.debugNotes, ...retry.debugNotes]
+        if (retry.selection) {
+          const retryFlags = [...(retry.selection.flags ?? []), 'seat_all_failed']
+          // A retry that lands on below-market evidence prices a floor,
+          // not ARV — flag it the same way the forced pick path does.
+          const belowIds = new Set(rankedByPref.filter((x) => belowMarket(x)).map((x) => String(x.r.id)))
+          if (retry.selection.selectedCompIds?.some((id) => belowIds.has(String(id)))) retryFlags.push('below_market_pick')
+          retry.selection.flags = retryFlags
+        }
+        return retry
       }
       // Every candidate reads below-market — the seat still must answer.
       // Least-bad is the highest-preference distressed comp; it prices the

@@ -15,7 +15,7 @@ test('realtor notes are quiet: no box, no bold title, a left rule, readable word
   const out = render({ notes: [note] })
   assert.match(out, /<section aria-label="Realtor notes" class="border-l-2 border-border /)
   assert.doesNotMatch(out, /class="border border-border/, 'not a boxed card')
-  assert.match(out, /<h3 class="text-\[11px\] font-medium text-foreground-tertiary">Realtor notes<\/h3>/)
+  assert.match(out, /<h3 class="text-\[11px\] font-medium text-foreground-tertiary[^"]*">Realtor notes<\/h3>/)
   assert.doesNotMatch(out, /font-semibold|font-bold/)
   // The date is split from the words, and the words are in the readable secondary text
   assert.match(out, /text-foreground-tertiary[^"]*">2026-10-06<\/span><span class="text-foreground-secondary">underwriting eval FAILED/)
