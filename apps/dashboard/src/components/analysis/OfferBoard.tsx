@@ -1,11 +1,25 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { X, FileText, CheckCircle2, ArrowLeftRight, PenLine, FileCheck2, CircleDollarSign, CircleSlash2, ExternalLink } from 'lucide-react'
 import { getOfferBoard, removeOfferBoardItem, type BoardItem } from '@/app/(dashboard)/dashboard/give-offer/actions'
 
 const POLL_MS = 10_000
+
+/** Session cache — same pattern as the offer queue's getCachedQueue.
+ *  Back-navigation renders the board instantly; the poll refreshes in
+ *  the background instead of a loading flash every revisit. */
+let boardCache: BoardItem[] | null = null
+const BOARD_CACHE_KEY = 'offerBoard.cache'
+const cachedBoard = (): BoardItem[] | null => {
+  if (boardCache) return boardCache
+  try {
+    const raw = sessionStorage.getItem(BOARD_CACHE_KEY)
+    if (raw) boardCache = JSON.parse(raw) as BoardItem[]
+  } catch { /* unreadable — treat as empty */ }
+  return boardCache
+}
 
 /** Column order — the campaign stages in flow order. A stage outside
  *  this list (custom_*) appends its own column at the end. */
@@ -50,8 +64,8 @@ const reportHref = (i: BoardItem) =>
 const ADDR_LINK = 'text-foreground hover:text-primary transition-colors truncate'
 
 export function OfferBoard() {
-  const [items, setItems] = useState<BoardItem[]>([])
-  const [loaded, setLoaded] = useState(false)
+  const [items, setItems] = useState<BoardItem[]>(cachedBoard() ?? [])
+  const [loaded, setLoaded] = useState(cachedBoard() != null)
   const [showAll, setShowAll] = useState(false)
   const [view, setView] = useState<'board' | 'list'>('board')
   const [listStage, setListStage] = useState<string>('all')
@@ -65,19 +79,37 @@ export function OfferBoard() {
     if (r?.ok) {
       const sig = (arr: BoardItem[]) =>
         arr.map((i) => `${i.id}:${i.status}:${i.updatedAt}:${i.counterAmount}:${i.note ?? ''}:${i.dismissed ? 1 : 0}`).join('|')
-      setItems((prev) => sig(prev) === sig(r.items) ? prev : r.items)
+      setItems((prev) => {
+        if (sig(prev) === sig(r.items)) return prev
+        boardCache = r.items
+        try { sessionStorage.setItem(BOARD_CACHE_KEY, JSON.stringify(r.items)) } catch { /* quota — in-memory still works */ }
+        return r.items
+      })
     }
     setLoaded(true)
   }, [])
 
+  const firstLoad = useRef(true)
   useEffect(() => {
-    load(showAll)
+    if (firstLoad.current && cachedBoard() != null && !showAll) {
+      // Warm cache — zero server hit on revisit; the poll picks up
+      // new session writes on its next tick.
+      firstLoad.current = false
+    } else {
+      firstLoad.current = false
+      load(showAll)
+    }
     const t = setInterval(() => load(showAll), POLL_MS)
     return () => clearInterval(t)
   }, [load, showAll])
 
   const remove = useCallback((id: string) => {
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, dismissed: true } : i))
+    setItems((prev) => {
+      const next = prev.map((i) => i.id === id ? { ...i, dismissed: true } : i)
+      boardCache = next
+      try { sessionStorage.setItem(BOARD_CACHE_KEY, JSON.stringify(next)) } catch { /* quota — in-memory still works */ }
+      return next
+    })
     removeOfferBoardItem(id).catch(() => null)
   }, [])
 
