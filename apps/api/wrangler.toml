@@ -104,6 +104,8 @@ invocation_logs = true
 #
 # TypeSafe JEV evidence lane (only read when a run's evidenceBackend='jev')
 # - JEV_API_KEY
+# JEV takes text + satellite/streetview reads; photo-bearing reads still
+# need OPENAI_API_KEY (Decisions lane). The agent seat needs ANTHROPIC_API_KEY.
 # JEV endpoint/model as vars: TYPESAFE_URL (default api.typesafe.ai/v1/systemone),
 # JEV_MODEL (default jev-latest)
 
