@@ -848,6 +848,7 @@ export async function decisionsSubjectObservables(
         state: satelliteState,
         questions: SUBJECT_SATELLITE_QUESTIONS,
         images: satelliteImages.map(({ content_type, base64 }) => ({ content_type, base64 })),
+        imageLane: 'map',
       }).catch(() => null)
     : Promise.resolve(null)
 
@@ -1051,10 +1052,10 @@ export async function decisionsCompObservables(
       ? decisionsRun(env, { state: conditionState, questions: COMP_CONDITION_QUESTIONS, images: payload(listingSet) }).catch(() => null)
       : null,
     wantSite && satelliteSet.length
-      ? decisionsRun(env, { state: satelliteState, questions: COMP_SATELLITE_QUESTIONS, images: payload(satelliteSet) }).catch(() => null)
+      ? decisionsRun(env, { state: satelliteState, questions: COMP_SATELLITE_QUESTIONS, images: payload(satelliteSet), imageLane: 'map' }).catch(() => null)
       : null,
     wantSite && streetSet.length
-      ? decisionsRun(env, { state: streetState, questions: COMP_STREET_QUESTIONS, images: payload(streetSet) }).catch(() => null)
+      ? decisionsRun(env, { state: streetState, questions: COMP_STREET_QUESTIONS, images: payload(streetSet), imageLane: 'map' }).catch(() => null)
       : null,
     exteriorPromise,
   ])

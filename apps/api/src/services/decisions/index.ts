@@ -18,7 +18,8 @@ export interface DecisionsEnv {
   /** Decisions model — default gpt-6-luna (the only supported model today) */
   DECISIONS_MODEL?: string
   /** Evidence lane backend: 'decisions' (default) or 'jev' (TypeSafe JEV).
-   *  'jev' routes every decisionsRun call in the run to api.typesafe.ai. */
+   *  'jev' sends text-only and map-tile (imageLane:'map') reads to JEV;
+   *  photo-bearing reads stay on Decisions (JEV's ~280px image floor). */
   EVIDENCE_BACKEND?: string
   JEV_API_KEY?: string
   /** JEV endpoint — default TypeSafe systemone */
@@ -52,9 +53,20 @@ export async function decisionsRun(
      *  Batch mode uses this so each comp's photos group under its own
      *  header instead of pooling anonymously. Total image cap 128. */
     sections?: Array<{ text?: string; images?: Array<{ content_type?: string; base64: string }> }>
+    /** 'map' marks satellite/streetview tiles (all >=640px, JEV-safe).
+     *  Anything else — listing photos, comp covers — is 'photo': JEV
+     *  rejects images under ~280px, so photo calls stay on Decisions
+     *  even when the run is pinned to the JEV backend. Text-only calls
+     *  always take the pinned backend. */
+    imageLane?: 'map' | 'photo'
   },
 ): Promise<{ answers?: Record<string, unknown> }> {
-  if (env.EVIDENCE_BACKEND === 'jev') return jevRun(env, params)
+  if (env.EVIDENCE_BACKEND === 'jev') {
+    const hasImages = (params.images?.length ?? 0) > 0 ||
+      (params.sections ?? []).some((s) => (s.images?.length ?? 0) > 0)
+    if (!hasImages || params.imageLane === 'map') return jevRun(env, params)
+    // photo-lane call → fall through to the Decisions lane
+  }
   if (!env.OPENAI_API_KEY) throw new Error('DECISIONS: no OPENAI_API_KEY')
 
   const content: Array<Record<string, unknown>> = [
