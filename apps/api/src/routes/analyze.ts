@@ -155,6 +155,9 @@ interface AnalyzeRequest {
   /** Replay identical outbound calls from this earlier job's call log, so
    *  both arms of an A/B evaluate the same evidence. */
   replayCallsFrom?: string;
+  /** Evidence lane backend: 'jev' runs every question-types read through
+   *  TypeSafe JEV instead of Decisions. Unset = Decisions. */
+  evidenceBackend?: 'jev' | 'decisions';
 }
 
 const ALLOWED_MODELS = new Set([
@@ -331,10 +334,13 @@ analyze.post('/', async (c) => {
     // (and vice versa) through the shared KV.
     // An A/B arm keys the cache too — arm A's report is never served as arm B's.
     const assistArm = parseAssistArm(body.arm);
+    const evidenceBackend = body.evidenceBackend === 'decisions' ? 'decisions'
+      : body.evidenceBackend === 'jev' ? 'jev'
+      : (c.env.DEFAULT_EVIDENCE_BACKEND === 'jev' ? 'jev' : undefined)
     const resultCacheKey = evalResultKey(
       auth.userId,
       body.address ?? '',
-      evalParamsHash + (seatHarness ? `:${seatHarness}` : '') + (assistArm ? `:arm${assistArm}` : ''),
+      evalParamsHash + (seatHarness ? `:${seatHarness}` : '') + (assistArm ? `:arm${assistArm}` : '') + (evidenceBackend === 'jev' ? ':jev' : ''),
     );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
@@ -434,6 +440,7 @@ analyze.post('/', async (c) => {
               ? c.env.DEFAULT_HARNESS
               : undefined),
         arm: assistArm,
+        evidenceBackend,
         replayCallsFrom: typeof body.replayCallsFrom === 'string' && /^job_[\w-]{1,80}$/.test(body.replayCallsFrom)
           ? body.replayCallsFrom
           : undefined,

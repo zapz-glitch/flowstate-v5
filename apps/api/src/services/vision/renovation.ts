@@ -17,7 +17,7 @@
  */
 
 import { createReasoningProvider, createSpecialistProvider, isReasoningProviderAvailable } from '../llm'
-import { decisionsRun } from '../decisions'
+import { decisionsRun, isDecisionsAvailable } from '../decisions'
 import { fetchImageAsBase64, type FetchedImage } from '../llm/image-utils'
 import { REHAB_LEVELS } from '../valuation/types'
 
@@ -340,7 +340,7 @@ async function runClefChunkReads(
   propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
 ): Promise<ClefChunkRead> {
   const ai = env.AI
-  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  const useDecisions = env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)
   if (!ai && !useDecisions) return { answers: [], chunksRead: 0 }
   const model = '@cf/cloudflare/clef-flash'
   const questions = {
@@ -772,7 +772,7 @@ export async function assessRenovationFromPhotos(
   // The decision model is the subject's primary reader when configured;
   // the reasoning reader (haiku) is its backup. A caller-supplied provider
   // is an explicit choice of reader and skips the decision model.
-  const decisionsOn = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY && !providerOverride
+  const decisionsOn = env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env) && !providerOverride
 
   if (!isReasoningProviderAvailable(env) && !env.AI && !providerOverride && !decisionsOn) {
     return {

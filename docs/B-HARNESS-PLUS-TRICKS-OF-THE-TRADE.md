@@ -170,9 +170,9 @@ anchor** and ARV is its repriced contribution. The rest of the driver
 set bounds the range — never blended in. The weighted blend survives
 only as the anchor of last resort when nothing dominates similarity.
 
-Similarity score: distance `max(0, 1−d)×3` · same block group `+3` (else
-same tract `+2`) · same subdivision `+2` · era ±10yr `+1.5` (±20yr `+0.75`)
-· size ±150sf `+1.5` (±300sf `+0.75`).
+Similarity score: distance `max(0, 1−d)×3` · same
+neighborhood/subdivision `+3` · same block group `+2` · same tract `+1`
+· era ±10yr `+1.5` (±20yr `+0.75`) · size ±150sf `+1.5` (±300sf `+0.75`).
 
 **Similarity gate:** drivers must score ≥ **60% of the anchor's** score
 or they drop out entirely — a far, cross-pocket comp with a clean
@@ -244,7 +244,7 @@ never silent, never a bare refusal.
 | Similarity floor / gate | 3.0 / 60% of anchor | Marie St, 109th Ave |
 | Clef confidence floor | 30 | tiering sessions |
 | Land factor / cap / floor | 0.35 / ±20% of sale / <$1,000 ignored | land ladder sessions |
-| T1 lot rescue | ≤0.5mi, no major-road cross, same tract/BG | Ruskin cascade debut |
+| T1 lot rescue | ≤0.5mi, no major-road cross, same pocket | Ruskin cascade debut |
 | T2 pocket-implied | ≥3 same-tract sales | same |
 | Sqft slope fit | ≥5 comps, tract first, slope < avg $/sf | appraiser ladder |
 | Self-heal | anchor < 0.8 × driver median | Indianapolis |
@@ -292,13 +292,23 @@ $199,922 shelved for a $161,145 AVM). Now `insufficient` no longer blocks
 a B result whose verify ladder passed. Unverified results still floor
 honestly.
 
-### G2 — Geo hierarchy: tract → block group → neighborhood
-`746d8f3`, road rule `78cc9e4`. After the class pick, drivers restrict to
-the tightest geo tier present; out-of-tier comps drive only when nothing
-closer exists. **Tract/BG membership requires no major-road crossing** —
-a comp across the road may sit inside the census polygon but it isn't the
-same pocket; it can only claim the neighborhood-name tier. Names are
-normalized (spelling variants don't split a pocket).
+### G2 — Geo hierarchy: neighborhood → block group → tract
+`746d8f3`, road rule `78cc9e4`, order change 2026-10-15. After the class
+pick, drivers restrict to the tightest geo tier present; out-of-tier
+comps drive only when nothing closer exists. **Pick order: named pocket
+(neighborhood, subdivision as fallback) first, census block group
+second, census tract last** — the named pocket is the market the seller
+and buyers actually shop. A comp inside both BG and neighborhood counts
+as a neighborhood match. **Tract/BG membership requires no major-road
+crossing** — a comp across the road may sit inside the census polygon
+but it isn't the same pocket. Names are normalized (spelling variants
+don't split a pocket).
+
+**Pocket-price cap:** every pocket has a median sale price (the subject's
+neighborhood, subdivision fallback, then BG/tract/pool when the named
+set is too thin). Picks are preferred at ≤+5% over the pocket median,
+tolerated ≤+10%, and >+10% can never drive ARV — a sale that rich
+belongs to a different market (selector R10, gate d9).
 
 ### G3 — URAR adjustment ceiling as judge, not clamp
 `a07bd4a`. A comp needing >25% total adjustment — measured by whichever

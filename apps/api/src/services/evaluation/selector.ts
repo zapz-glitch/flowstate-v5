@@ -27,7 +27,7 @@
 
 import { gradeVerdict } from './verdict-grade'
 import { groupPocketSales } from './price-groups'
-import { compMatchProfile } from './observable'
+import { compMatchProfile, pocketMedianSalePrice } from './observable'
 import { exclusionReasons } from './appraiser'
 import { validateAgentSelection } from './index'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
@@ -36,6 +36,15 @@ import type { AppraisedComparable } from '../appraisal/types'
 import type { AppraiserResult } from './appraiser'
 import type { CompMatchProfile } from './observable'
 
+/** Pick-order geo rank — the owner's order: named-pocket matches
+ *  (neighborhood/subdivision) FIRST, census block group second, tract
+ *  last. Derived from the independent match booleans so a BG+neighborhood
+ *  comp counts as a neighborhood match (it lives inside the pocket),
+ *  not as a deeper census tier. */
+const geoRankOf = (profile: CompMatchProfile): number =>
+  (profile.neighborhoodMatch || profile.subdivisionMatch) ? 0
+    : profile.blockGroupMatch ? 1
+    : profile.tractMatch ? 2 : 3
 const GEO_TIER_RANK: Record<CompMatchProfile['geoTier'], number> = {
   BLOCK_GROUP: 0,
   NEIGHBORHOOD: 1,
@@ -114,6 +123,10 @@ interface CompLabels {
   saleAge: 'fresh' | 'stale' | 'aged_out' | 'unknown'
   pricePosition: 'top' | 'median' | 'bottom' | 'outlier' | 'unknown'
   priceEvidence: 'arv' | 'median' | 'as_is' | 'none'
+  /** Sale price vs the pocket's median sale price (+0.05 = 5% above). */
+  pocketDeltaPct: number | null
+  /** ≤+5% preferred, ≤+10% fallback, >+10% can't drive (different market). */
+  pocketBand: 'preferred' | 'fallback' | 'over' | null
   sanity: 'clean' | 'anomalous'
   /** Recoverable physical differences — "fewest exceptions wins". */
   diffs: number
@@ -459,15 +472,39 @@ export function runDeterministicSelector(
   const medianBand = groupStats('middle')
   const asIsBand = groupStats('bottom')
 
+  // R10 pocket-price cap — the pocket is the named neighborhood (subdivision
+  // when no neighborhood name); a comp more than +10% above its median sale
+  // price belongs to a different market: context, never a pick (d9 also
+  // rejects it as a driver). ≤+5% ranks preferred, ≤+10% fallback.
+  const POCKET_CAP = { preferred: 1.05, max: 1.10 }
+  const pocketAnchor = pocketMedianSalePrice(
+    subject as { neighborhoodName?: string | null; subdivision?: string | null; censusTract?: string | null },
+    ranked.map((r) => r.comp),
+  )
+  const pocketDeltaOf = (r: RankedComp): number | null =>
+    pocketAnchor && (r.comp.salePrice ?? 0) > 0
+      ? (r.comp.salePrice! / pocketAnchor.medianPrice) - 1
+      : null
+  const pocketBandOf = (r: RankedComp): 'preferred' | 'fallback' | 'over' | null => {
+    const d = pocketDeltaOf(r)
+    if (d == null) return null
+    return d <= POCKET_CAP.preferred - 1 ? 'preferred' : d <= POCKET_CAP.max - 1 ? 'fallback' : 'over'
+  }
+  const overPocket = (r: RankedComp) => pocketBandOf(r) === 'over'
+
   // Lexicographic pick order — compare the most important criterion
-  // first, move to the next only on a tie: geo tier → fewest recoverable
-  // diffs → physical twin count → Decisions arv-fitness → price position.
-  // A strong attribute can never compensate for a higher-priority
-  // weakness; there is no weighted score anywhere in the pick path.
+  // first, move to the next only on a tie: geo tier (named pocket →
+  // block group → tract) → pocket-price band (≤+5% preferred, ≤+10%
+  // fallback) → fewest recoverable diffs → physical twin count →
+  // Decisions arv-fitness → price position. A strong attribute can never
+  // compensate for a higher-priority weakness; there is no weighted
+  // score anywhere in the pick path.
   const twinCount = (r: RankedComp) =>
     r.labels ? [r.labels.sqft, r.labels.year, r.labels.lot].filter((d) => d === 'exact').length : 0
+  const POCKET_BAND_RANK: Record<string, number> = { preferred: 0, fallback: 1, over: 2 }
   const rank = (a: RankedComp, b: RankedComp) =>
-    GEO_TIER_RANK[a.profile.geoTier] - GEO_TIER_RANK[b.profile.geoTier]
+    geoRankOf(a.profile) - geoRankOf(b.profile)
+    || (POCKET_BAND_RANK[a.labels?.pocketBand ?? 'preferred'] ?? 0) - (POCKET_BAND_RANK[b.labels?.pocketBand ?? 'preferred'] ?? 0)
     || (a.labels?.diffs ?? 9) - (b.labels?.diffs ?? 9)
     || twinCount(b) - twinCount(a)
     || (b.comp.observables?.arvFitnessP ?? 0.5) - (a.comp.observables?.arvFitnessP ?? 0.5)
@@ -548,6 +585,8 @@ export function runDeterministicSelector(
         : asIsPriced(r) ? 'as_is' : isRenovated(r) ? 'arv' : 'median',
       sanity: r.audit.rules.includes('R4') ? 'anomalous' : 'clean',
       diffs: r.audit.recoverable.length + featDiffs,
+      pocketDeltaPct: pocketDeltaOf(r),
+      pocketBand: pocketBandOf(r),
     }
   }
   // type-selector seat: the typescript lane lets a reasoning model pick
@@ -637,11 +676,18 @@ export function runDeterministicSelector(
   // comp outranks every off-pocket comp — an off-pocket ARV comp never
   // cuts ahead of an in-pocket median comp while pocket stock remains.
   // Inside each side, ARV-qualified comps first, then the rank.
-  const pickable = clean.filter((r) => !asIsPriced(r))
+  const pickable = clean.filter((r) => !asIsPriced(r) && !overPocket(r))
+  for (const r of clean) {
+    if (overPocket(r)) {
+      r.audit.rules.push('R10')
+      r.audit.reasons.push(
+        `R10 over-pocket — $${r.comp.salePrice!.toLocaleString()} is +${Math.round((pocketDeltaOf(r) ?? 0) * 100)}% over the pocket median $${pocketAnchor!.medianPrice.toLocaleString()} (${pocketAnchor!.scope}, cap +${Math.round((POCKET_CAP.max - 1) * 100)}%) — context only, never a pick`)
+    }
+  }
   const arvFirst = (a: RankedComp, b: RankedComp) =>
     Number(arvPool.includes(b)) - Number(arvPool.includes(a)) || rank(a, b)
   const bgFirst = (a: RankedComp, b: RankedComp) =>
-    Number(inBg(b)) - Number(inBg(a)) || arvFirst(a, b)
+    geoRankOf(a.profile) - geoRankOf(b.profile) || arvFirst(a, b)
   const ordered = [
     ...pickable.filter(inPocketPick).sort(bgFirst),
     ...pickable.filter((r) => !inPocketPick(r)).sort(arvFirst),
@@ -897,7 +943,7 @@ export function runDeterministicSelector(
   // Per-pick label dump — every pick shows its full label vector so the
   // audit explains exactly why one comp beat another.
   const pickLabels = picks.map((p) =>
-    `${p.id}[${p.labels ? `${p.labels.geo}|sqft:${p.labels.sqft}|yr:${p.labels.year}|lot:${p.labels.lot}|price:${p.labels.pricePosition}→${p.labels.priceEvidence}|diffs:${p.labels.diffs}` : ''}]`)
+    `${p.id}[${p.labels ? `${p.labels.geo}|sqft:${p.labels.sqft}|yr:${p.labels.year}|lot:${p.labels.lot}|price:${p.labels.pricePosition}→${p.labels.priceEvidence}|pocket:${p.labels.pocketDeltaPct != null ? `${p.labels.pocketDeltaPct >= 0 ? '+' : ''}${Math.round(p.labels.pocketDeltaPct * 100)}%/${p.labels.pocketBand}` : 'n/a'}|diffs:${p.labels.diffs}` : ''}]`)
   ledger.unshift(`labels: ${pickLabels.join(' ')}`)
   ledger.unshift(`pocket: ${pocketLedger.join(' ')}`)
 

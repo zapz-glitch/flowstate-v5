@@ -20,11 +20,12 @@
 
 import type { HarnessEvidence, AgentSelection } from './index'
 import { noCompPassesRules } from './rule-passers'
+import { pocketMedianSalePrice } from './observable'
 
 export type CheckResult = 'pass' | 'fail' | 'warn' | 'skipped'
 
 export interface VerdictGrade {
-  checks: Record<'d1' | 'd2' | 'd4' | 'd5' | 'd6' | 'd7' | 'd8', CheckResult>
+  checks: Record<'d1' | 'd2' | 'd4' | 'd5' | 'd6' | 'd7' | 'd8' | 'd9', CheckResult>
   /** pass=1, warn=0.5 over non-skipped checks, minus flat soft penalties. */
   score: number
   /** Machine-readable failure classes — the 'improve' loop input. */
@@ -135,7 +136,7 @@ export function gradeVerdict(evidenceIn: HarnessEvidence, selection: AgentSelect
   const gateFeedback: string[] = []
   let scorePenalty = 0
   const checks: VerdictGrade['checks'] = {
-    d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass',
+    d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass', d9: 'pass',
   }
 
   const byId = new Map(evidence.comps.map((c) => [c.id, c] as const))
@@ -312,6 +313,31 @@ export function gradeVerdict(evidenceIn: HarnessEvidence, selection: AgentSelect
     } else {
       checks.d8 = 'skipped'
     }
+  }
+
+  // ── d9: pocket-price cap ─────────────────────────────────────────────
+  // The pocket is the subject's named neighborhood (subdivision when no
+  // neighborhood name). A driver priced more than +10% over the pocket's
+  // median sale price belongs to a different market — it can sit in the
+  // pick set as context but can never drive ARV.
+  const pocketAnchor = pocketMedianSalePrice(evidence.subject, evidence.comps)
+  if (pocketAnchor) {
+    const overDrivers = drivers.filter(
+      (c) => (c.salePrice ?? 0) > pocketAnchor.medianPrice * 1.10)
+    if (overDrivers.length > 0) {
+      checks.d9 = 'fail'
+      failures.push('d9_driver_over_pocket')
+      for (const c of overDrivers) {
+        gateFeedback.push(
+          `d9: driver ${c.id} (${c.address ?? 'unknown'}) sold at $${c.salePrice!.toLocaleString()} — ` +
+          `+${Math.round(((c.salePrice! / pocketAnchor.medianPrice) - 1) * 100)}% over the pocket median $${Math.round(pocketAnchor.medianPrice).toLocaleString()} ` +
+          `(${pocketAnchor.scope}, cap +10%) — that's a different market; demote it to supporting or replace it`)
+      }
+    } else {
+      checks.d9 = 'pass'
+    }
+  } else {
+    checks.d9 = 'skipped'
   }
 
   // Composite — pass=1, warn=0.5, skipped out of the denominator, minus

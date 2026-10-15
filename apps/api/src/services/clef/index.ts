@@ -14,7 +14,7 @@
  */
 
 import type { Env } from '../../types'
-import { decisionsRun } from '../decisions'
+import { decisionsRun, isDecisionsAvailable } from '../decisions'
 import {
   RENOVATION_LEVEL_DEFINITIONS,
   RENOVATION_TIER_CHOICES,
@@ -270,7 +270,7 @@ function scoreIdx(v: unknown): { idx: number; score: number } {
 
 export function isClefAvailable(env: Env): boolean {
   return typeof env.AI?.run === 'function' ||
-    (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY)
+    (env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env))
 }
 
 export async function classifyCompCondition(
@@ -298,7 +298,7 @@ export async function classifyCompCondition(
 
   const started = Date.now()
   // 'decisions' lane — same questions through OpenAI's dedicated endpoint.
-  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  const useDecisions = env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)
   const res: { model?: string; answers?: Record<string, unknown> } = useDecisions
     ? { ...(await decisionsRun(env, {
         state,

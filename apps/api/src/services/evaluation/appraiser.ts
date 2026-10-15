@@ -60,11 +60,13 @@ Each comp row also carries exclusionReasons — code-stamped disqualifiers (geo,
 Your job, IN ORDER:
 1. DISQUALIFY FIRST. Read every comp's exclusionReasons and the observables — confirm the disqualifications and set those comps aside before selecting anything. A comp that is merely cheap-but-legal ("investor-grade") is real data but not ARV evidence.
 2. From the survivors, pick the comps that set the ARV — the genuinely renovated retail evidence — name which picks drove the number, and post the ARV. Prefer high arvFitnessP AND high physicalMatchP: a comp that both fits the rules and resembles the subject's finished state is the strongest evidence.
-3. GEOGRAPHY IS STRICT — never reach outside the pocket for a better-matching house. Order: same block group → same neighborhood → same census tract. If NO in-pocket comp qualifies, select the median comps of the subject's block group (median-of-BG fallback) — the pocket's own market, not a similar house across town.
-4. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence. FEATURE MISMATCH: a comp premium the subject cannot sell — a pool on the comp when the subject has none, waterfront, an oversized lot (its premiumAttributes/premiumProbabilities vs subject.poolType and the subject's own lot reads) — explains THAT comp's higher price, not the subject's value. Treat it as bound evidence, never a driver, unless the unmatched feature's contributory value is small and you name it.
-5. STALENESS IS A CAUTION, NOT A VETO. When the market itself is stale, the pocket's renovated sales are the freshest ARV evidence that exists — a completed in-pocket flip IS the realized ARV and belongs in the drivers even past the preferred-sale-age line. Staleness lowers your confidence, not the comp's eligibility — note it in conf/dataQuality instead of excluding or demoting the sale to supporting-only.
+3. GEOGRAPHY IS STRICT — never reach outside the pocket for a better-matching house. Order: same neighborhood/subdivision FIRST, then same block group, then same census tract. A comp outside the named pocket must never cut ahead of an in-pocket match. If NO in-pocket comp qualifies, select the median comps of the subject's pocket (median fallback) — the pocket's own market, not a similar house across town.
 
-WHEN NO COMP PASSES THE FILTER RULES (state.noCompPassesFilterRules is true): every comp is stamped 'disabled by the filter rules', and that stamp is then NOT a disqualifier. Your job is to select the comps that come CLOSEST to the rules — judge each on three things, in this order: (a) location identity — same block group, then same neighborhood/subdivision, then same tract; (b) physical characteristics — living area, year built, beds/baths, lot, stories, construction, and the exterior match to the subject; (c) how narrowly it misses each filter (a comp 40 sqft over the size limit beats one 600 over; a sale 20 days past the age limit beats one a year past). Say in your notes which rules each pick misses and by how much, and set conf to "low". Non-market sales (nominal, package, bulk, data errors) stay disqualified.
+4. POCKET-PRICE DISCIPLINE — the pocket's median sale price bounds every pick. Prefer comps priced within +5% of the pocket median; up to +10% is fallback-only. A driver priced more than +10% over the pocket median belongs to a different market — demote it to supporting context, never let it drive ARV. Prefer above-market comps that satisfy the rules (above-median price band, real ARV evidence); when none qualify, fall back to at-market picks. Never stretch the rules just to land an above-market pick.
+5. Do not pick flagged/non-market sales (nominal, data_error, disabled). A comp priced wildly off its condition group is not evidence. FEATURE MISMATCH: a comp premium the subject cannot sell — a pool on the comp when the subject has none, waterfront, an oversized lot (its premiumAttributes/premiumProbabilities vs subject.poolType and the subject's own lot reads) — explains THAT comp's higher price, not the subject's value. Treat it as bound evidence, never a driver, unless the unmatched feature's contributory value is small and you name it.
+6. STALENESS IS A CAUTION, NOT A VETO. When the market itself is stale, the pocket's renovated sales are the freshest ARV evidence that exists — a completed in-pocket flip IS the realized ARV and belongs in the drivers even past the preferred-sale-age line. Staleness lowers your confidence, not the comp's eligibility — note it in conf/dataQuality instead of excluding or demoting the sale to supporting-only.
+
+WHEN NO COMP PASSES THE FILTER RULES (state.noCompPassesFilterRules is true): every comp is stamped 'disabled by the filter rules', and that stamp is then NOT a disqualifier. Your job is to select the comps that come CLOSEST to the rules — judge each on three things, in this order: (a) location identity — same neighborhood/subdivision first, then same block group, then same tract; (b) physical characteristics — living area, year built, beds/baths, lot, stories, construction, and the exterior match to the subject; (c) how narrowly it misses each filter (a comp 40 sqft over the size limit beats one 600 over; a sale 20 days past the age limit beats one a year past). Say in your notes which rules each pick misses and by how much, and set conf to "low". Non-market sales (nominal, package, bulk, data errors) stay disqualified.
 
 If anything is missing or ambiguous, you may ask the Decisions sub-agent to clarify — up to ${MAX_CLARIFICATIONS} requests TOTAL across the whole review. Ask targeted questions ("does comp X's listing mention a kitchen remodel?", "is comp Y's sale arm's length given the $500 price?"). Decisions answers with probability + verdict; you decide.
 
@@ -540,9 +542,18 @@ export async function runOpusAppraiser(
   // then selects the comps, backs up the decision model, and answers its own
   // reasoning requests as a sub-agent. Unset keeps Sonnet 5.5 in the seat.
   // High effort on the first pass, max effort on every retry.
-  const provider = (env as { APPRAISER_SEAT?: string }).APPRAISER_SEAT === 'reasoning'
-    ? createReasoningProvider(env, 'openai/gpt-6-luna', { timeout: APPRAISER_SEAT_TIMEOUT_MS })
-    : createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
+  // Gate-rejection ladder: APPRAISER_ESCALATION_MODEL names the model the
+  // seat hands off to once any pass fails the gate (haiku pass 1 → sonnet
+  // on every retry, until the gate passes). Unset = one seat for the whole
+  // run.
+  const escalationModel = (env as { APPRAISER_ESCALATION_MODEL?: string }).APPRAISER_ESCALATION_MODEL
+  const makeProvider = (model?: string) =>
+    (env as { APPRAISER_SEAT?: string }).APPRAISER_SEAT === 'reasoning'
+      ? createReasoningProvider(
+          model ? { ...env, REASONING_MODEL: model } : env,
+          'openai/gpt-6-luna', { timeout: APPRAISER_SEAT_TIMEOUT_MS })
+      : createSpecialistProvider(env, 'routine') ?? createSpecialistProvider(env, 'expert')
+  let provider = makeProvider()
   if (!provider) { out.unavailable = true; return out }
   out.model = provider.model
 
@@ -565,6 +576,16 @@ export async function runOpusAppraiser(
   // rejects consume revisions; a passing grade (or a plain-text answer we
   // can coerce) ends the loop.
   for (let round = 0; round <= limits.clarifications + limits.reasoning + limits.revisions + 1; round++) {
+    // A rejected pass moves the seat to the escalation model for every
+    // remaining attempt.
+    if (lastGrade && escalationModel && provider!.model !== escalationModel) {
+      const next = makeProvider(escalationModel)
+      if (next) {
+        provider = next
+        out.model = next.model
+        out.debugNotes.push(`appraiser: gate rejected — escalating seat to ${escalationModel}`)
+      }
+    }
     const state = {
       ...baseState,
       ...(clarificationBlock.length ? { clarificationFindings: clarificationBlock } : {}),
@@ -635,7 +656,7 @@ export async function runOpusAppraiser(
       const vfails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
       if (vfails.length > 0) {
         const grade: VerdictGrade = {
-          checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass' },
+          checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass', d9: 'pass' },
           score: 0, failures: ['coherence_validation'], warnings: [], scorePenalty: 0,
           gateFails: ['validation'], gateFeedback: vfails, gradedAt: new Date().toISOString(),
         }
@@ -650,7 +671,7 @@ export async function runOpusAppraiser(
       // Unusable selection shape — one more chance counts as a revision.
       if (++revisionsUsed > limits.revisions) break
       lastGrade = {
-        checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass' },
+        checks: { d1: 'pass', d2: 'pass', d4: 'pass', d5: 'pass', d6: 'pass', d7: 'pass', d8: 'pass', d9: 'pass' },
         score: 0, failures: ['malformed_selection'], warnings: [], scorePenalty: 0,
         gateFails: ['shape'], gateFeedback: ['selection was missing comps or a positive ARV — repost under the schema'], gradedAt: new Date().toISOString(),
       }

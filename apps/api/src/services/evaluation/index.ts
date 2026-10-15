@@ -969,7 +969,7 @@ export async function performAnalysisPhase1(
                 // Post-geo classify runs just below — don't let the fallback
                 // gather pin geo-less per-comp reads the pool classify skips.
                 gatherOnly: !!env.ANTHROPIC_API_KEY ||
-                  (env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY),
+                  (env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)),
               })
             : null
           const evGet = (propertyId: string): Promise<CompConditionEvidence | null> =>
@@ -997,7 +997,7 @@ export async function performAnalysisPhase1(
             const subjectRef = { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined }
             const [early, filled] = await evidenceMaps()
             const classifyInputs = classifyInputsFor(early, filled)
-            if (env.CONDITION_READER === 'decisions' && env.OPENAI_API_KEY) {
+            if (env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)) {
               await classifyCompBatchDecisions(env, classifyInputs, subjectRef).catch(() => null)
             } else if (env.ANTHROPIC_API_KEY) {
               await classifyCompPoolHaiku(env, classifyInputs, subjectRef).catch(() => null)

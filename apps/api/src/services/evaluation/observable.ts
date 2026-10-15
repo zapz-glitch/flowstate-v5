@@ -418,6 +418,39 @@ export interface MatchLike {
   sameBlockGroup?: boolean | null
 }
 
+/** Pocket median SALE PRICE — the owner-defined pocket is the named
+ *  neighborhood (subdivision when no neighborhood name). Used by the
+ *  selector's pick cap and the d9 gate: a comp priced far above the
+ *  pocket's median belongs to a different market and can't drive ARV.
+ *  Scope ladder: neighborhood → block group → tract → whole pool. */
+export function pocketMedianSalePrice(
+  subject: { neighborhoodName?: string | null; subdivision?: string | null; censusTract?: string | null },
+  comps: Array<{
+    salePrice?: number | null
+    neighborhoodName?: string | null
+    subdivision?: string | null
+    sameBlockGroup?: boolean | null
+    censusTract?: string | null
+  }>,
+): { medianPrice: number; scope: 'neighborhood' | 'block_group' | 'tract' | 'pool'; n: number } | null {
+  const priced = comps.filter((c) => (c.salePrice ?? 0) > 0)
+  if (!priced.length) return null
+  const hoodField = subject.neighborhoodName ? 'neighborhoodName' : subject.subdivision ? 'subdivision' : null
+  const subjHood = hoodField ? normalizeGeoName(subject[hoodField]) : null
+  const hoodSet = subjHood && hoodField
+    ? priced.filter((c) => normalizeGeoName(c[hoodField] as string | null | undefined) === subjHood)
+    : []
+  const bgSet = priced.filter((c) => c.sameBlockGroup === true)
+  const tractSet = subject.censusTract ? priced.filter((c) => c.censusTract === subject.censusTract) : []
+  const [set, scope] = hoodSet.length >= 2 ? [hoodSet, 'neighborhood' as const]
+    : bgSet.length >= 2 ? [bgSet, 'block_group' as const]
+    : tractSet.length >= 3 ? [tractSet, 'tract' as const]
+    : [priced, 'pool' as const]
+  const prices = set.map((c) => c.salePrice!).sort((a, b) => a - b)
+  const medianPrice = prices[Math.floor(prices.length / 2)]!
+  return { medianPrice, scope, n: set.length }
+}
+
 export interface CompMatchProfile {
   /** Two-dimension geo answer — a comp can be BG+neighborhood matched at
    *  once. Deepest tier wins the ordering. */
@@ -848,6 +881,7 @@ export async function decisionsSubjectObservables(
         state: satelliteState,
         questions: SUBJECT_SATELLITE_QUESTIONS,
         images: satelliteImages.map(({ content_type, base64 }) => ({ content_type, base64 })),
+        imageLane: 'map',
       }).catch(() => null)
     : Promise.resolve(null)
 
@@ -1051,10 +1085,10 @@ export async function decisionsCompObservables(
       ? decisionsRun(env, { state: conditionState, questions: COMP_CONDITION_QUESTIONS, images: payload(listingSet) }).catch(() => null)
       : null,
     wantSite && satelliteSet.length
-      ? decisionsRun(env, { state: satelliteState, questions: COMP_SATELLITE_QUESTIONS, images: payload(satelliteSet) }).catch(() => null)
+      ? decisionsRun(env, { state: satelliteState, questions: COMP_SATELLITE_QUESTIONS, images: payload(satelliteSet), imageLane: 'map' }).catch(() => null)
       : null,
     wantSite && streetSet.length
-      ? decisionsRun(env, { state: streetState, questions: COMP_STREET_QUESTIONS, images: payload(streetSet) }).catch(() => null)
+      ? decisionsRun(env, { state: streetState, questions: COMP_STREET_QUESTIONS, images: payload(streetSet), imageLane: 'map' }).catch(() => null)
       : null,
     exteriorPromise,
   ])

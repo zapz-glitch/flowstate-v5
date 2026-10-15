@@ -18,7 +18,7 @@
 
 import type { Env } from '../../types'
 import type { Question } from '../clef'
-import { decisionsRun } from '../decisions'
+import { decisionsRun, isDecisionsAvailable } from '../decisions'
 
 export type DigestStage = 'A' | 'B' | 'C'
 
@@ -194,7 +194,7 @@ export async function assessCompDigest(
   subject: DigestSubject,
   stage: DigestStage,
 ): Promise<CompDigest | null> {
-  const useDecisions = env.CONDITION_READER === 'decisions' && !!env.OPENAI_API_KEY
+  const useDecisions = env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)
   if (!env.AI && !useDecisions) return null
   const model = env.CLEF_MODEL === 'clef' ? 'clef' : 'clef-flash'
   const started = Date.now()

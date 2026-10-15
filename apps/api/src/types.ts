@@ -33,6 +33,16 @@ export interface Env {
    *  'agent' (Sonnet appraiser) | 'corelogic' (deterministic selector).
    *  alpha.flowstate sets 'corelogic'; unset = deterministic engine. */
   DEFAULT_HARNESS?: string
+  /** Deployment-level evidence backend when the request doesn't name one:
+   *  'jev' = TypeSafe JEV question-types lane; unset = OpenAI Decisions. */
+  DEFAULT_EVIDENCE_BACKEND?: string
+  /** Per-run evidence backend selector read by decisionsRun ('jev' |
+   *  anything-else = Decisions). Set from the job config. */
+  EVIDENCE_BACKEND?: string
+  /** TypeSafe JEV backend (EVIDENCE_BACKEND='jev') — key + endpoint + model */
+  JEV_API_KEY?: string
+  TYPESAFE_URL?: string
+  JEV_MODEL?: string
   /**
    * Candidate-pool size for comparable retrieval (system config — not an
    * owner-facing Appraisal Rule). Defaults to the provider maximum
