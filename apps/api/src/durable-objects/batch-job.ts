@@ -19,6 +19,7 @@ import { loadUserAnalysisSettings } from '../services/user-settings'
 import { kickNextQueuedBatch } from '../services/batch-queue'
 import { withDbRetry } from '../lib/db-retry'
 import { evalResultKey, hashEvalParams, searchOptionsFingerprint } from '../utils/eval-cache'
+import { parseAssistArm } from '../services/llm/assist-arms'
 
 interface BatchState {
   batchId: string
@@ -99,10 +100,11 @@ export class BatchJobDO {
       await this.state.storage.setAlarm(Date.now() + 60_000)
       return
     }
-    // Grace window: a single address can legitimately take ~180s. Only declare
-    // the loop dead when the last completed address is older than that.
+    // Grace window: a single address can legitimately take ~12min on the
+    // arm-C appraiser ladder. Only declare the loop dead when the last
+    // completed address is older than that.
     const lastProgress = bs.lastProgressAt ?? 0
-    if (Date.now() - lastProgress < 210_000) {
+    if (Date.now() - lastProgress < 750_000) {
       await this.state.storage.setAlarm(Date.now() + 60_000)
       return
     }
@@ -685,14 +687,22 @@ export class BatchJobDO {
       reconciliationSaleAgeDays: userSettings.reconciliationSaleAgeDays,
       proximityConfig: userSettings.proximityConfig,
     }
+    // Same lane resolution the analyze route applies — batches run the
+    // deployment's production harness (agent + arm + evidence) too.
+    const harness = (this.env.DEFAULT_HARNESS === 'agent' || this.env.DEFAULT_HARNESS === 'corelogic' || this.env.DEFAULT_HARNESS === 'typescript' || this.env.DEFAULT_HARNESS === 'finale')
+      ? this.env.DEFAULT_HARNESS
+      : undefined
+    const arm = parseAssistArm(this.env.DEFAULT_ASSIST_ARM)
+    const evidenceBackend = this.env.DEFAULT_EVIDENCE_BACKEND === 'jev' ? 'jev' as const : undefined
     // Same cache key the analyze route computes — lets child DOs replay stored
     // reports/verdicts and populate the cache for future runs of this address.
-    // Fingerprint the options actually sent to the child DO (defaults applied).
+    // Fingerprint the options actually sent to the child DO (defaults applied),
+    // with the same lane suffix the route adds so reports never cross lanes.
     const searchOptions = config.searchOptions ?? { radiusMiles: 1, monthsBack: 12 }
     const evalResultCacheKey = evalResultKey(config.userId, address, await hashEvalParams({
       evalParams,
       searchOptions: searchOptionsFingerprint(searchOptions),
-    }))
+    }) + (harness ? `:${harness}` : '') + (arm ? `:arm${arm}` : '') + (evidenceBackend === 'jev' ? ':jev' : ''))
     let startResp: Response
     try {
       startResp = await stub.fetch('http://internal/start-streaming', {
@@ -706,6 +716,9 @@ export class BatchJobDO {
           skipCache: config.skipCache ?? false,
           evalParams,
           evalResultCacheKey,
+          harness,
+          arm,
+          evidenceBackend,
           llmEnabled: false, // No AI for batch
           isRefresh: false,
         }),
@@ -715,10 +728,11 @@ export class BatchJobDO {
       throw new Error(`Failed to start analysis: ${err instanceof Error ? err.message : 'timeout'}`)
     }
 
-    // Poll for completion — 3 min hard cap, plus stall detection: once the
-    // address has run 60s+, if the child DO shows no new events or status
+    // Poll for completion — 12 min hard cap (the arm-C appraiser ladder can
+    // take several minutes on gate rejections), plus stall detection: once
+    // the address has run 60s+, if the child DO shows no new events or status
     // change for 45s it's wedged → fail the address and continue the list.
-    const deadline = Date.now() + 180_000
+    const deadline = Date.now() + 720_000
     let lastStep = ''
     let lastProgressAt = Date.now()
     let lastEventCount = 0

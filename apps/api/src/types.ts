@@ -36,6 +36,9 @@ export interface Env {
   /** Deployment-level evidence backend when the request doesn't name one:
    *  'jev' = TypeSafe JEV question-types lane; unset = OpenAI Decisions. */
   DEFAULT_EVIDENCE_BACKEND?: string
+  /** Deployment-level assist arm when the request doesn't name one:
+   *  'A' haiku | 'B' deepseek-flash | 'C' haiku→sonnet ladder. */
+  DEFAULT_ASSIST_ARM?: string
   /** Per-run evidence backend selector read by decisionsRun ('jev' |
    *  anything-else = Decisions). Set from the job config. */
   EVIDENCE_BACKEND?: string
