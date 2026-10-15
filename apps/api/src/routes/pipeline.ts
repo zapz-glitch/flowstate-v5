@@ -169,11 +169,11 @@ async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> 
     for (let i = 0; i < missingLeads.length; i += 90) {
       const chunk = missingLeads.slice(i, i + 90)
       const r = await env.DB.prepare(
-        `SELECT json_extract(full_response_json, '$.leadId') AS lead_id,
+        `SELECT lead_id_gen AS lead_id,
                 COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
                          json_extract(full_response_json, '$.valuation.listPrice')) AS lp
            FROM saved_reports
-          WHERE json_extract(full_response_json, '$.leadId') IN (${chunk.map(() => '?').join(',')})
+          WHERE lead_id_gen IN (${chunk.map(() => '?').join(',')})
             AND COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
                          json_extract(full_response_json, '$.valuation.listPrice')) IS NOT NULL
           ORDER BY created_at DESC`,

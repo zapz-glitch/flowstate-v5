@@ -439,12 +439,14 @@ async function resolveBoardReports(
   const leadIds = [...new Set(items.map((i) => i.leadId).filter((x): x is string => !!x))]
   const addresses = [...new Set(items.map((i) => i.address).filter(Boolean))]
   const out = new Map<string, string>()
+  // lead_id_gen is a generated column + index (migration 0046) — an exact
+  // IN-list hits the index instead of json_extract-ing every row.
   for (let i = 0; i < leadIds.length; i += 90) {
     const chunk = leadIds.slice(i, i + 90)
     const { results } = await env.DB.prepare(
-      `SELECT json_extract(full_response_json, '$.leadId') AS lead_id, job_id, created_at
+      `SELECT lead_id_gen AS lead_id, job_id, created_at
          FROM saved_reports
-        WHERE json_extract(full_response_json, '$.leadId') IN (${chunk.map(() => '?').join(',')})
+        WHERE lead_id_gen IN (${chunk.map(() => '?').join(',')})
         ORDER BY created_at DESC`,
     ).bind(...chunk).all<{ lead_id: string | null; job_id: string; created_at: string }>()
       .catch(() => ({ results: [] as Array<{ lead_id: string | null; job_id: string; created_at: string }> }))
@@ -452,14 +454,17 @@ async function resolveBoardReports(
       if (r.lead_id && !out.has(`lead:${r.lead_id}`)) out.set(`lead:${r.lead_id}`, r.job_id)
     }
   }
-  for (let i = 0; i < addresses.length; i += 90) {
-    const chunk = addresses.slice(i, i + 90).map((a) => a.toLowerCase())
+  // Addresses are stored in mixed case — probe the index with the exact,
+  // upper, and lower forms so the IN-list stays index-only.
+  for (let i = 0; i < addresses.length; i += 45) {
+    const chunk = addresses.slice(i, i + 45)
+    const forms = chunk.flatMap((a) => [a, a.toUpperCase(), a.toLowerCase()])
     const { results } = await env.DB.prepare(
       `SELECT property_address, job_id, created_at
          FROM saved_reports
-        WHERE LOWER(property_address) IN (${chunk.map(() => '?').join(',')})
+        WHERE property_address IN (${forms.map(() => '?').join(',')})
         ORDER BY created_at DESC`,
-    ).bind(...chunk).all<{ property_address: string; job_id: string; created_at: string }>()
+    ).bind(...forms).all<{ property_address: string; job_id: string; created_at: string }>()
       .catch(() => ({ results: [] as Array<{ property_address: string; job_id: string; created_at: string }> }))
     for (const r of results) {
       if (r.property_address && !out.has(`addr:${r.property_address.toLowerCase()}`)) {
