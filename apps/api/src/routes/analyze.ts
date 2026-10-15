@@ -333,7 +333,7 @@ analyze.post('/', async (c) => {
     // deployment serves deterministic-harness reports to ordinary requests
     // (and vice versa) through the shared KV.
     // An A/B arm keys the cache too — arm A's report is never served as arm B's.
-    const assistArm = parseAssistArm(body.arm);
+    const assistArm = parseAssistArm(body.arm) ?? parseAssistArm(c.env.DEFAULT_ASSIST_ARM);
     const evidenceBackend = body.evidenceBackend === 'decisions' ? 'decisions'
       : body.evidenceBackend === 'jev' ? 'jev'
       : (c.env.DEFAULT_EVIDENCE_BACKEND === 'jev' ? 'jev' : undefined)
