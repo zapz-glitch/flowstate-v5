@@ -27,7 +27,7 @@
 
 import { gradeVerdict } from './verdict-grade'
 import { groupPocketSales } from './price-groups'
-import { compMatchProfile, pocketMedianSalePrice } from './observable'
+import { compMatchProfile, overPocketRescue, pocketMedianSalePrice } from './observable'
 import { exclusionReasons } from './appraiser'
 import { validateAgentSelection } from './index'
 import type { AgentSelection, HarnessEvidence, Phase1Context, SelectionAttempt } from './index'
@@ -472,10 +472,12 @@ export function runDeterministicSelector(
   const medianBand = groupStats('middle')
   const asIsBand = groupStats('bottom')
 
-  // R10 pocket-price cap — the pocket is the named neighborhood (subdivision
-  // when no neighborhood name); a comp more than +10% above its median sale
-  // price belongs to a different market: context, never a pick (d9 also
-  // rejects it as a driver). ≤+5% ranks preferred, ≤+10% fallback.
+  // R10 pocket-price position — the pocket is the named neighborhood
+  // (subdivision when no neighborhood name). No hard cap: an over-pocket
+  // comp can drive ARV when its premium is EXPLAINED (verified reno
+  // evidence — overPocketRescue, same test the d9 gate applies); an
+  // unexplained over-pocket sale belongs to a different market: context,
+  // never a pick. ≤+5% ranks preferred, ≤+10% fallback, over last.
   const POCKET_CAP = { preferred: 1.05, max: 1.10 }
   const pocketAnchor = pocketMedianSalePrice(
     subject as { neighborhoodName?: string | null; subdivision?: string | null; censusTract?: string | null },
@@ -676,12 +678,18 @@ export function runDeterministicSelector(
   // comp outranks every off-pocket comp — an off-pocket ARV comp never
   // cuts ahead of an in-pocket median comp while pocket stock remains.
   // Inside each side, ARV-qualified comps first, then the rank.
-  const pickable = clean.filter((r) => !asIsPriced(r) && !overPocket(r))
+  const pickable = clean.filter((r) => !asIsPriced(r) && (!overPocket(r) || overPocketRescue(r.comp)))
   for (const r of clean) {
     if (overPocket(r)) {
-      r.audit.rules.push('R10')
-      r.audit.reasons.push(
-        `R10 over-pocket — $${r.comp.salePrice!.toLocaleString()} is +${Math.round((pocketDeltaOf(r) ?? 0) * 100)}% over the pocket median $${pocketAnchor!.medianPrice.toLocaleString()} (${pocketAnchor!.scope}, cap +${Math.round((POCKET_CAP.max - 1) * 100)}%) — context only, never a pick`)
+      if (overPocketRescue(r.comp)) {
+        r.audit.rules.push('R10-rescue')
+        r.audit.reasons.push(
+          `R10 explained premium — $${r.comp.salePrice!.toLocaleString()} is +${Math.round((pocketDeltaOf(r) ?? 0) * 100)}% over the pocket median $${pocketAnchor!.medianPrice.toLocaleString()} (${pocketAnchor!.scope}) but the premium is verified reno evidence — eligible`)
+      } else {
+        r.audit.rules.push('R10')
+        r.audit.reasons.push(
+          `R10 over-pocket — $${r.comp.salePrice!.toLocaleString()} is +${Math.round((pocketDeltaOf(r) ?? 0) * 100)}% over the pocket median $${pocketAnchor!.medianPrice.toLocaleString()} (${pocketAnchor!.scope}) with unexplained premium — different market, context only`)
+      }
     }
   }
   const arvFirst = (a: RankedComp, b: RankedComp) =>

@@ -451,6 +451,31 @@ export function pocketMedianSalePrice(
   return { medianPrice, scope, n: set.length }
 }
 
+/** Explained-premium rescue — an over-pocket comp may still drive ARV when
+ *  its premium is EXPLAINED by a verified renovation (what an appraiser
+ *  does: ask "can I say why this sold high?"). Two conditions, both in
+ *  evidence the observables already compute: the unexplained-premium
+ *  outlier read is low (the premium is attributable, not an anomaly) AND
+ *  the comp carries ARV-grade evidence (verified flip, after_renovation
+ *  classification, Renovated/Updated condition label, or arv comp tier).
+ *  An over-pocket sale without both stays different-market context. */
+export function overPocketRescue(c: {
+  observables?: { unexplainedPremiumP?: number | null } | null
+  verifiedFlip?: boolean | null
+  classification?: { type?: string | null } | null
+  conditionLabel?: string | null
+  compTier?: string | null
+}): boolean {
+  const unexplained = c.observables?.unexplainedPremiumP
+  const explained = unexplained != null && unexplained < 0.5
+  if (!explained) return false
+  const cond = c.classification?.type ?? null
+  return c.verifiedFlip === true ||
+    cond === 'after_renovation' ||
+    c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated' ||
+    c.compTier === 'arv'
+}
+
 export interface CompMatchProfile {
   /** Two-dimension geo answer — a comp can be BG+neighborhood matched at
    *  once. Deepest tier wins the ordering. */
