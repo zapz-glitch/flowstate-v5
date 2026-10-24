@@ -324,8 +324,12 @@ export function gradeVerdict(evidenceIn: HarnessEvidence, selection: AgentSelect
   // explained belongs to a different market — it fails here.
   const pocketAnchor = pocketMedianSalePrice(evidence.subject, evidence.comps)
   if (pocketAnchor) {
+    const subjectFeatures = {
+      lotPremiumProbabilities: evidence.subjectObservables?.lotPremiumProbabilities ?? null,
+      poolType: (evidence.subject as { poolType?: string | null }).poolType ?? null,
+    }
     const overDrivers = drivers.filter(
-      (c) => (c.salePrice ?? 0) > pocketAnchor.medianPrice * 1.10 && !overPocketRescue(c))
+      (c) => (c.salePrice ?? 0) > pocketAnchor.medianPrice * 1.10 && !overPocketRescue(c, subjectFeatures))
     if (overDrivers.length > 0) {
       checks.d9 = 'fail'
       failures.push('d9_driver_over_pocket')

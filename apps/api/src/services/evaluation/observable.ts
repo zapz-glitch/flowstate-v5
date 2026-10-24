@@ -458,22 +458,58 @@ export function pocketMedianSalePrice(
  *  outlier read is low (the premium is attributable, not an anomaly) AND
  *  the comp carries ARV-grade evidence (verified flip, after_renovation
  *  classification, Renovated/Updated condition label, or arv comp tier).
- *  An over-pocket sale without both stays different-market context. */
-export function overPocketRescue(c: {
-  observables?: { unexplainedPremiumP?: number | null } | null
-  verifiedFlip?: boolean | null
-  classification?: { type?: string | null } | null
-  conditionLabel?: string | null
-  compTier?: string | null
-}): boolean {
+ *  Third: no premium attribute the subject can't sell — a waterfront or
+ *  pool premium explains the COMP's price, not the subject's value.
+ *  An over-pocket sale failing any of these stays different-market
+ *  context. */
+export function overPocketRescue(
+  c: {
+    observables?: {
+      unexplainedPremiumP?: number | null
+      premiumProbabilities?: Record<string, number> | null
+    } | null
+    verifiedFlip?: boolean | null
+    classification?: { type?: string | null } | null
+    conditionLabel?: string | null
+    compTier?: string | null
+  },
+  subjectFeatures?: {
+    /** P(feature) on the SUBJECT's own lot read — same attribute family as
+     *  the comp's c8p lane (LARGE_LOT maps to subject OVERSIZED_LOT). */
+    lotPremiumProbabilities?: Record<string, number> | null
+    poolType?: string | null
+  } | null,
+): boolean {
   const unexplained = c.observables?.unexplainedPremiumP
   const explained = unexplained != null && unexplained < 0.5
   if (!explained) return false
   const cond = c.classification?.type ?? null
-  return c.verifiedFlip === true ||
+  const arvEvidence = c.verifiedFlip === true ||
     cond === 'after_renovation' ||
     c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated' ||
     c.compTier === 'arv'
+  if (!arvEvidence) return false
+  // Appraisal feature-mismatch rule: a comp premium explained by a feature
+  // the subject can't sell (waterfront, oversized lot, corner/cul-de-sac,
+  // view, pool) accounts for THAT comp's price, not the subject's value —
+  // it stays bound evidence, never a driver. Shared features pass.
+  const compPremium = c.observables?.premiumProbabilities
+  if (compPremium) {
+    const SUBJECT_KEY: Record<string, string> = {
+      WATERFRONT: 'WATERFRONT', CORNER_CULDESAC: 'CORNER_CULDESAC',
+      LARGE_LOT: 'OVERSIZED_LOT', VIEW: 'VIEW', POOL: 'POOL',
+    }
+    for (const [attr, p] of Object.entries(compPremium)) {
+      if ((p ?? 0) < 0.6) continue
+      const key = SUBJECT_KEY[attr] ?? attr
+      const subjP = subjectFeatures?.lotPremiumProbabilities?.[key]
+      const subjectShares = attr === 'POOL'
+        ? ((subjP ?? 0) >= 0.5 || !!(subjectFeatures?.poolType && subjectFeatures.poolType.toLowerCase() !== 'none'))
+        : (subjP ?? 0) >= 0.5
+      if (!subjectShares) return false
+    }
+  }
+  return true
 }
 
 export interface CompMatchProfile {

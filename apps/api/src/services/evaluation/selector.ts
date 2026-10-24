@@ -678,17 +678,22 @@ export function runDeterministicSelector(
   // comp outranks every off-pocket comp — an off-pocket ARV comp never
   // cuts ahead of an in-pocket median comp while pocket stock remains.
   // Inside each side, ARV-qualified comps first, then the rank.
-  const pickable = clean.filter((r) => !asIsPriced(r) && (!overPocket(r) || overPocketRescue(r.comp)))
+  const subjectFeatures = {
+    lotPremiumProbabilities: evidence.subjectObservables?.lotPremiumProbabilities ?? null,
+    poolType: (subject as { poolType?: string | null }).poolType ?? null,
+  }
+  const rescued = (r: RankedComp) => overPocketRescue(r.comp, subjectFeatures)
+  const pickable = clean.filter((r) => !asIsPriced(r) && (!overPocket(r) || rescued(r)))
   for (const r of clean) {
     if (overPocket(r)) {
-      if (overPocketRescue(r.comp)) {
+      if (rescued(r)) {
         r.audit.rules.push('R10-rescue')
         r.audit.reasons.push(
           `R10 explained premium — $${r.comp.salePrice!.toLocaleString()} is +${Math.round((pocketDeltaOf(r) ?? 0) * 100)}% over the pocket median $${pocketAnchor!.medianPrice.toLocaleString()} (${pocketAnchor!.scope}) but the premium is verified reno evidence — eligible`)
       } else {
         r.audit.rules.push('R10')
         r.audit.reasons.push(
-          `R10 over-pocket — $${r.comp.salePrice!.toLocaleString()} is +${Math.round((pocketDeltaOf(r) ?? 0) * 100)}% over the pocket median $${pocketAnchor!.medianPrice.toLocaleString()} (${pocketAnchor!.scope}) with unexplained premium — different market, context only`)
+          `R10 over-pocket — $${r.comp.salePrice!.toLocaleString()} is +${Math.round((pocketDeltaOf(r) ?? 0) * 100)}% over the pocket median $${pocketAnchor!.medianPrice.toLocaleString()} (${pocketAnchor!.scope}) with unexplained/unmatched premium — different market, context only`)
       }
     }
   }
