@@ -20,7 +20,7 @@
 
 import type { HarnessEvidence, AgentSelection } from './index'
 import { noCompPassesRules } from './rule-passers'
-import { pocketMedianSalePrice } from './observable'
+import { overPocketRescue, pocketMedianSalePrice } from './observable'
 
 export type CheckResult = 'pass' | 'fail' | 'warn' | 'skipped'
 
@@ -315,15 +315,21 @@ export function gradeVerdict(evidenceIn: HarnessEvidence, selection: AgentSelect
     }
   }
 
-  // ── d9: pocket-price cap ─────────────────────────────────────────────
+  // ── d9: unexplained over-pocket drivers ─────────────────────────────
   // The pocket is the subject's named neighborhood (subdivision when no
-  // neighborhood name). A driver priced more than +10% over the pocket's
-  // median sale price belongs to a different market — it can sit in the
-  // pick set as context but can never drive ARV.
+  // neighborhood name). There is no hard price cap — an over-pocket
+  // comp may drive ARV when its premium is EXPLAINED by verified reno
+  // evidence (overPocketRescue — what an appraiser checks: can I say why
+  // it sold high?). An over-pocket driver whose premium can't be
+  // explained belongs to a different market — it fails here.
   const pocketAnchor = pocketMedianSalePrice(evidence.subject, evidence.comps)
   if (pocketAnchor) {
+    const subjectFeatures = {
+      lotPremiumProbabilities: evidence.subjectObservables?.lotPremiumProbabilities ?? null,
+      poolType: (evidence.subject as { poolType?: string | null }).poolType ?? null,
+    }
     const overDrivers = drivers.filter(
-      (c) => (c.salePrice ?? 0) > pocketAnchor.medianPrice * 1.10)
+      (c) => (c.salePrice ?? 0) > pocketAnchor.medianPrice * 1.10 && !overPocketRescue(c, subjectFeatures))
     if (overDrivers.length > 0) {
       checks.d9 = 'fail'
       failures.push('d9_driver_over_pocket')
@@ -331,7 +337,7 @@ export function gradeVerdict(evidenceIn: HarnessEvidence, selection: AgentSelect
         gateFeedback.push(
           `d9: driver ${c.id} (${c.address ?? 'unknown'}) sold at $${c.salePrice!.toLocaleString()} — ` +
           `+${Math.round(((c.salePrice! / pocketAnchor.medianPrice) - 1) * 100)}% over the pocket median $${Math.round(pocketAnchor.medianPrice).toLocaleString()} ` +
-          `(${pocketAnchor.scope}, cap +10%) — that's a different market; demote it to supporting or replace it`)
+          `(${pocketAnchor.scope}) with no verified reno evidence explaining the premium — that's a different market; demote it to supporting or replace it`)
       }
     } else {
       checks.d9 = 'pass'
