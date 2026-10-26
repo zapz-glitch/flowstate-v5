@@ -41,3 +41,15 @@ Re-run with corrected labels + reworded question (busy road / commercial, yes/no
 | clef (27B) | 18/19 | lot 4 false alarm (street + park behind) |
 
 Small sample, single labeler. Decision: proceed with clef-flash for **water** and **exposure** only.
+
+## Round 2 — pins and pools
+
+- Lot 5 (7462 Water Silk Dr): owner confirmed **backs water AND has a pool**. One "pick the
+  strongest premium" answer can't hold both, so every attribute becomes its own yes/no.
+- ATTOM `pool` is blank on 4 of 5 lots that visibly have one. Can't rely on it.
+- Pool yes/no from aerials: clef-flash 12/19, clef 14/19 — screened pools are hard from above.
+  Pool should come from the listing (description/features + listing photos), aerial as a backup.
+- Map pins: ATTOM's pin is >15 m off the house on 6/20 (7470 Thoreau 58 m — owner confirmed
+  the real house is beside the image center). Geocodio returned `rooftop` on 18/20; its two
+  `range_interpolation` answers were 65 m and 118 m off. None of our Google keys can geocode yet
+  (API not enabled / referer-locked / billing off).
