@@ -24,4 +24,20 @@ Findings
   should retry at 512.
 - 2–3 of 20 map pins don't sit on the house; reads on those lots are noise either way.
 
+## Owner spot-check round 1
+
+- Lot 16 (5347 N 2nd Dr): **backing** commercial, not siding (house faces the private drive).
+- Lots 15 and 20 (94th Ave, Seminole): **fronting** — 94th Ave is a double-yellow through road.
+  My question had told Clef "two-lane streets don't count"; reworded to "a road with a painted
+  center line counts; only quiet streets with no center line don't."
+- Lots 12 and 13 confirmed as labeled.
+- OpenStreetMap tags 94th Ave `highway=residential`, so map road class would also miss it.
+
+Re-run with corrected labels + reworded question (busy road / commercial, yes/no):
+
+| Reader | Exposure y/n | Misses |
+|---|---|---|
+| clef-flash | 17/19 | lot 1 false alarm (golf course edge), lot 15 missed (score 0.40) |
+| clef (27B) | 18/19 | lot 4 false alarm (street + park behind) |
+
 Small sample, single labeler. Decision: proceed with clef-flash for **water** and **exposure** only.
