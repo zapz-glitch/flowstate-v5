@@ -42,6 +42,8 @@
  *   9. URAR condition line        — Carlton Dr / Banjo reno premium
  *  10. outlier ceiling, 2 votes  — Geraci / Woodcrest / Longwood
  *  11. verify-and-retry ladder    — widen → deepen → labeled floor
+ *  12. site match                — 7462 Water Silk Dr: water/road read
+ *                                  per lot, unknown never excludes
  */
 
 // ── Constants (calibrated — see scoreboard.md) ────────────────────────────
@@ -62,6 +64,16 @@ export const B_REHAB_FRACTION: Record<string, number> = {
 }
 
 // ── Minimal shapes (supersets of the serialized analysis fields) ──────────
+/** Yes/no site reads for one lot — true/false is a read, null/absent is
+ *  unknown. Waterfront and busy road come from the aerial; pool from the
+ *  listing text or the county record (aerial pool reads proved unreliable). */
+export interface BSite {
+  waterfront?: boolean | null
+  /** Busy road, arterial, rail, or commercial use touching the lot. */
+  busyRoad?: boolean | null
+  pool?: boolean | null
+}
+
 export interface BSubject {
   squareFeet: number | null
   yearBuilt?: number | null
@@ -86,6 +98,7 @@ export interface BSubject {
   condition?: string | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
+  site?: BSite | null
 }
 
 export interface BComp {
@@ -169,6 +182,7 @@ export interface BComp {
     flags?: string[] | null
   } | null
   appraisalRules?: { totalAdjustment?: number | null } | null
+  site?: BSite | null
 }
 
 export interface BContribution {
@@ -209,7 +223,7 @@ export interface BResult {
 // ── Helpers ───────────────────────────────────────────────────────────────
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 
-export const HARNESS_VERSION = 'og-2026.10.14.1'
+export const HARNESS_VERSION = 'og-2026.10.26.1'
 
 export function bSubjectAvm(s: BSubject): number | null {
   return s.avmValue ?? s.avm?.value ?? null
@@ -714,6 +728,9 @@ export function evaluateB(
     if (yd != null) s += yd <= 10 ? 1.5 : yd <= 20 ? 0.75 : 0
     const sd = c.squareFeet && subject.squareFeet ? Math.abs(c.squareFeet - subject.squareFeet) : null
     if (sd != null) s += sd <= 150 ? 1.5 : sd <= 300 ? 0.75 : 0
+    // Pool differs from the subject (both read) — ranks lower, still drives.
+    const sp = subject.site?.pool, cp = c.site?.pool
+    if (typeof sp === 'boolean' && typeof cp === 'boolean' && sp !== cp) s -= 1.0
     return s
   }
 
@@ -812,6 +829,27 @@ export function evaluateB(
         note: `outside ${geoTierName}` })
     }
     drivers = geoKept
+  }
+
+  // ── Site match — a lot premium/penalty the subject doesn't share ───────
+  // A waterfront comp, or one on a busy road, prices its own lot, not the
+  // subject's. When a driver matches the subject on both reads, the
+  // mismatched ones step down to bounds. Unknown on either side is not a
+  // mismatch. When nothing matches, the drivers stand and the gap is flagged.
+  const SITE_KEYS = ['waterfront', 'busyRoad'] as const
+  const siteMisses = (c: BComp) => SITE_KEYS.filter((k) => {
+    const a = subject.site?.[k], b = c.site?.[k]
+    return typeof a === 'boolean' && typeof b === 'boolean' && a !== b
+  })
+  if (drivers.some((x) => !siteMisses(x.comp).length)) {
+    for (const x of drivers.filter((x) => siteMisses(x.comp).length)) {
+      const miss = siteMisses(x.comp).join(', ')
+      flags.push(`${x.comp.address}: dropped from drivers — site differs from subject (${miss})`)
+      dec({ compAddress: x.comp.address, stage: 'site', rule: 'site-match', verdict: 'dropped', note: miss })
+    }
+    drivers = drivers.filter((x) => !siteMisses(x.comp).length)
+  } else if (drivers.length) {
+    flags.push('site: no driver matches the subject lot — premium/penalty not adjusted')
   }
 
   // ── Reconciliation anchoring — most-similar comp drives, rest bounds ────
