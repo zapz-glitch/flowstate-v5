@@ -37,4 +37,11 @@ assert.equal(poolFrom({ description: 'Updated kitchen, new roof.' }), null)
 assert.equal(poolFrom({ poolType: 'In-Ground' }), true)
 assert.equal(poolFrom({ poolType: 'None' }), null)
 
+// Permits — a pool permit is pool evidence (7462 Water Silk Dr carries
+// "Pool/att spa/deck/gas"); a removal / fill-in permit is not.
+assert.equal(poolFrom({ permits: ['Re-roof mod bit/18 squares', 'Pool/att spa/deck/gas'] }), true)
+assert.equal(poolFrom({ permits: ['Demo pool and fill in'] }), null)
+assert.equal(poolFrom({ permits: ['Pool fence', 'Pool barrier'] }), null)
+assert.equal(poolFrom({ mlsPool: false, permits: ['Pool/att spa/deck/gas'] }), false, 'MLS field still wins')
+
 console.log('site-read: passed')

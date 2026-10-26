@@ -72,6 +72,24 @@ const comp = (over: Partial<BComp> = {}): BComp => ({
   assert.equal(r.drivers.length, 2)
 }
 
+// Seat picks are held to the site rule too (7462 Water Silk Dr, first
+// e2e): the agent named an inland comp for a waterfront subject while a
+// waterfront ARV comp was in the pool — the pick fails like an unverified
+// one and the matched comp drives.
+{
+  const s = subject({ site: { waterfront: true } })
+  const inland = comp({ id: 'in', address: 'inland', site: { waterfront: false } })
+  const water = comp({ id: 'wa', address: 'water', salePrice: 360_000, site: { waterfront: true } })
+  const r = evaluateB(s, [inland, water], { driverIds: ['in'] })
+  assert.deepEqual(r.drivers.map((x) => x.comp.address), ['water'])
+  assert.ok(r.flags.some((f) => f.startsWith('seat: 1 pick(s) did not verify')))
+  // No waterfront comp that can price an ARV → the seat pick stands.
+  const asIs = comp({ id: 'wa', address: 'water', classification: { type: 'distressed' }, site: { waterfront: true } })
+  const r2 = evaluateB(s, [inland, asIs], { driverIds: ['in'] })
+  assert.deepEqual(r2.drivers.map((x) => x.comp.address), ['inland'])
+  assert.ok(r2.flags.some((f) => f.startsWith('site: no driver matches')))
+}
+
 // Replay — a saved report carries its site reads, so a recalc reaches the
 // same drivers the run did (server/dashboard symmetry).
 {

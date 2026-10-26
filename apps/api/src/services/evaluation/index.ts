@@ -1707,7 +1707,7 @@ export async function performAnalysisPhase2(
     // Unknown on any failure; never blocks the run.
     if (env.SITE_READS_ENABLED !== 'false') {
       const photos = ctx.photoBundle ?? (ctx.photoBundlePromise ? await ctx.photoBundlePromise.catch(() => null) : null)
-      const sites = await readSites(env, siteLotsOf(bundle.property, appraisalResult.comparables, subjectListingDetails, photos))
+      const sites = await readSites(env, siteLotsOf(bundle.property, appraisalResult.comparables, subjectListingDetails, photos, bundle.enrichment.permits?.items))
         .catch((e) => { console.log('[SiteRead] failed:', e); return null })
       if (sites) {
         bSubjectFields.site = sites.get(SUBJECT_SITE_ID) ?? null
@@ -2396,6 +2396,7 @@ function siteLotsOf(
   comparables: AppraisedComparable[],
   subjectListing: RedfinDetailsResult | null,
   photos: PhotoBundle | null,
+  permits?: Array<{ description?: string | null; projectType?: string | null }> | null,
 ): SiteLot[] {
   const full = (p: { address?: string | null; city?: string | null; state?: string | null; zipCode?: string | null }) =>
     p.address ? [p.address, p.city, [p.state, p.zipCode].filter(Boolean).join(' ')].filter(Boolean).join(', ') : null
@@ -2407,7 +2408,8 @@ function siteLotsOf(
     .slice(0, SITE_READ_MAX_COMPS)
   return [
     { id: SUBJECT_SITE_ID, address: full(property), mlsPool: subjectListing?.details?.pool ?? null,
-      description: photos?.subject?.description ?? null, poolType: poolType(property) },
+      description: photos?.subject?.description ?? null, poolType: poolType(property),
+      permits: (permits ?? []).map((p) => [p.description, p.projectType].filter(Boolean).join(' ')) },
     ...candidates.map((c) => ({ id: c.id, address: full(c), mlsPool: c.listingDetails?.pool ?? null,
       description: photos?.comps?.[c.id]?.description ?? null, poolType: poolType(c) })),
   ]

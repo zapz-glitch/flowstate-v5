@@ -53,3 +53,43 @@ Small sample, single labeler. Decision: proceed with clef-flash for **water** an
   the real house is beside the image center). Geocodio returned `rooftop` on 18/20; its two
   `range_interpolation` answers were 65 m and 118 m off. None of our Google keys can geocode yet
   (API not enabled / referer-locked / billing off).
+
+## Build + first end-to-end (2026-10-26)
+
+Shipped on `feat/b-harness-site-reads`:
+
+- **Reader** `apps/api/src/services/site-read` — Geocodio rooftop pin only
+  (else unknown) → Esri aerials (640 → 512 → USGS) → clef-flash water,
+  clef 27B busy road → KV cache by pin. Pool: MLS field → description
+  (shared pools stripped) → pool permit → county field. No aerial pool.
+- **Cutoffs** (from the 19 lots): water yes ≥0.60, no ≤0.30; busy road
+  yes when 27B NEUTRAL ≤0.30, no when ≥0.45; between = unknown.
+- **Set-B trick 12** (`og-2026.10.26.1`): when the pool holds a
+  site-matched comp that can carry an ARV, comps that differ on water or
+  busy road step down to bounds — seat (agent) picks included. Pool
+  differences only rank lower (−1 similarity). Unknown never excludes.
+- Saved reports carry `site` on subject + comps; API and dashboard recalc
+  replay it. `SITE_READS_ENABLED=false` turns the reads off.
+
+Tests: 6 unit (site match) + 4 unit (reader) + 1 integration, full API
+suite 46/46, snapshot replay 11/11 with 0 drift.
+
+### E2E — 7462 Watersilk Dr N, Pinellas Park (job_1792992726782_5d104f9a1c754520)
+
+- Subject read: waterfront **yes**, busy road **no** — matches owner label.
+  Pool came back unknown → fixed: the subject's permit "Pool/att spa/deck/gas"
+  now reads as pool (owner label: has a pool).
+- Comps: 26/28 read (2 were $100 sales outside the candidate set).
+  waterfront 6 yes / 17 no / 3 unknown; busy road 6 / 17 / 3.
+- Comp pool: unknown on all — the default harness pulls no comp listings,
+  ATTOM pool blank. Pool rule is a no-op until comp listing text exists.
+- Site reads cost ~17s cold inside `set_b_arv` (cached after).
+- **Bug found:** the agent seat named one inland comp (7253 Bryce Pt) as
+  sole driver; the rule only filtered inside the seat's picks, so it just
+  flagged. Fixed by applying the site check to the driver pool before the
+  seat picks are honored.
+- Replay of the saved run through the fixed code: ARV **$1,173,719 →
+  $1,531,041** (low confidence, one driver: 7394 Kindal Pt, waterfront,
+  same subdivision, 0.09 mi, $1.675M at 4,510 sf). 8 comps dropped for
+  water/busy-road mismatch. **Needs owner check** — the water reads on
+  the dropped Bayou Club comps decide this swing.

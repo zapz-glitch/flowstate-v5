@@ -42,13 +42,18 @@ export function busyFromExposure(a: { choice?: string; probabilities?: Record<st
 // Shared amenities and non-pool phrases — stripped before the pool check.
 const NOT_OWN_POOL = /\b(community|neighborhood|subdivision|hoa|association|shared|club ?house|resort[- ]style|amenit(?:y|ies)[^.]{0,40})\s+(?:swimming\s+)?pools?\b|\bpools?\s+(?:table|access|privileges)\b|\b(?:room|space|yard)\s+for\s+(?:a\s+)?pool\b|\bno\s+pool\b|\bcar ?pool/gi
 
-/** Pool from listing evidence. MLS field wins; a description that names
- *  the home's own pool is yes; the county field is last. Silence is
- *  unknown, never no. */
-export function poolFrom(e: { mlsPool?: boolean | null; description?: string | null; poolType?: string | null }): boolean | null {
+// A pool permit proves a pool — unless it took one out or only fenced it.
+const POOL_PERMIT = /\bpool\b/i
+const NOT_A_POOL_PERMIT = /remov|demo|fill(?:ed)?[- ]in|abandon|\bfence\b|barrier|alarm/i
+
+/** Pool from listing evidence. MLS field wins; then a description that
+ *  names the home's own pool; then a pool permit; the county field is
+ *  last. Silence is unknown, never no. */
+export function poolFrom(e: { mlsPool?: boolean | null; description?: string | null; permits?: string[] | null; poolType?: string | null }): boolean | null {
   if (typeof e.mlsPool === 'boolean') return e.mlsPool
   const text = (e.description ?? '').replace(NOT_OWN_POOL, ' ')
   if (/\b(?:swimming\s+)?pool\b/i.test(text)) return true
+  if ((e.permits ?? []).some((p) => POOL_PERMIT.test(p) && !NOT_A_POOL_PERMIT.test(p))) return true
   const county = (e.poolType ?? '').trim().toLowerCase()
   if (county && !['none', 'no', 'n', 'false', '0'].includes(county)) return true
   return null
@@ -172,6 +177,8 @@ export interface SiteLot {
   address: string | null
   mlsPool?: boolean | null
   description?: string | null
+  /** Permit descriptions on record (subject only today). */
+  permits?: string[] | null
   poolType?: string | null
 }
 

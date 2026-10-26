@@ -737,7 +737,35 @@ export function evaluateB(
   // ── Tier discipline — renovated preferred → median fallback → retail ────
   // Over-adjusted comps are bounds, not drivers — they sit in verifiedPool
   // (and the ceiling) but can never anchor or support.
-  const driverPool = verifiedPool.filter((x) => !x.boundOnly)
+  const verifiedDrivers = verifiedPool.filter((x) => !x.boundOnly)
+
+  // ── Site match — a lot premium/penalty the subject doesn't share ───────
+  // A waterfront comp, or one on a busy road, prices its own lot, not the
+  // subject's. When the pool holds a site-matched comp that can carry an
+  // ARV (renovated or median tier), the mismatched comps step down to
+  // bounds — seat picks included. Unknown on either side is not a
+  // mismatch. With no usable match the pool stands and the gap is flagged.
+  const SITE_KEYS = ['waterfront', 'busyRoad'] as const
+  const siteMisses = (c: BComp) => SITE_KEYS.filter((k) => {
+    const a = subject.site?.[k], b = c.site?.[k]
+    return typeof a === 'boolean' && typeof b === 'boolean' && a !== b
+  })
+  const siteMatched = verifiedDrivers.filter((x) => !siteMisses(x.comp).length)
+  const canCarry = (x: BContribution) =>
+    bCondTier(x.comp) === 'median' || (x.tier === 'arv' && bCondTier(x.comp) !== 'distressed')
+  let driverPool = verifiedDrivers
+  if (siteMatched.length < verifiedDrivers.length) {
+    if (siteMatched.some(canCarry)) {
+      for (const x of verifiedDrivers.filter((x) => siteMisses(x.comp).length)) {
+        const miss = siteMisses(x.comp).join(', ')
+        flags.push(`${x.comp.address}: dropped from drivers — site differs from subject (${miss})`)
+        dec({ compAddress: x.comp.address, stage: 'site', rule: 'site-match', verdict: 'dropped', note: miss })
+      }
+      driverPool = siteMatched
+    } else {
+      flags.push('site: no driver matches the subject lot — premium/penalty not adjusted')
+    }
+  }
   const medianComps = driverPool.filter((x) => bCondTier(x.comp) === 'median')
   const preferred = driverPool.filter((x) =>
     x.tier === 'arv' && !['median', 'distressed'].includes(bCondTier(x.comp)) && similarity(x) >= B_MIN_SIM)
@@ -829,27 +857,6 @@ export function evaluateB(
         note: `outside ${geoTierName}` })
     }
     drivers = geoKept
-  }
-
-  // ── Site match — a lot premium/penalty the subject doesn't share ───────
-  // A waterfront comp, or one on a busy road, prices its own lot, not the
-  // subject's. When a driver matches the subject on both reads, the
-  // mismatched ones step down to bounds. Unknown on either side is not a
-  // mismatch. When nothing matches, the drivers stand and the gap is flagged.
-  const SITE_KEYS = ['waterfront', 'busyRoad'] as const
-  const siteMisses = (c: BComp) => SITE_KEYS.filter((k) => {
-    const a = subject.site?.[k], b = c.site?.[k]
-    return typeof a === 'boolean' && typeof b === 'boolean' && a !== b
-  })
-  if (drivers.some((x) => !siteMisses(x.comp).length)) {
-    for (const x of drivers.filter((x) => siteMisses(x.comp).length)) {
-      const miss = siteMisses(x.comp).join(', ')
-      flags.push(`${x.comp.address}: dropped from drivers — site differs from subject (${miss})`)
-      dec({ compAddress: x.comp.address, stage: 'site', rule: 'site-match', verdict: 'dropped', note: miss })
-    }
-    drivers = drivers.filter((x) => !siteMisses(x.comp).length)
-  } else if (drivers.length) {
-    flags.push('site: no driver matches the subject lot — premium/penalty not adjusted')
   }
 
   // ── Reconciliation anchoring — most-similar comp drives, rest bounds ────
