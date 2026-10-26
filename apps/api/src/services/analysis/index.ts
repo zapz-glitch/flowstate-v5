@@ -635,6 +635,8 @@ export interface AnalysisResponse {
     county: string | null
     latitude: number | null
     longitude: number | null
+    /** Set-B site reads (trick 12) — waterfront / busy road / pool; null = unread. */
+    site?: import('@flowstate-api/shared/appraisal').BSite | null
     bedrooms: number | null
     bathrooms: number | null
     /** @deprecated Use bedrooms and bathrooms separately */
@@ -1566,6 +1568,7 @@ export function buildAnalysisResponse(
       // honest signal; a stored flag would get dropped by pool merges.
       ...(comp.censusTract == null && comp.latitude != null ? { geographyUnverified: true } : {}),
       ...(comp.listingDetails ? { listingDetails: comp.listingDetails } : {}),
+      ...(comp.site ? { site: comp.site } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
       heating: merged?.features?.heating ?? comp.features?.heating ?? null,
@@ -1671,6 +1674,7 @@ export function buildAnalysisResponse(
       lotSizeAcres: property.lotSizeAcres ?? null,
       lotSizeSquareFeet: property.lotSizeSquareFeet ?? null,
       condition: valuation?.rehabLevel ?? null,
+      site: property.site ?? null,
     },
     allComps,
     { rehabCost: valuation?.totalRehabCost ?? null },
@@ -1723,6 +1727,7 @@ export function buildAnalysisResponse(
       yearBuilt: property.yearBuilt ?? null,
       propertyType: property.propertyType ?? null,
       subdivision: property.subdivision ?? null,
+      site: property.site ?? null,
       parcelId: property.parcelId ?? null,
       apnFormatted: property.apnFormatted ?? null,
       neighborhoodName: property.neighborhoodName ?? property.geoScopes?.n4 ?? property.geoScopes?.n3 ?? null,

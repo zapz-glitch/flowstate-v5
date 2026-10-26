@@ -31,7 +31,7 @@ import {
   passesHardFilters,
   scoreComp,
 } from '@flowstate-api/shared'
-import { evaluateB, type BComp } from '@flowstate-api/shared/appraisal'
+import { evaluateB, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
 
 /**
  * Check whether the user has changed any filter or adjustment settings
@@ -215,6 +215,7 @@ export function recalculateReport(
     appraisalRules: c.appraisalRules
       ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
       : null,
+    site: ((c as { site?: BComp['site'] }).site) ?? null,
   }))
   const bSubject = {
     squareFeet: subject.squareFeet ?? null,
@@ -228,6 +229,7 @@ export function recalculateReport(
     lotSizeAcres: subject.lotSizeAcres ?? null,
     lotSizeSquareFeet: subject.lotSizeSquareFeet ?? null,
     condition: data.valuation?.rehabLevel ?? null,
+    site: ((subject as { site?: BSubject['site'] }).site) ?? null,
   }
   const bResult = evaluateB(bSubject, bComps, { rehabCost: data.valuation?.rehabCost ?? null })
   // Server ARV is authoritative — the pipeline's evidence pool (rescues,
@@ -536,6 +538,7 @@ export function recalculateValuationFromComps(
     appraisalRules: c.appraisalRules
       ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
       : null,
+    site: ((c as { site?: BComp['site'] }).site) ?? null,
   }))
   const bResult = evaluateB(
     {
@@ -550,6 +553,7 @@ export function recalculateValuationFromComps(
       lotSizeAcres: subject.lotSizeAcres ?? null,
       lotSizeSquareFeet: subject.lotSizeSquareFeet ?? null,
       condition: originalValuation.rehabLevel ?? null,
+      site: ((subject as { site?: BSubject['site'] }).site) ?? null,
     },
     bComps,
     { rehabCost: originalValuation.rehabCost ?? null },

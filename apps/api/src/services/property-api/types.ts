@@ -208,6 +208,8 @@ export interface NormalizedProperty {
   legalDescription?: string
   /** Redfin MLS property-details enrichment (shadow evidence — not used in appraisal math) */
   listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
+  /** Set-B site reads (trick 12) — see services/site-read. */
+  site?: import('@flowstate-api/shared/appraisal').BSite | null
 
   /** Newest priced sale in the record — sales-history can carry a newer
    *  transaction than the comparables pool returned (pool sometimes holds
@@ -299,6 +301,9 @@ export interface NormalizedComparable {
   improvementAssessedValue?: number | null
   /** Redfin MLS property-details enrichment — shadow display evidence */
   listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
+  /** Set-B site reads (trick 12) — waterfront / busy road / pool yes-no;
+   *  null = unknown. Stamped just before B runs (services/site-read). */
+  site?: import('@flowstate-api/shared/appraisal').BSite | null
   /** ARV evidence verification — price cross-check (sale vs own AVM) +
    *  age staleness, own-AVM price check, and pocket market fit. Shadow
    *  evidence:

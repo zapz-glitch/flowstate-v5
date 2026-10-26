@@ -39,7 +39,7 @@ const TRANSACTION_NOISE_REASON: Record<string, string> = {
   nominal_sale: 'Nominal sale — not an arm\'s-length price',
 }
 export { arvEvidence, classifyCompsByEvidence, pocketPriceGroups }
-import { evaluateB, subdivisionsMatch, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
+import { evaluateB, subdivisionsMatch, type BComp, type BSite, type BSubject } from '@flowstate-api/shared/appraisal'
 import { createValuationService, MAJOR_ITEMS, type MajorItem, type ValuationResult } from '../valuation'
 import type { ClassificationResult } from '../classification'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
@@ -65,6 +65,7 @@ import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
+import { readSites, type SiteLot } from '../site-read'
 import { gradeVerdict } from './verdict-grade'
 import { buildRenovationEvidence, priceAgentRenovation } from './renovation'
 
@@ -1702,6 +1703,22 @@ export async function performAnalysisPhase2(
     // attempts — a persistently failing pool ships its honest fallback
     // tier, never a forced number.
     const bSubjectFields = buildBSubjectFields(bundle, valuation, subjectAvm)
+    // Site reads (trick 12) — the subject plus the comps that can drive.
+    // Unknown on any failure; never blocks the run.
+    if (env.SITE_READS_ENABLED !== 'false') {
+      const photos = ctx.photoBundle ?? (ctx.photoBundlePromise ? await ctx.photoBundlePromise.catch(() => null) : null)
+      const sites = await readSites(env, siteLotsOf(bundle.property, appraisalResult.comparables, subjectListingDetails, photos))
+        .catch((e) => { console.log('[SiteRead] failed:', e); return null })
+      if (sites) {
+        bSubjectFields.site = sites.get(SUBJECT_SITE_ID) ?? null
+        bundle.property.site = bSubjectFields.site
+        for (const comp of appraisalResult.comparables) {
+          const site = sites.get(comp.id)
+          if (site) comp.site = site
+        }
+        onProgress?.(`Site reads: ${sites.size - 1} comp lot(s) + subject`)
+      }
+    }
     const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal, compDigests, ctx.compCoverPhotos)
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
@@ -2283,6 +2300,7 @@ function buildBSubjectFields(
   subjectAvm: number | null,
 ) {
   return {
+    site: null as BSite | null,
     squareFeet: bundle.property.squareFeet ?? null,
     yearBuilt: bundle.property.yearBuilt ?? null,
     censusTract: bundle.property.censusTract ?? null,
@@ -2363,7 +2381,36 @@ export function toBCompsOf(
     evidenceCoverage: compEvidenceCoverage?.[comp.id] ?? null,
     evidenceVerification: comp.evidenceVerification ?? null,
     appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
+    site: comp.site ?? null,
   }))
+}
+
+const SUBJECT_SITE_ID = '__subject'
+const SITE_READ_MAX_COMPS = 40
+
+/** Lots worth a site read — the subject and the comps that could drive:
+ *  enabled, or same-pocket (the T1b rescue can bring those back). Nearest
+ *  first, capped so a wide pool can't fan out into hundreds of reads. */
+function siteLotsOf(
+  property: PropertyBundle['property'],
+  comparables: AppraisedComparable[],
+  subjectListing: RedfinDetailsResult | null,
+  photos: PhotoBundle | null,
+): SiteLot[] {
+  const full = (p: { address?: string | null; city?: string | null; state?: string | null; zipCode?: string | null }) =>
+    p.address ? [p.address, p.city, [p.state, p.zipCode].filter(Boolean).join(' ')].filter(Boolean).join(', ') : null
+  const poolType = (p: unknown) => featStr((p as { features?: { poolType?: string[] | string | null } }).features?.poolType ?? (p as { pool?: string | null }).pool)
+  const candidates = comparables
+    .filter((c) => c.salePrice && c.squareFeet &&
+      (c.isEnabled || c.sameBlockGroup === true || (!!property.censusTract && c.censusTract === property.censusTract)))
+    .sort((a, b) => (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+    .slice(0, SITE_READ_MAX_COMPS)
+  return [
+    { id: SUBJECT_SITE_ID, address: full(property), mlsPool: subjectListing?.details?.pool ?? null,
+      description: photos?.subject?.description ?? null, poolType: poolType(property) },
+    ...candidates.map((c) => ({ id: c.id, address: full(c), mlsPool: c.listingDetails?.pool ?? null,
+      description: photos?.comps?.[c.id]?.description ?? null, poolType: poolType(c) })),
+  ]
 }
 
 /** Re-stamp price/age/market-fit verification across the pool and switch off

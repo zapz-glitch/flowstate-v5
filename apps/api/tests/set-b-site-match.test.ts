@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import { evaluateB, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
+import { savedToBComps, savedToBSubject } from '../src/services/evaluation/saved-pool'
 
 const subject = (over: Partial<BSubject> = {}): BSubject => ({
   squareFeet: 1500,
@@ -69,6 +70,23 @@ const comp = (over: Partial<BComp> = {}): BComp => ({
   const r = evaluateB(s, [withPool, noPool])
   assert.equal(r.anchorAddress, 'nopool')
   assert.equal(r.drivers.length, 2)
+}
+
+// Replay — a saved report carries its site reads, so a recalc reaches the
+// same drivers the run did (server/dashboard symmetry).
+{
+  const saved = {
+    subject: { squareFeet: 1500, yearBuilt: 1990, censusTract: 'T1', subdivision: 'PINES', site: { waterfront: false } },
+    valuation: {},
+  }
+  const items = [
+    { id: 'w', address: 'water', isEnabled: true, salePrice: 380_000, squareFeet: 1500, censusTract: 'T1', subdivision: 'PINES',
+      distanceMiles: 0.2, yearBuilt: 1990, classification: { type: 'after_renovation' }, site: { waterfront: true } },
+    { id: 'i', address: 'inland', isEnabled: true, salePrice: 300_000, squareFeet: 1500, censusTract: 'T1', subdivision: 'PINES',
+      distanceMiles: 0.2, yearBuilt: 1990, classification: { type: 'after_renovation' }, site: { waterfront: false } },
+  ]
+  const r = evaluateB(savedToBSubject(saved), savedToBComps(items, null))
+  assert.deepEqual(r.drivers.map((x) => x.comp.address), ['inland'])
 }
 
 console.log('set-b site match: passed')

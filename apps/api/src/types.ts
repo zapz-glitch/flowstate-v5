@@ -134,6 +134,8 @@ export interface Env {
   REASONING_STAGE_ONLY?: string
   /** 'false' turns off Google Street View (no coverage check, no image, no street comparison) */
   STREET_VIEW_ENABLED?: string
+  /** 'false' turns off Set-B site reads (rooftop pin + aerial water/busy-road + listing pool). */
+  SITE_READS_ENABLED?: string
   /** 'false' turns off every OpenStreetMap lookup (Overpass location risks, Nominatim street orientation) */
   OSM_ENABLED?: string
   /** 'true' = the appraiser gets one model call: no questions, no revision */

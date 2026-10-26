@@ -46,6 +46,7 @@ export function savedToBComps(
     appraisalRules: c.appraisalRules
       ? { totalAdjustment: c.appraisalRules.totalAdjustment ?? null }
       : null,
+    site: (c.site as BComp['site']) ?? null,
   }))
 }
 
@@ -72,5 +73,6 @@ export function savedToBSubject(saved: {
     lotSizeAcres: (subject.lotSizeAcres as number) ?? null,
     lotSizeSquareFeet: (subject.lotSizeSquareFeet as number) ?? null,
     condition: (savedVal.rehabLevel as string) ?? null,
+    site: (subject.site as BSubject['site']) ?? null,
   }
 }
