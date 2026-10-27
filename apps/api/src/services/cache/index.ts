@@ -21,10 +21,11 @@ export interface CacheService {
 
 // Default TTLs for different cache types (in seconds)
 export const CACHE_TTL = {
-  // Property data rarely changes - cache for 21 days
-  PROPERTY_DETAILS: 21 * 24 * 60 * 60,
-  // Comparables data - cache for 21 days
-  COMPARABLES: 21 * 24 * 60 * 60,
+  // Property facts (beds, baths, sqft, lot, year built) rarely change —
+  // owner policy is 90–180 days; 90 keeps a re-sale or addition visible.
+  PROPERTY_DETAILS: 90 * 24 * 60 * 60,
+  // Comparables — owner policy 30 days (new closings move the pool)
+  COMPARABLES: 30 * 24 * 60 * 60,
   // Flood zone data rarely changes - cache for 30 days
   FLOOD_ZONE: 30 * 24 * 60 * 60,
   // Permits data - cache for 7 days
@@ -118,7 +119,8 @@ export function comparablesKey(clip: string, radius?: number, months?: number, p
     : CACHE_PREFIX.COMPARABLES
   const effective = { ...parameters, radiusMiles: radius ?? null, monthsBack: months ?? null }
   const entries = Object.entries(effective).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b))
-  return `${prefix}search-v4:${clip}:${JSON.stringify(entries)}`
+  // v5 — entries before the ATTOM sale-date fix (2026-10-27) carry undated comps.
+  return `${prefix}search-v5:${clip}:${JSON.stringify(entries)}`
 }
 
 /**

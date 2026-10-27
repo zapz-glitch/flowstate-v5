@@ -7,7 +7,7 @@ import type { Env } from '../src/types'
 
 const base: ComparablesSearchParams = { propertyId: 'fixture', radiusMiles: 0.5, monthsBack: 12, maxComps: 25, subjectSqft: 2000, sqftVariance: 20, minBeds: 2, maxBeds: 5, minBaths: 1, maxBaths: 4 }
 const key = (params: ComparablesSearchParams) => comparablesKey(params.propertyId, params.radiusMiles, params.monthsBack, 'corelogic', { ...params })
-assert.match(key(base), /search-v4/)
+assert.match(key(base), /search-v5/)
 assert.equal(key(base), key(Object.fromEntries(Object.entries(base).reverse()) as unknown as ComparablesSearchParams))
 const variants = [
   { propertyId: 'other' }, { radiusMiles: 1 }, { monthsBack: 6 }, { maxComps: 100 },

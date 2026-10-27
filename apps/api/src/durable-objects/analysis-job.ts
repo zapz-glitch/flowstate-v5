@@ -82,6 +82,7 @@ import { notifyEvalComplete } from '../routes/offers'
 import { analysisRuns, harnessQueue, savedReports } from '../db/schema'
 import {
   EVAL_ERROR_TTL_SECONDS,
+  EVAL_RESULT_TTL,
   decodeVerdict,
   encodeVerdict,
   isCacheableVerdict,
@@ -2086,7 +2087,7 @@ export class AnalysisJobDO {
 
       if (config.evalResultCacheKey) {
         await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
-          expirationTtl: 21 * 24 * 60 * 60, // 21 days
+          expirationTtl: EVAL_RESULT_TTL,
         }).catch(() => { /* best-effort */ })
       }
     } catch (dbError) {
@@ -2722,7 +2723,7 @@ export class AnalysisJobDO {
           await linkRunRecordToReport(db.$client, runRecordId, config.jobId, config.userId)
           if (config.evalResultCacheKey) {
             await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
-              expirationTtl: 21 * 24 * 60 * 60, // 21 days
+              expirationTtl: EVAL_RESULT_TTL,
             }).catch(() => { /* best-effort */ })
           }
         } catch (dbError) {

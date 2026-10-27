@@ -34,11 +34,15 @@ export async function hashEvalParams(params: unknown): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** How long a finished evaluation (comps + ARV) is served — owner policy 30 days. */
+export const EVAL_RESULT_TTL = 30 * 24 * 60 * 60
+
 export function evalResultKey(userId: string, address: string, paramsHash: string): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
   // v4 — harness-versioned: a rule release can never serve an old-code
-  // answer as if it were produced by the current evaluator.
-  return `eval-result:v4:${HARNESS_VERSION}:${userId}:${norm}:${paramsHash}`;
+  // answer as if it were produced by the current evaluator. v5 — rolled
+  // past answers built on undated ATTOM comps (2026-10-27 sale-date fix).
+  return `eval-result:v5:${HARNESS_VERSION}:${userId}:${norm}:${paramsHash}`;
 }
 
 /**
