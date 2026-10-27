@@ -93,3 +93,22 @@ suite 46/46, snapshot replay 11/11 with 0 drift.
   same subdivision, 0.09 mi, $1.675M at 4,510 sf). 8 comps dropped for
   water/busy-road mismatch. **Needs owner check** — the water reads on
   the dropped Bayou Club comps decide this swing.
+
+### Stress round 1 — two pipeline bugs found by the e2e (2026-10-27)
+
+- **ATTOM dropped `saleDate` on comps** — records carry `recordedDate`
+  only (probed `find_comparable_sales`). Every comp read "sale age
+  unverified". Fixed: recorded date stands in. This is live on `main`.
+- **Subject tier reader had no Clef fallback** — Decisions 401 (local
+  OpenAI key rejected) + no reasoning key left 16 photos unread and the
+  rehab tier at the default. Fixed: Clef reads when both fail. Prod has
+  an Anthropic key, so prod falls to Haiku, not Clef.
+
+Re-run (job_1793078222241_7a45f6880f174560): 85s (was 542s),
+27/28 comps dated, subject tier read by Clef (Full Cosmetic, 35%,
+needs_review), subject pool **yes** from permit. ARV **$1,141,032**
+anchored on 7361 Watersilk Dr N ($1.186M, 3,787 sf, 2026-06-12, water
+unknown). The $1.53M replay rested on 7394 Kindal Pt — the one comp
+with no sale date at all, so it no longer verifies.
+Agent pick 7253 Bryce Pt (inland read) was dropped by the site rule.
+Open: owner spot-check of the 8 dropped comps' water reads.
