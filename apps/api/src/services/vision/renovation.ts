@@ -338,9 +338,11 @@ async function runClefChunkReads(
   env: RenovationEnv,
   live: FetchedImage[],
   propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null; description?: string | null },
+  /** Read through Workers AI Clef even when the decision model is configured. */
+  opts?: { forceClef?: boolean },
 ): Promise<ClefChunkRead> {
   const ai = env.AI
-  const useDecisions = env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)
+  const useDecisions = !opts?.forceClef && env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)
   if (!ai && !useDecisions) return { answers: [], chunksRead: 0 }
   const model = '@cf/cloudflare/clef-flash'
   const questions = {
@@ -832,9 +834,10 @@ export async function assessRenovationFromPhotos(
   // chunk layer is skipped entirely when a reasoning provider is bound
   // (haiku sees the images itself rather than reasoning over Clef votes).
   // Clef remains only as the fallback reader when no reasoning provider
-  // is configured.
-  if (!provider && !decisionsOn) {
-    const clef = await runClefChunkReads(env, live, propertyContext ?? {})
+  // is configured — including when the decision model was configured but
+  // returned nothing (bad key, outage).
+  if (!provider && !decisionsRead && env.AI) {
+    const clef = await runClefChunkReads(env, live, propertyContext ?? {}, { forceClef: true })
       .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
     const mergedClef = mergedClefAssessment(clef.answers, live)
     if (mergedClef) return mergedClef
