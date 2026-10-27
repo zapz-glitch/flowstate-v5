@@ -555,7 +555,7 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
   return property
 }
 
-function normalizeMcpComp(c: McpCompRecord): NormalizedComparable {
+export function normalizeMcpComp(c: McpCompRecord): NormalizedComparable {
   const a = parseOneLine(c.address)
   const baths = (c.fullBathrooms ?? 0) + 0.5 * (c.partialBathrooms ?? 0)
   const attomId = String(c.attomId ?? '')
@@ -581,7 +581,9 @@ function normalizeMcpComp(c: McpCompRecord): NormalizedComparable {
     propertyType: c.propertyUse ?? c.propertyTypeKey ?? null,
 
     salePrice: c.salePrice ?? null,
-    saleDate: c.saleDate ? String(c.saleDate).slice(0, 10) : null,
+    // ATTOM dropped saleDate from comp records (2026-10-26) — the deed's
+    // recorded date stands in; it trails closing by days, not months.
+    saleDate: (c.saleDate ?? c.recordedDate) ? String(c.saleDate ?? c.recordedDate).slice(0, 10) : null,
     pricePerSqft: c.pricePerSqFt ?? (c.salePrice && c.squareFootage ? Math.round(c.salePrice / c.squareFootage) : null),
 
     // N4 is ATTOM's micro-neighborhood layer — NOT the legal subdivision.
