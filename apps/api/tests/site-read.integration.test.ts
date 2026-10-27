@@ -16,7 +16,8 @@ const API_CACHE = {
 }
 
 // Lat encodes the lot: 27.1 water (Water Silk Dr), 27.2 inland, 27.3
-// busy road, 27.4 Esri 640 fails (512 must cover), 27.5 Clef throws.
+// busy road, 27.4 Esri 640 fails (512 must cover), 27.5 Clef throws,
+// 27.7 sharp tile with a pool (every other tile is a few bytes = blurry).
 const pins: Record<string, { lat: number; lng: number; accuracy_type: string }> = {
   'subject addr': { lat: 27.1, lng: -82.7, accuracy_type: 'rooftop' },
   'water comp': { lat: 27.1, lng: -82.7, accuracy_type: 'rooftop' },
@@ -25,6 +26,7 @@ const pins: Record<string, { lat: number; lng: number; accuracy_type: string }> 
   'phoenix comp': { lat: 27.4, lng: -82.7, accuracy_type: 'rooftop' },
   'flaky comp': { lat: 27.5, lng: -82.7, accuracy_type: 'rooftop' },
   'street comp': { lat: 27.6, lng: -82.7, accuracy_type: 'range_interpolation' },
+  'pool comp': { lat: 27.7, lng: -82.7, accuracy_type: 'rooftop' },
 }
 const yOf = (lat: number) => (20037508.34 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))
 const latOfBbox = (url: string) => {
@@ -43,18 +45,20 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.includes('World_Imagery') || url.includes('USGSImageryTopo')) {
     if (latOfBbox(url) === 27.4 && url.includes('size=640,640')) return new Response('err', { status: 500 })
-    return new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { 'content-type': 'image/jpeg' } })
+    const bytes = latOfBbox(url) === 27.7 ? new Uint8Array(60_000).fill(0xd8) : new Uint8Array([0xff, 0xd8, 0xff])
+    return new Response(bytes, { headers: { 'content-type': 'image/jpeg' } })
   }
   throw new Error(`unexpected fetch ${url}`)
 }) as typeof fetch
 
-let aiCalls = 0
+let aiCalls = 0, poolCalls = 0
 const AI = {
   run: async (model: string, body: { images: { base64: string }[]; questions: Record<string, unknown> }) => {
     aiCalls++
     assert.equal(body.images.length, 2, 'wide + close aerial')
     const lat = currentLat
     if (lat === 27.5) throw new Error('clef 503')
+    if ('pool' in body.questions) { poolCalls++; return { answers: { pool: { noul: lat === 27.7 ? 0.93 : 0.5 } } } }
     if (model.endsWith('/clef-flash')) return { answers: { water: { noul: lat === 27.1 ? 0.86 : 0.02 } } }
     return { answers: { exposure: { choice: lat === 27.3 ? 'FRONTING' : 'NEUTRAL',
       probabilities: { NEUTRAL: lat === 27.3 ? 0.12 : 0.66 } } } }
@@ -84,6 +88,13 @@ assert.deepEqual(await one(lot('f', 'flaky comp')), { waterfront: null, busyRoad
 const aiBeforeStreet = aiCalls
 assert.deepEqual(await one(lot('st', 'street comp')), { waterfront: null, busyRoad: null, pool: null }, 'non-rooftop pin is unknown')
 assert.equal(aiCalls, aiBeforeStreet, 'no aerial read without a rooftop pin')
+
+// Pool from the aerial — only a sharp tight tile is asked; a blurry one
+// leaves pool unknown without a Clef call, and listing text still wins.
+assert.equal(poolCalls, 0, 'blurry tiles never ask the pool question')
+assert.deepEqual(await one(lot('pc', 'pool comp')), { waterfront: false, busyRoad: false, pool: true })
+assert.equal(poolCalls, 1)
+assert.deepEqual(await one(lot('pc', 'pool comp', { mlsPool: false })), { waterfront: false, busyRoad: false, pool: false }, 'MLS field beats the aerial')
 
 // ── 2. Cache — a repeat costs no Geocodio or Clef call; failures retry ───
 const geoBefore = geocodioCalls, aiBefore = aiCalls

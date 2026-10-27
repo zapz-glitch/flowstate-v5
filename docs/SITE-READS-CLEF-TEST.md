@@ -112,3 +112,36 @@ unknown). The $1.53M replay rested on 7394 Kindal Pt — the one comp
 with no sale date at all, so it no longer verifies.
 Agent pick 7253 Bryce Pt (inland read) was dropped by the site rule.
 Open: owner spot-check of the 8 dropped comps' water reads.
+
+## Owner pool labels — Watersilk comps (2026-10-27)
+
+Owner checked the spot-check page: **pool = yes** on 8675 Buttonwood Ln N,
+7253 Bryce Pt N, 7303 Sawgrass Point Dr N, 7861 Oliver Rd. Harness read all
+four as unknown. Cause: comp pool has no source — no comp listing pull in the
+default harness, ATTOM pool blank, permits pulled for the subject only, and
+aerial pool reads were turned off (12–14/19 in round 2).
+
+## Aerial pool read back on (2026-10-27)
+
+Owner: the satellite view is the source for comp pools — turn it back on.
+Why round 2 failed: the ~180m close-up makes a pool ~18px wide.
+
+Test (`scratchpad/pooltest/run_pool.py`): 18 labeled lots from the 19-lot set
+plus the 4 owner-labeled Watersilk comps, Clef 27B, images = close (~180m) +
+tight (~70m), pool-only yes/no prompt.
+
+- Prompt 1 ("screen cage at the back of the house") missed 7303 Sawgrass —
+  its pool is a screened courtyard in the middle of the roof (0.26).
+  Prompt 2 names courtyard pools → 0.93.
+- Prompt 2, yes ≥0.85 / no ≤0.2: all 8 owner-confirmed pools ≥0.89; no
+  false yes. clef-flash was worse (missed 7253 Bryce Pt at 0.18).
+- Blurry tiles: Esri is sharp in Pinellas (≥80KB/640px) and mush in
+  Phoenix/Atlanta/Valrico (~22KB). A blurry tile scored a no-pool lot 0.79.
+  Gate: tight tile under 0.12 bytes/px → pool unknown, Clef not asked.
+
+Wired: pool = MLS → description → permit → aerial → county. Aerial cache
+`site:aerial:v2:` (pool added). Unit + integration pass; 49/49, replay 11/11.
+
+E2E (7462 Watersilk, 2026-10-27): subject pool yes; comps pool yes 18 /
+no 1 / unknown 7. All 4 owner-labeled comps read yes. ARV unchanged at
+$1,141,032 — pool only ranks drivers, it never drops one.

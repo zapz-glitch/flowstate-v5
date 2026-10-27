@@ -3,13 +3,15 @@
  *
  *   waterfront  Clef-flash on two Esri aerials (wide ~600m, close ~180m)
  *   busyRoad    Clef 27B on the same aerials (busy road, rail, commercial)
- *   pool        MLS pool field → listing description → county pool field
+ *   pool        MLS field → description → permit → Clef 27B on a tight
+ *               (~70m) aerial → county field
  *
  * The aerials are centered on a Geocodio ROOFTOP pin only — an ATTOM pin
  * or an interpolated street point lands on the wrong lot often enough
  * (6/20 and 2/20 in the test) that the read is left unknown instead.
- * Cutoffs come from the 19-lot owner-labeled test; aerial pool reads were
- * wrong even when confident, so pool never comes from the aerial.
+ * Cutoffs come from the owner-labeled tests. Aerial pool reads only count
+ * on a sharp tile: on the ~180m close-up pools were ~18px and missed; on a
+ * ~70m tile Clef 27B found 8/8 owner-confirmed pools with no false yes.
  * Test record: docs/SITE-READS-CLEF-TEST.md
  *
  * Every failure resolves to unknown (null) — a site read can never block
@@ -21,7 +23,7 @@ import type { Env } from '../../types'
 
 const PIN_TTL = 180 * 24 * 60 * 60
 const AERIAL_TTL = 180 * 24 * 60 * 60
-const READ_VERSION = 'v1'
+const READ_VERSION = 'v2'
 
 // ── Cutoffs (pure) ───────────────────────────────────────────────────────
 
@@ -39,6 +41,19 @@ export function busyFromExposure(a: { choice?: string; probabilities?: Record<st
   return neutral <= 0.30 ? true : neutral >= 0.45 ? false : null
 }
 
+/** Clef 27B aerial pool probability → yes/no. Real pools scored ≥0.89 in
+ *  the owner-labeled test; no-pool lots topped out at 0.60 on sharp tiles. */
+export function poolFromP(p: number | null | undefined): boolean | null {
+  if (typeof p !== 'number') return null
+  return p >= 0.85 ? true : p <= 0.2 ? false : null
+}
+
+/** Low-detail imagery compresses small — a blurry tile can't show a pool,
+ *  so its pool read is unknown. Sharp tiles ran ≥0.2 bytes/px, blurry ~0.06–0.09. */
+export function sharpEnough(bytes: number, px: number): boolean {
+  return bytes / (px * px) >= 0.12
+}
+
 // Shared amenities and non-pool phrases — stripped before the pool check.
 const NOT_OWN_POOL = /\b(community|neighborhood|subdivision|hoa|association|shared|club ?house|resort[- ]style|amenit(?:y|ies)[^.]{0,40})\s+(?:swimming\s+)?pools?\b|\bpools?\s+(?:table|access|privileges)\b|\b(?:room|space|yard)\s+for\s+(?:a\s+)?pool\b|\bno\s+pool\b|\bcar ?pool/gi
 
@@ -46,14 +61,15 @@ const NOT_OWN_POOL = /\b(community|neighborhood|subdivision|hoa|association|shar
 const POOL_PERMIT = /\bpool\b/i
 const NOT_A_POOL_PERMIT = /remov|demo|fill(?:ed)?[- ]in|abandon|\bfence\b|barrier|alarm/i
 
-/** Pool from listing evidence. MLS field wins; then a description that
- *  names the home's own pool; then a pool permit; the county field is
- *  last. Silence is unknown, never no. */
-export function poolFrom(e: { mlsPool?: boolean | null; description?: string | null; permits?: string[] | null; poolType?: string | null }): boolean | null {
+/** Pool from the evidence on hand. MLS field wins; then a description
+ *  that names the home's own pool; then a pool permit; then the aerial
+ *  read; the county field is last. Silence is unknown, never no. */
+export function poolFrom(e: { mlsPool?: boolean | null; description?: string | null; permits?: string[] | null; aerialPool?: boolean | null; poolType?: string | null }): boolean | null {
   if (typeof e.mlsPool === 'boolean') return e.mlsPool
   const text = (e.description ?? '').replace(NOT_OWN_POOL, ' ')
   if (/\b(?:swimming\s+)?pool\b/i.test(text)) return true
   if ((e.permits ?? []).some((p) => POOL_PERMIT.test(p) && !NOT_A_POOL_PERMIT.test(p))) return true
+  if (typeof e.aerialPool === 'boolean') return e.aerialPool
   const county = (e.poolType ?? '').trim().toLowerCase()
   if (county && !['none', 'no', 'n', 'false', '0'].includes(county)) return true
   return null
@@ -73,6 +89,12 @@ const EXPOSURE_Q = {
     criteria: { FRONTING: 'fronts a busy road, arterial, or commercial', SIDING: 'sides a busy road, arterial, or commercial', BACKING: 'backs a busy road, commercial, freeway, or rail', NEUTRAL: 'typical interior residential setting', UNVERIFIED: 'imagery insufficient' },
     instructions: 'Does the center lot have adverse site exposure? Scan every edge of the center parcel: a large commercial/industrial building, parking lot, multi-lane arterial or highway, or rail line touching or immediately adjacent = exposure. A through road counts too: any road with a painted center line (double yellow) or that carries traffic between neighborhoods. Only quiet neighborhood streets with no center line are NOT exposure. Pick the side: fronting = street side, backing = rear edge, siding = side edge. NEUTRAL when all edges border homes, yards, or woods.',
   },
+}
+
+const POOL_STATE = { subject: 'Residential lot read for a real-estate appraisal. Image 1 is a close aerial (~180m across). Image 2 is a tight aerial (~70m across) of the same spot. The subject house is at the CENTER of both.' }
+
+const POOL_Q = {
+  pool: { type: 'noul', instructions: "Probability the CENTER house's own lot has a private swimming pool. In Florida most pools sit under a screen enclosure: a grey or white mesh roof with a visible grid of frame lines, either attached to the back of the house or set in a courtyard in the middle of the house, often with blue water faintly visible through it. A grid-patterned panel set into a solid roof is a screened courtyard pool. An open pool is a blue or teal shape in the back yard. A pool on a neighboring lot does NOT count. Spas, ponds, and blue tarps are not pools." },
 }
 
 // ── Rooftop pins (Geocodio, one batch call) ──────────────────────────────
@@ -120,13 +142,13 @@ export async function rooftopPins(env: Env, addresses: string[]): Promise<Map<st
 
 // ── Aerials (Esri World Imagery, USGS fallback) ──────────────────────────
 
-async function tileB64(url: string) {
+async function tileB64(url: string, px: number) {
   const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (flowstate site-read)' }, signal: AbortSignal.timeout(15000) }).catch(() => null)
   if (!res?.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return null
   const buf = new Uint8Array(await res.arrayBuffer())
   let bin = ''
   for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192))
-  return { content_type: 'image/jpeg' as const, base64: btoa(bin) }
+  return { content_type: 'image/jpeg' as const, base64: btoa(bin), sharp: sharpEnough(buf.length, px) }
 }
 
 /** One aerial centered on the pin, `half` meters each way. Esri 500s on
@@ -137,9 +159,9 @@ export async function aerial(pin: Pin, half: number) {
   const y = (R / Math.PI) * Math.log(Math.tan(Math.PI / 4 + pin.lat * Math.PI / 360))
   const bbox = `${Math.round(x - half)},${Math.round(y - half)},${Math.round(x + half)},${Math.round(y + half)}`
   const q = (size: number) => `export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=${size},${size}&format=jpg&f=image`
-  return (await tileB64(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/${q(640)}`))
-    ?? (await tileB64(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/${q(512)}`))
-    ?? (await tileB64(`https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/${q(512)}`))
+  return (await tileB64(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/${q(640)}`, 640))
+    ?? (await tileB64(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/${q(512)}`, 512))
+    ?? (await tileB64(`https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/${q(512)}`, 512))
 }
 
 // ── Aerial read (Clef) ───────────────────────────────────────────────────
@@ -148,25 +170,35 @@ const aerialKey = (pin: Pin) => `site:aerial:${READ_VERSION}:${pin.lat.toFixed(5
 
 type ClefAnswers = { answers?: Record<string, { noul?: number; choice?: string; probabilities?: Record<string, number> }> }
 
-/** Waterfront + busy road for one lot. Cached by pin; a failed read is
- *  unknown and not cached. */
-export async function aerialRead(env: Env, pin: Pin): Promise<Pick<BSite, 'waterfront' | 'busyRoad'>> {
+const UNREAD: BSite = { waterfront: null, busyRoad: null, pool: null }
+
+/** Waterfront, busy road, and pool for one lot. Cached by pin; a failed
+ *  read is unknown and not cached. A blurry tight tile skips the pool
+ *  question — that unknown is the answer, so it is cached. */
+export async function aerialRead(env: Env, pin: Pin): Promise<BSite> {
   const key = aerialKey(pin)
-  const hit = await env.API_CACHE?.get<Pick<BSite, 'waterfront' | 'busyRoad'>>(key, 'json').catch(() => null)
+  const hit = await env.API_CACHE?.get<BSite>(key, 'json').catch(() => null)
   if (hit) return hit
-  if (!env.AI) return { waterfront: null, busyRoad: null }
-  const [wide, close] = await Promise.all([aerial(pin, 300), aerial(pin, 90)])
-  if (!wide || !close) return { waterfront: null, busyRoad: null }
-  const images = [wide, close]
-  const run = (model: 'clef' | 'clef-flash', questions: Record<string, unknown>) =>
-    (env.AI!.run(`@cf/cloudflare/${model}` as Parameters<Ai['run']>[0], { model, state: STATE, questions, images } as never) as Promise<ClefAnswers>)
+  if (!env.AI) return UNREAD
+  const [wide, close, tight] = await Promise.all([aerial(pin, 300), aerial(pin, 90), aerial(pin, 35)])
+  if (!wide || !close) return UNREAD
+  const img = (t: NonNullable<typeof wide>) => ({ content_type: t.content_type, base64: t.base64 })
+  const run = (model: 'clef' | 'clef-flash', state: object, questions: Record<string, unknown>, images: object[]) =>
+    (env.AI!.run(`@cf/cloudflare/${model}` as Parameters<Ai['run']>[0], { model, state, questions, images } as never) as Promise<ClefAnswers>)
       .catch((e: unknown) => { console.log(`[SiteRead] ${model} threw:`, e); return null })
-  const [w, x] = await Promise.all([run('clef-flash', WATER_Q), run('clef', EXPOSURE_Q)])
-  const read = {
+  const askPool = !!tight?.sharp
+  const [w, x, p] = await Promise.all([
+    run('clef-flash', STATE, WATER_Q, [img(wide), img(close)]),
+    run('clef', STATE, EXPOSURE_Q, [img(wide), img(close)]),
+    askPool ? run('clef', POOL_STATE, POOL_Q, [img(close), img(tight!)]) : null,
+  ])
+  const read: BSite = {
     waterfront: waterFromP(w?.answers?.water?.noul),
     busyRoad: busyFromExposure(x?.answers?.exposure),
+    pool: poolFromP(p?.answers?.pool?.noul),
   }
-  if (w?.answers && x?.answers) await env.API_CACHE?.put(key, JSON.stringify(read), { expirationTtl: AERIAL_TTL }).catch(() => undefined)
+  const poolDone = !askPool ? !!tight : !!p?.answers
+  if (w?.answers && x?.answers && poolDone) await env.API_CACHE?.put(key, JSON.stringify(read), { expirationTtl: AERIAL_TTL }).catch(() => undefined)
   return read
 }
 
@@ -191,8 +223,8 @@ export async function readSites(env: Env, lots: SiteLot[]): Promise<Map<string, 
     while (next < lots.length) {
       const lot = lots[next++]
       const pin = lot.address ? pins.get(lot.address) ?? null : null
-      const air = pin ? await aerialRead(env, pin) : { waterfront: null, busyRoad: null }
-      out.set(lot.id, { ...air, pool: poolFrom(lot) })
+      const air = pin ? await aerialRead(env, pin) : UNREAD
+      out.set(lot.id, { waterfront: air.waterfront, busyRoad: air.busyRoad, pool: poolFrom({ ...lot, aerialPool: air.pool }) })
     }
   }
   await Promise.all(Array.from({ length: Math.min(8, lots.length) }, worker))
