@@ -74,6 +74,7 @@ import type { PhysicalCharacteristicSourceData } from '../physical-characteristi
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
+import { dropSubjectSelf } from '../property-api/comparable-pool'
 import { assessRenovationFromPhotos, unavailableAssessment, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { isReasoningProviderAvailable } from '../llm'
@@ -503,6 +504,8 @@ export async function performAnalysisPhase1(
 ): Promise<Phase1Context> {
   const { jobId } = params
   let { bundle } = params
+  // The subject is never its own comp (market-context returns its resale).
+  bundle.comparables = dropSubjectSelf(bundle.comparables, bundle.property)
   const appraisalService = createAppraisalService()
   const rules = params.appraisalRules ?? {}
   let filters: AppraisalFilter[]
@@ -2779,7 +2782,7 @@ export async function harnessDeepen(
  *  evidence set. Returns the count of comps added. */
 export function harnessWiden(ctx: Phase1Context, widened: NormalizedComparable[]): number {
   const existing = new Set(ctx.appraisalResult.comparables.map((c) => c.id))
-  const added = widened.filter((c) => !existing.has(c.id))
+  const added = dropSubjectSelf(widened.filter((c) => !existing.has(c.id)), ctx.bundle.property)
   if (added.length === 0) return 0
   const appraisalService = createAppraisalService()
   const widenedResult = appraisalService.evaluate(ctx.bundle.property, added, {

@@ -23,6 +23,7 @@ import type { Env } from '../../types';
 import { createCoreLogicProvider } from './providers/corelogic';
 import { createAttomProvider } from './providers/attom';
 import { createAttomMcpProvider } from './providers/attom-mcp';
+import { correctToLatestSale } from './latest-sale';
 import {
   createCacheService,
   propertyKey,
@@ -675,7 +676,7 @@ class PropertyApi implements PropertyApiService {
       await this.cache.set(cntKey, n, { ttl: CACHE_TTL.FLOOD_ZONE });
       if (n >= 3) {
         console.warn(`PropertyAPI: AVM failed ${n} consecutive times (${result.code}) — disabling for 7 days`);
-        await this.cache.set(disabledKey, 1, { ttl: CACHE_TTL.PERMITS });
+        await this.cache.set(disabledKey, 1, { ttl: 7 * 24 * 60 * 60 }); // weekly — a newly entitled product self-heals
       }
     }
 
@@ -1191,7 +1192,10 @@ class PropertyApi implements PropertyApiService {
                   }
                 : undefined;
 
-              return {
+              // Pool records can carry the flip's ACQUISITION leg — when
+              // sales-history shows a newer priced sale, the comp is priced
+              // on the true resale (correctToLatestSale).
+              return correctToLatestSale({
                 ...comp,
                 raw: {
                   ...(comp.raw && typeof comp.raw === 'object' ? comp.raw : {}),
@@ -1209,18 +1213,6 @@ class PropertyApi implements PropertyApiService {
                 flip: result.data.flip ?? null,
                 distressedSale: result.data.distressedSale ?? null,
                 latestSale: result.data.latestSale ?? null,
-                // Pool records can carry the flip's ACQUISITION leg — when
-                // sales-history shows a newer priced sale, correct the comp
-                // sale to the true resale so ARV prices the right transaction.
-                ...(result.data.latestSale && (!comp.saleDate || result.data.latestSale.date > comp.saleDate)
-                  ? {
-                      salePrice: result.data.latestSale.price,
-                      saleDate: result.data.latestSale.date,
-                      pricePerSqft: result.data.latestSale.price && comp.squareFeet
-                        ? Math.round(result.data.latestSale.price / comp.squareFeet)
-                        : comp.pricePerSqft,
-                    }
-                  : {}),
                 // ARV-evidence signals: comp's own AVM + scope medians
                 avmValue: result.data.avmValue ?? null,
                 assessedValue: result.data.assessedValue ?? null,
@@ -1250,7 +1242,7 @@ class PropertyApi implements PropertyApiService {
                   fireplacesCount: result.data.features?.fireplacesCount,
                 } : undefined,
                 isEnriched: true,
-              };
+              });
             } else {
               // Some comparables don't have detailed property data available - this is normal
               console.log(

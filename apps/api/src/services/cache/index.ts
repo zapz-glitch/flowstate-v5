@@ -28,10 +28,10 @@ export const CACHE_TTL = {
   COMPARABLES: 30 * 24 * 60 * 60,
   // Flood zone data rarely changes - cache for 30 days
   FLOOD_ZONE: 30 * 24 * 60 * 60,
-  // Permits data - cache for 7 days
-  PERMITS: 7 * 24 * 60 * 60,
-  // Vision analysis results - cache for 21 days
-  VISION_ANALYSIS: 21 * 24 * 60 * 60,
+  // Permits — owner policy: an evaluation's data lives 30 days on our side
+  PERMITS: 30 * 24 * 60 * 60,
+  // Vision analysis results (photo condition reads) — 30 days, same policy
+  VISION_ANALYSIS: 30 * 24 * 60 * 60,
   // Zillow listing/photo scrape results - cache for 30 days
   ZILLOW_DATA: 30 * 24 * 60 * 60,
   // OAuth tokens - cache until expiry minus buffer

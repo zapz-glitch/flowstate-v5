@@ -318,7 +318,7 @@ analyze.post('/', async (c) => {
       proximityConfig: userSettings.proximityConfig,
     };
 
-    // 21-day eval-result cache: same address + same effective params returns
+    // 30-day eval-result cache: same address + same effective params returns
     // the stored report; different params hash -> fresh run. skipCache and
     // explicit refresh always bypass.
     const evalParamsHash = await hashEvalParams({

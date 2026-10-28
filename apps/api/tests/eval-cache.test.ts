@@ -90,7 +90,7 @@ const stateOf = async (job: AnalysisJobDO) =>
   )
   assert.match(
     evalResultKey('u1', '123 Main St', 'h'),
-    new RegExp(`^eval-result:v5:${HARNESS_VERSION.replace(/\./g, '\\.')}:`),
+    new RegExp(`^eval-result:v6:${HARNESS_VERSION.replace(/\./g, '\\.')}:`),
     'harness version is part of the result-cache key',
   )
 }

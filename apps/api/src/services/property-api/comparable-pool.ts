@@ -75,3 +75,17 @@ export function nearestComparables<C extends { distanceMiles?: number | null }>(
     .slice(0, Math.floor(limit))
     .map(({ c }) => c)
 }
+
+const streetKey = (a?: string | null) => (a ?? '').split(',')[0].toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+/** The subject is never its own comp — drop pool rows that are the subject
+ *  by provider id or street address (market-context returns the subject's
+ *  own recent sale among the nearby sales). */
+export function dropSubjectSelf<C extends { id?: string | null; address?: string | null }>(
+  comps: C[],
+  subject: { id?: string | null; address?: string | null },
+): C[] {
+  const id = subject.id ? String(subject.id) : null
+  const addr = streetKey(subject.address)
+  return comps.filter((c) => !((id && String(c.id) === id) || (addr && streetKey(c.address) === addr)))
+}

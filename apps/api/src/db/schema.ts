@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 // ==========================================
 // Better Auth Tables
@@ -1050,3 +1050,44 @@ export const pipelineSnapshot = sqliteTable('pipeline_snapshot', {
   bodyJson: text('body_json').notNull(),
   refreshedAt: text('refreshed_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
+
+
+/** Verified flips — buy → resell pairs from provider sales-history,
+ *  recorded from every evaluation's comps (services/verified-flips).
+ *  Known resale prices for A/B and accuracy tests. Migration 0046. */
+export const verifiedFlips = sqliteTable(
+  'verified_flips',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    addressKey: text('address_key').notNull(),
+    address: text('address').notNull(),
+    state: text('state'),
+    providerId: text('provider_id'),
+    latitude: real('latitude'),
+    longitude: real('longitude'),
+    squareFeet: integer('square_feet'),
+    yearBuilt: integer('year_built'),
+    bedrooms: real('bedrooms'),
+    bathrooms: real('bathrooms'),
+    buyPrice: real('buy_price').notNull(),
+    buyDate: text('buy_date').notNull(),
+    sellPrice: real('sell_price').notNull(),
+    sellDate: text('sell_date').notNull(),
+    daysHeld: integer('days_held').notNull(),
+    gainPct: real('gain_pct').notNull(),
+    /** high | medium — see verifyFlip() */
+    confidence: text('confidence').notNull(),
+    reasonsJson: text('reasons_json'),
+    source: text('source').notNull().default('attom-sales-history'),
+    firstJobId: text('first_job_id'),
+    lastJobId: text('last_job_id'),
+    seenCount: integer('seen_count').notNull().default(1),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    uniqueIndex('uq_verified_flips_sale').on(table.addressKey, table.sellDate),
+    index('idx_verified_flips_state_sold').on(table.state, table.sellDate),
+    index('idx_verified_flips_confidence').on(table.confidence, table.sellDate),
+  ]
+)

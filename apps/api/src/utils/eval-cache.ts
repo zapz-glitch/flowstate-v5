@@ -10,8 +10,6 @@
 
 import { HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 
-/** 21 days — window in which a repeat evaluation with identical params returns the stored report. */
-export const EVAL_RESULT_TTL_SECONDS = 21 * 24 * 60 * 60;
 
 /** Terminal-verdict TTL — provider data can change daily, so failures expire fast. */
 export const EVAL_ERROR_TTL_SECONDS = 24 * 60 * 60;
@@ -36,13 +34,17 @@ export async function hashEvalParams(params: unknown): Promise<string> {
 
 /** How long a finished evaluation (comps + ARV) is served — owner policy 30 days. */
 export const EVAL_RESULT_TTL = 30 * 24 * 60 * 60
+/** Window in which a repeat evaluation with identical params returns the stored report. */
+export const EVAL_RESULT_TTL_SECONDS = EVAL_RESULT_TTL
 
 export function evalResultKey(userId: string, address: string, paramsHash: string): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
   // v4 — harness-versioned: a rule release can never serve an old-code
   // answer as if it were produced by the current evaluator. v5 — rolled
   // past answers built on undated ATTOM comps (2026-10-27 sale-date fix).
-  return `eval-result:v5:${HARNESS_VERSION}:${userId}:${norm}:${paramsHash}`;
+  // v6 — rolled past pools holding a flip's buy leg or the subject's own
+  // sale (2026-10-28).
+  return `eval-result:v6:${HARNESS_VERSION}:${userId}:${norm}:${paramsHash}`;
 }
 
 /**

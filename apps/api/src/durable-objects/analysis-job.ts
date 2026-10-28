@@ -43,6 +43,8 @@ import { createPhotoService } from '../services/photo-provider'
 import { assessRenovationFromPhotos, unavailableAssessment } from '../services/vision/renovation'
 import { createPropertyApi } from '../services/property-api'
 import { mergeComparablePools, nearestComparables } from '../services/property-api/comparable-pool'
+import { correctToLatestSale } from '../services/property-api/latest-sale'
+import { recordVerifiedFlips } from '../services/verified-flips'
 import {
   resolveCandidateLimit,
   providerMaxComps,
@@ -1037,9 +1039,10 @@ export class AnalysisJobDO {
       // same-street sales). Candidates arrive detail-enriched, then flow
       // through the same census geo gate as everything else.
       try {
-        const seenIds = new Set(comps.map((c) => String(c.id)))
+        // The subject counts as seen — its own resale is not a candidate.
+        const seenIds = new Set([String(property.id), ...comps.map((c) => String(c.id))])
         const normAddr = (a?: string | null) => (a ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
-        const seenAddrs = new Set(comps.map((c) => normAddr(c.address)).filter(Boolean))
+        const seenAddrs = new Set([property.address, ...comps.map((c) => c.address)].map(normAddr).filter(Boolean))
         const supplement = await propertyApi.marketContextSupplement(String(property.id), {
           ids: seenIds,
           addresses: seenAddrs,
@@ -1525,13 +1528,7 @@ export class AnalysisJobDO {
           }
           // The widened winner can hold the flip's stale acquisition leg —
           // re-apply the sales-history price correction on the merged comp.
-          const ls = src.latestSale as { price: number; date: string } | null | undefined
-          if (ls && (!out.saleDate || ls.date > (out.saleDate as string))) {
-            out.salePrice = ls.price
-            out.saleDate = ls.date
-            out.pricePerSqft = out.squareFeet ? Math.round(ls.price / (out.squareFeet as number)) : out.pricePerSqft
-          }
-          return out as unknown as NormalizedComparable
+          return correctToLatestSale(out as unknown as NormalizedComparable)
         })
       }
       for (const id of merged.conflictIds) {
@@ -2084,6 +2081,8 @@ export class AnalysisJobDO {
         comps: analysisResult.comps as { items?: unknown[] } | null,
         durationMs: Date.now() - evalStart,
       }).catch((e) => console.log('[telemetry] run_telemetry insert failed:', e))
+      await recordVerifiedFlips(this.env.DB, (analysisResult.comps as { items?: [] } | null)?.items, config.jobId)
+        .catch((e) => console.log('[verified-flips] record failed:', e))
 
       if (config.evalResultCacheKey) {
         await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
@@ -2721,6 +2720,8 @@ export class AnalysisJobDO {
             ...bMetricsFromValuation(valuation),
           })
           await linkRunRecordToReport(db.$client, runRecordId, config.jobId, config.userId)
+          await recordVerifiedFlips(this.env.DB, (updatedResponse.comps as { items?: [] } | null)?.items, config.jobId)
+            .catch((e) => console.log('[verified-flips] record failed:', e))
           if (config.evalResultCacheKey) {
             await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
               expirationTtl: EVAL_RESULT_TTL,

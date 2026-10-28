@@ -48,6 +48,7 @@ import type {
 } from '../types'
 import { fetchCensusGeography } from '../../geo/census-geocoder'
 import { buildRetrievalMeta } from '../retrieval-policy'
+import { correctToLatestSale } from '../latest-sale'
 
 // ─── MCP transport ────────────────────────────────────────────────────────────
 
@@ -791,7 +792,8 @@ class AttomMcpProvider implements PropertyProviderAdapter {
         )
         const property = await normalizeMcpProperty(detail, this.env)
         if (!property.id) continue
-        out.push({
+        // market-context rows can be a flip's acquisition leg too.
+        out.push(correctToLatestSale({
           id: property.id,
           provider: 'attom-mcp',
           address: property.address,
@@ -825,7 +827,7 @@ class AttomMcpProvider implements PropertyProviderAdapter {
           avmValue: property.avmValue ?? null,
           ppsfMedians: property.ppsfMedians ?? null,
           isEnriched: true,
-        })
+        }))
       } catch { /* skip a bad detail call — supplement is best-effort */ }
     }
     return out
