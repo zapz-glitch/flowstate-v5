@@ -34,6 +34,8 @@ export interface PropertySearchParams {
    *  the attom-mcp path when the address-string resolver misses. */
   fips?: string
   apn?: string
+  /** Provider property id (ATTOM attomId) — exact identity, tried first. */
+  propertyId?: string
 }
 
 export interface ComparablesSearchParams {

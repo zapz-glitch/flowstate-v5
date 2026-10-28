@@ -515,6 +515,8 @@ export class AnalysisJobDO {
       city: config.search.city,
       state: config.search.state,
       zipCode: config.search.zipCode,
+      // A caller-supplied provider id is the exact identity — tried first.
+      propertyId: config.search.propertyId,
     }
     let searchResult = coreFamily
       ? await propertyApi.searchPropertyWithFallback(searchParams)

@@ -692,8 +692,19 @@ class AttomMcpProvider implements PropertyProviderAdapter {
     const address =
       params.address ??
       [params.streetAddress, params.city, params.state, params.zipCode].filter(Boolean).join(', ')
-    if (!address) return { success: false, error: 'Address is required', code: 'INVALID_PARAMS' }
+    if (!address && !params.propertyId) return { success: false, error: 'Address is required', code: 'INVALID_PARAMS' }
     try {
+      // A known attomId is the exact identity — the caller already has it
+      // (verified flips, comps). Full subject datasets, not comp detail.
+      if (params.propertyId && /^\d+$/.test(params.propertyId)) {
+        const results = await this.propertyData({ lookupMode: 'attomId', attomId: params.propertyId }, SUBJECT_DATASETS).catch(() => [])
+        const property = await normalizeMcpProperty(results, this.env)
+        if (property.id) {
+          this.subjectResults.set(property.id, results)
+          return { success: true, data: property }
+        }
+        if (!address) return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
+      }
       // Exact-identity first: parcel numbers bypass the address-string
       // matcher entirely — the resolver misses on parcels whose recorded
       // address diverges (verified: 800 40th St S resolves by fipsApn,

@@ -5,6 +5,10 @@
  *
  *   node scripts/flip-backtest.mjs <local D1 .sqlite> [--per-state 10] [--since 2026-01-01]
  *        [--min-price 75000] [--concurrency 3] [--out .data/flip-backtest/run.json]
+ *        [--only "2649 Janice;2877 Motts"]   # re-run a few picked flips
+ *
+ * Subjects resolve by the stored provider id — ATTOM's address matcher
+ * misses some zip-less addresses (3 East Point / Atlanta flips, 2026-10-28).
  *
  * Picks the most recent high-confidence flips per state from verified_flips
  * (fill it with scripts/backfill-verified-flips.mts). Runs with rerun: true —
@@ -29,6 +33,7 @@ const MIN_PRICE = Number(opt('min-price', 75000))
 const CONCURRENCY = Number(opt('concurrency', 3))
 const OUT = opt('out', `.data/flip-backtest/${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`)
 const API = process.env.EVAL_API_URL ?? 'http://localhost:8797'
+const ONLY = (opt('only', '') || '').split(';').map((x) => x.trim().toLowerCase()).filter(Boolean)
 const RUN_TIMEOUT_MS = 15 * 60_000
 
 const vars = Object.fromEntries(readFileSync('apps/api/.dev.vars', 'utf8').split('\n')
@@ -40,12 +45,13 @@ const userId = db.prepare('select u.id from user u join saved_reports s on s.use
 if (!userId) { console.error('no local user with saved reports'); process.exit(1) }
 const headers = { 'Content-Type': 'application/json', 'X-Dashboard-User-Id': userId, 'X-Dashboard-Secret': vars.DASHBOARD_INTERNAL_SECRET }
 
-const flips = db.prepare(`
+const picked = db.prepare(`
   select * from (
     select *, row_number() over (partition by state order by sell_date desc) rn
     from verified_flips
     where confidence = 'high' and sell_date >= ? and sell_price >= ?
   ) where rn <= ? order by state, sell_date desc`).all(SINCE, MIN_PRICE, PER_STATE)
+const flips = ONLY.length ? picked.filter((f) => ONLY.some((o) => f.address.toLowerCase().includes(o))) : picked
 console.log(`${flips.length} flips picked (${PER_STATE}/state, high, sold since ${SINCE}, ≥$${MIN_PRICE.toLocaleString()})`)
 
 const streetKey = (a) => String(a ?? '').split(',')[0].toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -56,7 +62,7 @@ async function runOne(f) {
   const t0 = Date.now()
   const row = { address: f.address, state: f.state, buy: f.buy_price, buyDate: f.buy_date, sell: f.sell_price, sellDate: f.sell_date, sqft: f.square_feet }
   try {
-    const q = await (await fetch(`${API}/v1/analyze`, { method: 'POST', headers, body: JSON.stringify({ address: f.address, rerun: true }) })).json()
+    const q = await (await fetch(`${API}/v1/analyze`, { method: 'POST', headers, body: JSON.stringify({ address: f.address, propertyId: f.provider_id ?? undefined, rerun: true }) })).json()
     const jobId = q?.data?.jobId ?? q?.jobId
     if (!jobId) return { ...row, status: 'queue-failed', error: (q?.error ?? JSON.stringify(q)).slice(0, 200) }
     row.jobId = jobId
@@ -96,6 +102,11 @@ async function runOne(f) {
       compCount: items.length,
       subjectSite: r.subject?.site ?? null,
       flags: (m.flags ?? []).slice(0, 30),
+      // Provider (ATTOM) calls this run paid for vs served from our cache.
+      providerCalls: (() => {
+        const eps = Object.values(r.apiCallStats ?? {}).flatMap((p) => (p && Array.isArray(p.endpoints) ? p.endpoints : []))
+        return eps.length ? { paid: eps.reduce((s, e) => s + (e.calls ?? 0), 0), cached: eps.reduce((s, e) => s + (e.cached ?? 0), 0) } : null
+      })(),
     }
   } catch (e) {
     return { ...row, status: 'error', error: String(e).slice(0, 200), secs: Math.round((Date.now() - t0) / 1000) }
@@ -113,13 +124,16 @@ await Promise.all(Array.from({ length: Math.min(CONCURRENCY, flips.length) }, as
   }
 }))
 
-const scored = results.filter((x) => x.errPct != null)
+// An AVM-sourced ARV is not a test of the harness — ATTOM's AVM already
+// knows the resale. Score comp-driven answers only; count the rest.
+const scored = results.filter((x) => x.errPct != null && x.arvSource !== 'avm')
 const abs = scored.map((x) => Math.abs(x.errPct)).sort((a, b) => a - b)
 const median = (a) => (a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null)
 const summary = {
   picked: flips.length,
   scored: scored.length,
-  failed: results.length - scored.length,
+  avmSourced: results.filter((x) => x.arvSource === 'avm').length,
+  failed: results.filter((x) => x.errPct == null).length,
   medianAbsErrPct: median(abs),
   meanErrPct: scored.length ? Math.round((scored.reduce((s, x) => s + x.errPct, 0) / scored.length) * 10) / 10 : null,
   within5: scored.filter((x) => Math.abs(x.errPct) <= 5).length,

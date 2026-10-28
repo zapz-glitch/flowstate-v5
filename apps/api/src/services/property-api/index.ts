@@ -341,6 +341,7 @@ class PropertyApi implements PropertyApiService {
     // normalized subject by normalized address so repeat/nearby lookups
     // don't burn a provider call.
     const addrKey = [
+      params.propertyId,
       params.address,
       params.streetAddress,
       params.city,
