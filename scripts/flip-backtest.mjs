@@ -100,6 +100,10 @@ async function runOne(f) {
       postSaleDrivers: drivers.filter((x) => x.saleDate && x.saleDate > f.sell_date).length,
       selfComp: items.some((c) => streetKey(c.address) === streetKey(f.address)),
       compCount: items.length,
+      // Comps whose condition was read (Clef curb read) vs left to price.
+      compConditionReads: items.filter((c) => c.curbAppeal?.condition).length,
+      subjectRead: r.renovationLevelSource ?? null,
+      market: (m.flags ?? []).find((f) => f.startsWith('market:')) ?? null,
       subjectSite: r.subject?.site ?? null,
       flags: (m.flags ?? []).slice(0, 30),
       // Provider (ATTOM) calls this run paid for vs served from our cache.
