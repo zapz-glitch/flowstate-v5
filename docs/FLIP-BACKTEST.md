@@ -101,3 +101,41 @@ Proposals, highest expected impact first:
 
 Migration 0046 is applied to local D1 only. Production needs
 `npm run db:migrate:remote` with the next deploy.
+
+## Round 2 — 2026-10-28, harness `og-2026.10.28.1`, local
+
+Owner direction: price leads, condition supports. Clef reads condition
+(`CONDITION_READER=clef`); Set-B trick 13 sets each comp's class from a true
+neighborhood median $/sf (last 90 days, then 180, then 365; paper transfers
+and $/sf outliers out): above +10–45% = ARV evidence, ±10% = median tier,
+below = as-is, past 145% / under 70% = outside the market, never a driver.
+
+Same 20-flip pick, one at a time, `rerun: true`. 1777 Bond Dr replaced 2877
+Motts Cove Dr (a newer verified flip recorded by these runs).
+
+| 18 flips scored in both rounds | median miss | within 10% |
+|---|---|---|
+| Round 1 | 23.6% | 5 |
+| Round 2 | 19.8% | 5 |
+
+6 better, 7 worse, 5 about the same. Fixed: Fairway (+81% → −16%, the 254%
+waterfront sale is out), Norfolk, Osborne, Virginia, Paddington, Janice.
+Worse: Carmel (budget flip at 75% of its median), Hess, Webster, Oakview,
+Thornton. Unchanged misses: Banza (a 133% sale anchors; size gap barely
+adjusted), Amalfi (likely a wholesale), Hogan (resold at 3.3× its median —
+recorded sqft likely wrong).
+
+- **Condition reads:** Clef read 519 of 555 comps (round 1: almost none).
+- **Time per evaluation:** median 78s (47–101s), cached provider data.
+- **Provider calls:** 52 paid / 454 cached — 17 one-time subject lookups (the
+  property-id cache key is new), 32 detail calls for comps newly in the pools,
+  3 for the new flip. A repeat run of 2928 Banza St: 0 paid, 17 cached, same ARV.
+- **Saved-pool replay** (`scripts/flip-replay.mts`, no condition reads, no
+  calls): old engine 22.1% → new 21.4% median miss on the same pools.
+- Snapshot replay: 6/11 drift (rule change); not rebaselined.
+
+Results page: https://claude.ai/artifact/GfrcwuJMTBKdAkmsZvChER
+
+Next candidates (owner call): size adjustment for much larger comps; require
+two drivers or review; a minimum sale count for the "nearby" median; exclude
+flips whose resale sits far from their own median (bad sqft / wholesale).
