@@ -139,3 +139,31 @@ Results page: https://claude.ai/artifact/GfrcwuJMTBKdAkmsZvChER
 Next candidates (owner call): size adjustment for much larger comps; require
 two drivers or review; a minimum sale count for the "nearby" median; exclude
 flips whose resale sits far from their own median (bad sqft / wholesale).
+
+## ARV flip vs budget flip (2026-10-28)
+
+Owner question: a flip is not always an after-repair sale — a light-work
+flip of a distressed house resells below renovated value. What separates
+them? Measured on the 20 round-2 flips:
+
+| Signal | Separates? |
+|---|---|
+| **Resale $/sf ÷ true neighborhood median $/sf** | **Yes.** All 5 big overestimates resold below the median (0.50–0.91); every flip ≥1.08 landed close or under. One miss: 3782 Paddington (0.84, a 2,351 sf house — big homes sell lower per sf). |
+| Added $/sf (resale − buy) ÷ sqft | Partly. Budget flips $20–58/sf, but two ARV flips added only $23 and $35. |
+| Resale ÷ median *price* | Worse — 7146 Carmel reads at market (1.04). |
+| Days held / gain | Only for wholesales: 3209 Amalfi held 54 days for +21%. |
+| Permits in the flip window | Too sparse (3 of 20). |
+| Clef read of the subject photos | No — all 20 read "dated" / mostly "Full Cosmetic". |
+
+Rule proposed: a verified flip counts as **ARV evidence** only when its
+resale $/sf is at or above the true neighborhood median (trick 13's median).
+Below it, the flip is a **budget flip** — as-is/investor evidence, never ARV,
+and not ARV truth for backtests. Held <90 days with <25% gain = wholesale.
+
+Data faults found: 2960 Hogan Rd and 1684 Thornton Pl resolved (by ATTOM id)
+to 2960 Adenwell Rd and 1684 Regency Pl — the flip's sale prices and the
+evaluated house are not the same property. Excluded.
+
+Set-B today exempts flip-chain comps from the price class
+(`evidence_flip_chain` keeps tier `arv` below market) — the rule above
+would remove that exemption.
