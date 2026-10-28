@@ -12,6 +12,7 @@ import { recordVerifiedFlips } from '../src/services/verified-flips'
 // recorder uses.
 const sqlite = new DatabaseSync(':memory:')
 sqlite.exec(readFileSync(new URL('../migrations/0046_verified_flips.sql', import.meta.url), 'utf8'))
+sqlite.exec(readFileSync(new URL('../migrations/0047_verified_flip_class.sql', import.meta.url), 'utf8'))
 const stmt = (sql: string, args: unknown[] = []) => ({
   bind: (...a: unknown[]) => stmt(sql, a),
   run: async () => { sqlite.prepare(sql).run(...(args as never[])); return { success: true } },
@@ -29,7 +30,8 @@ const items = [
   { id: '2', address: '100 No Flip Rd, Atlanta, GA', salePrice: 300_000, saleDate: '2026-05-01', flip: null },
 ]
 
-assert.equal(await recordVerifiedFlips(d1, items, 'job_a'), 2)
+// The evaluation's neighborhood median ($250/sf) classes each flip.
+assert.equal(await recordVerifiedFlips(d1, items, 'job_a', 250), 2)
 const rows = sqlite.prepare('select * from verified_flips order by sell_price desc').all() as Record<string, unknown>[]
 assert.deepEqual(rows.map((r) => [r.address, r.state, r.confidence, r.buy_price, r.sell_price, r.days_held]), [
   ['7254 Landmark Dr, SPRING HILL, FL 34606', 'FL', 'medium', 56_500, 307_150, 227],
@@ -37,6 +39,17 @@ assert.deepEqual(rows.map((r) => [r.address, r.state, r.confidence, r.buy_price,
 ])
 assert.equal(rows[1].provider_id, '8717942')
 assert.equal(rows[1].square_feet, 910)
+// 4615 Webster resold at $329/sf (1.31× the median) → ARV flip.
+assert.deepEqual([rows[1].flip_class, rows[1].resale_vs_median], ['arv', 1.31])
+// Landmark has no sqft → no $/sf → class unknown.
+assert.equal(rows[0].flip_class, null)
+{
+  // A budget flip: resold below the median.
+  await recordVerifiedFlips(d1, [{ id: '9', address: '9 Budget Ln, Tampa, FL', salePrice: 200_000, saleDate: '2026-06-01', squareFeet: 1000,
+    flip: { priorSalePrice: 120_000, priorSaleDate: '2025-12-01' } }], 'job_x', 250)
+  const b = sqlite.prepare("select flip_class from verified_flips where address like '9 Budget%'").get() as { flip_class: string }
+  assert.equal(b.flip_class, 'budget')
+}
 
 // Same sale seen by a later run — one row, counted twice, last job updated.
 assert.equal(await recordVerifiedFlips(d1, [items[0]], 'job_b'), 1)

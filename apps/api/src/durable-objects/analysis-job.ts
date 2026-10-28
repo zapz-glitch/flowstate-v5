@@ -44,7 +44,7 @@ import { assessRenovationFromPhotos, unavailableAssessment } from '../services/v
 import { createPropertyApi } from '../services/property-api'
 import { mergeComparablePools, nearestComparables } from '../services/property-api/comparable-pool'
 import { correctToLatestSale } from '../services/property-api/latest-sale'
-import { recordVerifiedFlips } from '../services/verified-flips'
+import { recordVerifiedFlips, medianPpsfOf } from '../services/verified-flips'
 import {
   resolveCandidateLimit,
   providerMaxComps,
@@ -2084,7 +2084,7 @@ export class AnalysisJobDO {
         comps: analysisResult.comps as { items?: unknown[] } | null,
         durationMs: Date.now() - evalStart,
       }).catch((e) => console.log('[telemetry] run_telemetry insert failed:', e))
-      await recordVerifiedFlips(this.env.DB, (analysisResult.comps as { items?: [] } | null)?.items, config.jobId)
+      await recordVerifiedFlips(this.env.DB, (analysisResult.comps as { items?: [] } | null)?.items, config.jobId, medianPpsfOf(analysisResult as Record<string, unknown>))
         .catch((e) => console.log('[verified-flips] record failed:', e))
 
       if (config.evalResultCacheKey) {
@@ -2723,7 +2723,7 @@ export class AnalysisJobDO {
             ...bMetricsFromValuation(valuation),
           })
           await linkRunRecordToReport(db.$client, runRecordId, config.jobId, config.userId)
-          await recordVerifiedFlips(this.env.DB, (updatedResponse.comps as { items?: [] } | null)?.items, config.jobId)
+          await recordVerifiedFlips(this.env.DB, (updatedResponse.comps as { items?: [] } | null)?.items, config.jobId, medianPpsfOf(updatedResponse as Record<string, unknown>))
             .catch((e) => console.log('[verified-flips] record failed:', e))
           if (config.evalResultCacheKey) {
             await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {

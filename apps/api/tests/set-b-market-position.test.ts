@@ -51,3 +51,19 @@ const priceTop = { classification: { type: 'after_renovation', method: 'evidence
 }
 
 console.log('set-b market position: passed')
+
+// A flip is only ARV evidence when it resold at or above the median — a
+// budget flip (bought distressed, light work, resold below market) is
+// as-is evidence (owner, 2026-10-28; 5 of 5 big overshoots in the flip
+// backtest were budget flips).
+{
+  const flip = (ppsf: number, address: string) => sale(ppsf, { address, classification: { type: 'after_renovation', method: 'evidence_flip_chain' } })
+  const budget = flip(170, 'budget flip')
+  const r = evaluateB(subject, [...market(), budget])
+  assert.ok(!r.drivers.some((x) => x.comp.address === 'budget flip'), 'below-market flip never drives')
+  const arvFlip = flip(235, 'arv flip')
+  const r2 = evaluateB(subject, [...market(), arvFlip])
+  assert.deepEqual(r2.drivers.map((x) => x.comp.address), ['arv flip'])
+}
+
+console.log('set-b flip class: passed')

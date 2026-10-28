@@ -435,7 +435,10 @@ export function evaluateB(
   const tierOf = (c: BComp): BContribution['tier'] => {
     const p = posOf(c)
     const m = c.classification?.method
-    if (p == null || p === 'extreme' || m === 'evidence_flip_chain' || m === 'evidence_distressed') return bTierOf(c)
+    if (p == null || p === 'extreme' || m === 'evidence_distressed') return bTierOf(c)
+    // A flip resold below the median is a budget flip — as-is evidence;
+    // at or above it, the resale is renovated value.
+    if (m === 'evidence_flip_chain') return p === 'below' ? 'as_is' : 'arv'
     return p === 'above' ? 'arv' : p === 'below' ? 'as_is' : 'unidentified'
   }
   const condOf = (c: BComp): ReturnType<typeof bCondTier> => {

@@ -3,7 +3,7 @@
  * ARV truth. Cases are real comps from saved Oct-2026 reports.
  */
 import assert from 'node:assert/strict'
-import { verifyFlip } from '../src/services/verified-flips'
+import { verifyFlip, flipClass } from '../src/services/verified-flips'
 
 const comp = (o: Record<string, unknown>) => ({ salePrice: null, saleDate: null, latestSale: null, flip: null, distressedSale: null, ...o })
 
@@ -41,5 +41,15 @@ assert.equal(f({ flip: { priorSalePrice: 200_000, priorSaleDate: '2026-05-15' } 
 assert.equal(f({ distressedSale: true }).verified, false)
 assert.equal(f({ flip: null }).verified, false)
 assert.equal(f({}).verified, true)
+
+// Flip class — a flip is ARV truth only when it resold at or above the true
+// neighborhood median $/sf. Values are the 2026-10-28 backtest flips.
+assert.equal(flipClass({ resalePpsf: 289, medianPpsf: 164, daysHeld: 216, gainPct: 79 }), 'arv')        // 1715 1st St, 1.76
+assert.equal(flipClass({ resalePpsf: 238, medianPpsf: 226, daysHeld: 63, gainPct: 46 }), 'arv')         // 8212 Stoner Woods, 1.05
+assert.equal(flipClass({ resalePpsf: 109, medianPpsf: 146, daysHeld: 169, gainPct: 88 }), 'budget')     // 7146 Carmel, 0.75
+assert.equal(flipClass({ resalePpsf: 159, medianPpsf: 175, daysHeld: 157, gainPct: 21 }), 'budget')     // 2928 Banza, 0.91
+assert.equal(flipClass({ resalePpsf: 115, medianPpsf: 191, daysHeld: 54, gainPct: 21 }), 'wholesale')  // 3209 Amalfi
+assert.equal(flipClass({ resalePpsf: 250, medianPpsf: 200, daysHeld: 60, gainPct: 30 }), 'arv', 'quick but a real gain at market')
+assert.equal(flipClass({ resalePpsf: 250, medianPpsf: null, daysHeld: 200, gainPct: 50 }), null, 'no median — unknown')
 
 console.log('verified flip rule: passed')

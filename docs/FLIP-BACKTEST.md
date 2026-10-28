@@ -167,3 +167,31 @@ evaluated house are not the same property. Excluded.
 Set-B today exempts flip-chain comps from the price class
 (`evidence_flip_chain` keeps tier `arv` below market) — the rule above
 would remove that exemption.
+
+## Toward a 10% median miss (2026-10-28)
+
+Owner target: median miss ≤10% on true ARV flips.
+
+Built: `flipClass()` (arv / budget / wholesale) stored on `verified_flips`
+(migration 0047, local only) from each evaluation's true median; Set-B
+treats a below-median flip comp as as-is. Local table: 53 ARV, 18 budget,
+3 wholesale.
+
+Findings on the 12 ARV flips (saved pools, no calls):
+- Current engine: 17.0% median miss, mostly low (small homes).
+- **Median scope bug:** the 90-day window ran before geography, so a thin
+  "anything within a mile" set beat the subject's tract (Webster: $138/sf
+  vs ~$265/sf in its tract). Neighborhood-first ordering fixes the low bias
+  (−7.4% → +2.1%) but not the spread on its own.
+- **Single-comp anchoring is the main error source.** A plain estimator —
+  median of the neighborhood's at-or-above-median sales, each size-adjusted
+  to the subject (elasticity 0.85) — scored 4.5% … but only because it saw
+  sales after each resale. **Honest (comps before the resale only): ~14%.**
+- **Leakage:** rounds 1–2 priced flips with today's pools; 8–12 of 20 runs
+  had a driver sold after the resale. Pools reach back ~12 months from
+  today, so older flips keep only 3–12 pre-resale comps.
+
+Needed for an honest ≤10%: an as-of backtest (comps pulled as of the resale
+date, longer lookback), a larger tune/holdout split from the 53 ARV flips,
+then the multi-comp neighborhood estimate in place of the single anchor.
+Prototype: scratchpad `replay/estim.py` (not committed).

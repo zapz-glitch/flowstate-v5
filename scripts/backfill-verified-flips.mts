@@ -6,10 +6,10 @@
  *   npx tsx scripts/backfill-verified-flips.mts <local D1 .sqlite file>
  *
  * Local D1 only (the miniflare file under wrangler's --persist-to dir).
- * Apply migration 0046 first: wrangler d1 migrations apply DB --local.
+ * Apply migrations 0046–0047 first: wrangler d1 migrations apply DB --local.
  */
 import { DatabaseSync } from 'node:sqlite'
-import { recordVerifiedFlips } from '../apps/api/src/services/verified-flips'
+import { recordVerifiedFlips, medianPpsfOf } from '../apps/api/src/services/verified-flips'
 
 const file = process.argv[2]
 if (!file) { console.error('usage: backfill-verified-flips.mts <d1 sqlite file>'); process.exit(1) }
@@ -31,12 +31,13 @@ const reports = sqlite.prepare(
 
 let written = 0
 for (const r of reports) {
-  let items: [] | undefined
-  try { items = JSON.parse(r.full_response_json)?.comps?.items } catch { continue }
-  written += await recordVerifiedFlips(d1, items, r.job_id)
+  let response: Record<string, unknown> | null = null
+  try { response = JSON.parse(r.full_response_json) } catch { continue }
+  const items = (response?.comps as { items?: [] } | undefined)?.items
+  written += await recordVerifiedFlips(d1, items, r.job_id, medianPpsfOf(response))
 }
 const tally = sqlite.prepare(
-  'select state, confidence, count(*) n from verified_flips group by state, confidence order by state, confidence',
+  'select state, confidence, flip_class, count(*) n from verified_flips group by state, confidence, flip_class order by state, confidence, flip_class',
 ).all()
 console.log(`${reports.length} reports → ${written} flip sightings recorded`)
 console.table(tally)
