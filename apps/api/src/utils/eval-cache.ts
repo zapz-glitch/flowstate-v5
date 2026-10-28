@@ -37,6 +37,15 @@ export const EVAL_RESULT_TTL = 30 * 24 * 60 * 60
 /** Window in which a repeat evaluation with identical params returns the stored report. */
 export const EVAL_RESULT_TTL_SECONDS = EVAL_RESULT_TTL
 
+/** What a request may reuse. Default: the stored answer and the provider
+ *  caches. rerun: a fresh evaluation on cached provider data (harness
+ *  tests — no repeat ATTOM spend inside the cache window). skipCache or
+ *  refresh: nothing cached. */
+export function cachePolicyFor(req: { skipCache?: boolean; rerun?: boolean }, isRefresh: boolean) {
+  const fresh = !!req.skipCache || isRefresh
+  return { readStoredResult: !fresh && !req.rerun, skipProviderCache: fresh }
+}
+
 export function evalResultKey(userId: string, address: string, paramsHash: string): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
   // v4 — harness-versioned: a rule release can never serve an old-code

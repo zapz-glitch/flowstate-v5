@@ -171,6 +171,8 @@ export interface StartStreamingRequest {
   llmEnabled: boolean
   /** Whether this is updating an existing report (refresh) */
   isRefresh?: boolean
+  /** Skip the stored answer, keep provider caches (cachePolicyFor) */
+  rerun?: boolean
   /** Close CRM lead/opportunity this evaluation belongs to — stamped onto the
    *  persisted report so it can be written back to the CRM */
   leadId?: string
@@ -472,7 +474,7 @@ export class AnalysisJobDO {
     // Eval-result cache (route + batch children): a stored jobId replays the
     // saved report, an 'err:' marker replays a terminal verdict — zero
     // provider calls either way.
-    if (config.evalResultCacheKey && !config.skipCache && !config.isRefresh) {
+    if (config.evalResultCacheKey && !config.skipCache && !config.isRefresh && !config.rerun) {
       try {
         const cached = await this.env.API_CACHE?.get(config.evalResultCacheKey)
         const verdict = cached ? decodeVerdict(cached) : null

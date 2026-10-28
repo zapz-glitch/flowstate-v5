@@ -26,6 +26,7 @@ import { generateSseToken } from '../utils/sse-token';
 import { AnalysisError } from '../utils/analysis-error';
 import {
   EVAL_RESULT_TTL_SECONDS,
+  cachePolicyFor,
   decodeVerdict,
   evalResultKey,
   hashEvalParams,
@@ -93,6 +94,9 @@ interface AnalyzeRequest {
 
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean;
+
+  /** Re-evaluate on cached provider data — skips only the stored answer */
+  rerun?: boolean;
 
   /** Override ARV comp threshold for this request (top % of comps by sale price) */
   arvThresholdPercent?: number;
@@ -342,7 +346,8 @@ analyze.post('/', async (c) => {
       body.address ?? '',
       evalParamsHash + (seatHarness ? `:${seatHarness}` : '') + (assistArm ? `:arm${assistArm}` : '') + (evidenceBackend === 'jev' ? ':jev' : ''),
     );
-    if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
+    const cachePolicy = cachePolicyFor(body, isRefresh);
+    if (cachePolicy.readStoredResult && c.env.API_CACHE) {
       try {
         const cachedJobId = await c.env.API_CACHE.get(resultCacheKey)
         // Cached terminal verdict — replay the error without a provider call.
@@ -413,7 +418,8 @@ analyze.post('/', async (c) => {
         enrichment: body.enrichment,
         // A refresh is definitionally a cache-bust: skipCache must apply
         // even when the caller didn't pass the flag explicitly.
-        skipCache: body.skipCache || isRefresh,
+        skipCache: cachePolicy.skipProviderCache,
+        rerun: !cachePolicy.readStoredResult,
         evalResultCacheKey: resultCacheKey,
         evalParams,
         llmEnabled:
