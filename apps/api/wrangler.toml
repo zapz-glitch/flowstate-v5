@@ -13,9 +13,10 @@ port = 8787
 ENVIRONMENT = "production"
 DASHBOARD_URL = "https://app.flowstate.homes"
 PROPERTY_PROVIDER = "attom-mcp"
-# Condition reader: the OpenAI Decisions model reads the subject and comps
-# against the renovation tiers (probability per tier); haiku is the backup.
-CONDITION_READER = "decisions"
+# Condition reader: Clef (Workers AI) reads the subject and comps (owner,
+# 2026-10-28); haiku is the backup for a split subject read. "decisions"
+# routes reads to the OpenAI Decisions model instead.
+CONDITION_READER = "clef"
 # Eval defaults for requests that don't name a lane (dashboard, API callers):
 # the production harness — agent seat, arm C (haiku→sonnet ladder), JEV evidence.
 DEFAULT_HARNESS = "agent"

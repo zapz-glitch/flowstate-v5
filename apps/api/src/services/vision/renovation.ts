@@ -775,6 +775,9 @@ export async function assessRenovationFromPhotos(
   // the reasoning reader (haiku) is its backup. A caller-supplied provider
   // is an explicit choice of reader and skips the decision model.
   const decisionsOn = env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env) && !providerOverride
+  // CONDITION_READER=clef — Clef is the primary reader (owner 2026-10-28);
+  // the reasoning reader stays the backup for a split read.
+  const clefFirst = env.CONDITION_READER === 'clef' && !!env.AI && !providerOverride
 
   if (!isReasoningProviderAvailable(env) && !env.AI && !providerOverride && !decisionsOn) {
     return {
@@ -819,14 +822,16 @@ export async function assessRenovationFromPhotos(
   // read, a heavy tier called from a single photo, or a failed call hands
   // the verdict to the reasoning reader below.
   let decisionsRead: RenovationAssessment | null = null
-  if (decisionsOn) {
-    const read = await runClefChunkReads(env, live, propertyContext ?? {})
+  if (decisionsOn || clefFirst) {
+    const read = await runClefChunkReads(env, live, propertyContext ?? {}, { forceClef: clefFirst })
       .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
-    decisionsRead = mergedClefAssessment(read.answers, live, {
-      provider: 'openai',
-      model: env.DECISIONS_MODEL || 'gpt-6-luna',
-      label: 'Decisions',
-    })
+    decisionsRead = clefFirst
+      ? mergedClefAssessment(read.answers, live)
+      : mergedClefAssessment(read.answers, live, {
+          provider: 'openai',
+          model: env.DECISIONS_MODEL || 'gpt-6-luna',
+          label: 'Decisions',
+        })
     if (decisionsRead && !decisionsReadNeedsBackup(decisionsRead, live.length)) return decisionsRead
   }
 
@@ -836,7 +841,7 @@ export async function assessRenovationFromPhotos(
   // Clef remains only as the fallback reader when no reasoning provider
   // is configured — including when the decision model was configured but
   // returned nothing (bad key, outage).
-  if (!provider && !decisionsRead && env.AI) {
+  if (!provider && !decisionsRead && env.AI && !clefFirst) {
     const clef = await runClefChunkReads(env, live, propertyContext ?? {}, { forceClef: true })
       .catch(() => ({ answers: [], chunksRead: 0 }) as ClefChunkRead)
     const mergedClef = mergedClefAssessment(clef.answers, live)

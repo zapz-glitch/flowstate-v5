@@ -44,6 +44,12 @@
  *  11. verify-and-retry ladder    — widen → deepen → labeled floor
  *  12. site match                — 7462 Water Silk Dr: water/road read
  *                                  per lot, unknown never excludes
+ *  13. price leads, condition    — flip backtest 2026-10-28: four of the
+ *      supports                    worst misses anchored 147–254% over the
+ *                                  neighborhood median on a price-group
+ *                                  label. True median (90→180→365 days,
+ *                                  paper sales + outliers out) sets the
+ *                                  class; extremes never drive.
  */
 
 // ── Constants (calibrated — see scoreboard.md) ────────────────────────────
@@ -55,6 +61,9 @@ export const B_RETAIL_BAND = 0.70      // trick 5, unlabeled fallback
 export const B_SIM_GATE = 0.60         // trick 7
 export const B_MIN_SIM = 3.0           // trick 7, driver floor
 export const B_COND_MIN_CONF = 30      // trick 5, Clef confidence floor
+export const B_MARKET_AT = 0.10        // trick 13, ±10% of the median = at market
+export const B_MARKET_HIGH = 1.45      // trick 13, above this = outside the market
+export const B_MARKET_LOW = 0.70       // trick 13, below this = outside the market
 export const B_REHAB_FRACTION: Record<string, number> = {
   'Full Gut': 0.95,
   'Heavy Rehab': 0.85,
@@ -137,7 +146,7 @@ export interface BComp {
   /** A recorded buy → resale 30–365 days apart. The resale is the proof of
    *  the renovation, so an own-AVM divergence does not bar it from driving. */
   verifiedFlip?: boolean | null
-  classification?: { type?: string | null } | null
+  classification?: { type?: string | null; method?: string | null } | null
   curbAppeal?: {
     condition?: string | null
     confidence?: number | null
@@ -223,7 +232,7 @@ export interface BResult {
 // ── Helpers ───────────────────────────────────────────────────────────────
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 
-export const HARNESS_VERSION = 'og-2026.10.26.1'
+export const HARNESS_VERSION = 'og-2026.10.28.1'
 
 export function bSubjectAvm(s: BSubject): number | null {
   return s.avmValue ?? s.avm?.value ?? null
@@ -269,13 +278,21 @@ const bIsUnfit = (c: BComp) => {
     (evidence?.staleness === 'above_pocket' ? 'above_pocket'
       : evidence?.staleness === 'stale' ? 'below_pocket'
         : null)
+  return bIsUnfitTxn(c) ||
+    marketFit === 'below_pocket' ||
+    (marketFit === 'above_pocket' && !bExplainsPremium(c))
+}
+
+/** Unfit for reasons that are not price position — stale, paper or
+ *  outlier transactions, own-AVM divergence. */
+const bIsUnfitTxn = (c: BComp) => {
+  const evidence = c.evidenceVerification
+  const staleByAge = evidence?.staleness === 'stale' && evidence.saleAgeDays != null
   return staleByAge ||
     evidence?.transactionCheck === 'package_deed' ||
     evidence?.transactionCheck === 'nominal_sale' ||
     evidence?.transactionCheck === 'bulk_sale' ||
     evidence?.transactionCheck === 'extreme_outlier' ||
-    marketFit === 'below_pocket' ||
-    (marketFit === 'above_pocket' && !bExplainsPremium(c)) ||
     // A verified flip is exempt from the own-AVM divergence screen: the
     // AVM lags a renovation, and the buy → resale pair is stronger proof.
     (evidence?.priceCheck === 'divergent' && c.verifiedFlip !== true)
@@ -321,6 +338,60 @@ function olsSlope(pts: { x: number; y: number }[]): number | null {
 const bMedian = (xs: number[]) =>
   xs.length ? xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)] : null
 
+// ── Trick 13 — true neighborhood median (owner, 2026-10-28) ───────────────
+// Price is the main evidence; condition supports it. The median is read
+// over the last 90 days of neighborhood sales first (180, then 365 when
+// too thin), with paper transfers ($100 deeds, package and bulk sales)
+// and $/sf outliers left out.
+export const B_MEDIAN_WINDOWS = [90, 180, 365] as const
+export const B_MEDIAN_MIN_SALES = 5
+export const B_NOMINAL_SALE = 10_000
+const B_PAPER_SALES = new Set(['nominal_sale', 'package_deed', 'bulk_sale'])
+
+export interface BMarket {
+  ppsf: number
+  n: number
+  windowDays: number
+  scope: 'tract' | 'block group' | 'neighborhood' | 'nearby'
+  /** In-window sales left out: paper transfers and $/sf outliers. */
+  dropped: number
+}
+
+export function bTrueMedian(subject: BSubject, items: BComp[]): BMarket | null {
+  const dated = items.filter((c) => c.saleDate && Number.isFinite(Date.parse(c.saleDate)) && c.squareFeet && c.salePrice)
+  if (!dated.length) return null
+  // The newest sale stands in for "today" — the same answer on replay.
+  const refMs = Math.max(...dated.map((c) => Date.parse(c.saleDate!)))
+  const norm = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+  const scopes: { scope: BMarket['scope']; keep: (c: BComp) => boolean }[] = [
+    { scope: 'tract', keep: (c) => !!subject.censusTract && c.censusTract === subject.censusTract },
+    { scope: 'block group', keep: (c) => c.sameBlockGroup === true },
+    { scope: 'neighborhood', keep: (c) =>
+      (!!norm(subject.subdivision) && norm(c.subdivision) === norm(subject.subdivision)) ||
+      (!!norm(subject.neighborhoodName) && norm(c.neighborhoodName) === norm(subject.neighborhoodName)) },
+    { scope: 'nearby', keep: () => true },
+  ]
+  for (const windowDays of B_MEDIAN_WINDOWS) {
+    const inWindow = dated.filter((c) => refMs - Date.parse(c.saleDate!) <= windowDays * 864e5)
+    for (const { scope, keep } of scopes) {
+      const sales = inWindow.filter(keep)
+      const real = sales.filter((c) => c.salePrice! >= B_NOMINAL_SALE &&
+        !B_PAPER_SALES.has(c.evidenceVerification?.transactionCheck ?? ''))
+      const ppsfs = real.map((c) => c.salePrice! / c.squareFeet!).sort((a, b) => a - b)
+      let clean = ppsfs
+      if (ppsfs.length >= 4) {
+        const q1 = ppsfs[Math.floor(ppsfs.length * 0.25)]
+        const q3 = ppsfs[Math.floor(ppsfs.length * 0.75)]
+        const iqr = q3 - q1
+        if (iqr > 0) clean = ppsfs.filter((v) => v >= q1 - 1.5 * iqr && v <= q3 + 1.5 * iqr)
+      }
+      if (clean.length < B_MEDIAN_MIN_SALES) continue
+      return { ppsf: bMedian(clean)!, n: clean.length, windowDays, scope, dropped: sales.length - clean.length }
+    }
+  }
+  return null
+}
+
 // ── The evaluation ────────────────────────────────────────────────────────
 export function evaluateB(
   subject: BSubject,
@@ -344,6 +415,38 @@ export function evaluateB(
   const empty = (source: string): BResult => ({
     arv: null, flags, drivers: [], contribs: [], bracket: 'ok', conf: 'none', source,
   })
+
+  // ── Trick 13 — price leads, condition supports ─────────────────────────
+  // Each sale's $/sf against the true neighborhood median sets its class:
+  // above market → ARV evidence, at → median tier, below → as-is, past
+  // the outside lines → never a driver. A recorded flip or distress is a
+  // transaction fact and keeps its class. No median → the old labels.
+  const market = bTrueMedian(subject, items)
+  if (market) flags.push(`market: ${market.windowDays}-day ${market.scope} median $${market.ppsf.toFixed(0)}/sf (${market.n} sales${market.dropped ? `, ${market.dropped} left out` : ''})`)
+  const posOf = (c: BComp): 'extreme' | 'above' | 'at' | 'below' | null => {
+    const p = market ? bPpsfOf(c) : null
+    if (!market || !p) return null
+    const r = p / market.ppsf
+    return r > B_MARKET_HIGH || r < B_MARKET_LOW ? 'extreme'
+      : r > 1 + B_MARKET_AT ? 'above'
+      : r < 1 - B_MARKET_AT ? 'below'
+      : 'at'
+  }
+  const tierOf = (c: BComp): BContribution['tier'] => {
+    const p = posOf(c)
+    const m = c.classification?.method
+    if (p == null || p === 'extreme' || m === 'evidence_flip_chain' || m === 'evidence_distressed') return bTierOf(c)
+    return p === 'above' ? 'arv' : p === 'below' ? 'as_is' : 'unidentified'
+  }
+  const condOf = (c: BComp): ReturnType<typeof bCondTier> => {
+    const p = posOf(c)
+    const cond = bCondTier(c)
+    if (p === 'at') return 'median'
+    if (p === 'below') return 'distressed'
+    if (p === 'above' && (cond === 'median' || cond === 'distressed')) return 'unknown'
+    return cond
+  }
+  const unfitOf = (c: BComp) => posOf(c) != null ? bIsUnfitTxn(c) || posOf(c) === 'extreme' : bIsUnfit(c)
 
   // ── Marginal land rate — honest ladder ─────────────────────────────────
   const subLand = subject.landAssessedValue ?? null
@@ -694,12 +797,19 @@ export function evaluateB(
     if (boundOnly) dec({ compAddress: c.address, stage: 'contrib', rule: 'urar-cap-25', verdict: 'bound',
       value: Math.round(adjPct * 1000) / 10, note: 'total adjustment >25%' })
     const weight = (1 / (1 + adjPct)) * (boundOnly ? 0.5 : 1)
-    contribs.push({ comp: c, contrib, weight, tier: bTierOf(c), boundOnly })
+    contribs.push({ comp: c, contrib, weight, tier: tierOf(c), boundOnly })
   }
 
   // ── Evidence verification — stale/divergent never drive ARV ─────────────
-  const unfit = contribs.filter((x) => bIsUnfit(x.comp))
+  const unfit = contribs.filter((x) => unfitOf(x.comp))
   for (const x of unfit) {
+    if (posOf(x.comp) === 'extreme' && market) {
+      const pct = Math.round((bPpsfOf(x.comp)! / market.ppsf) * 100)
+      flags.push(`extreme: outside the market — ${x.comp.address} at ${pct}% of the median`)
+      dec({ compAddress: x.comp.address, stage: 'pool', rule: 'market-extreme', verdict: 'dropped', value: pct,
+        note: `${pct}% of the ${market.windowDays}-day median` })
+      continue
+    }
     flags.push(`${x.comp.address}: verification — ${(x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90)}`)
     dec({ compAddress: x.comp.address, stage: 'pool', rule: 'verification', verdict: 'dropped',
       note: (x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90) })
@@ -731,6 +841,11 @@ export function evaluateB(
     // Pool differs from the subject (both read) — ranks lower, still drives.
     const sp = subject.site?.pool, cp = c.site?.pool
     if (typeof sp === 'boolean' && typeof cp === 'boolean' && sp !== cp) s -= 1.0
+    // Condition supports price — a read that agrees with the price class
+    // ranks the comp up, one that disagrees ranks it down (trick 13).
+    const pos = posOf(c), cond = bCondTier(c)
+    if ((pos === 'above' && (cond === 'renovated' || cond === 'premium')) || (pos === 'at' && cond === 'median')) s += 0.75
+    else if ((pos === 'above' && (cond === 'median' || cond === 'distressed')) || (pos === 'at' && cond === 'distressed')) s -= 0.75
     return s
   }
 
@@ -752,7 +867,7 @@ export function evaluateB(
   })
   const siteMatched = verifiedDrivers.filter((x) => !siteMisses(x.comp).length)
   const canCarry = (x: BContribution) =>
-    bCondTier(x.comp) === 'median' || (x.tier === 'arv' && bCondTier(x.comp) !== 'distressed')
+    condOf(x.comp) === 'median' || (x.tier === 'arv' && condOf(x.comp) !== 'distressed')
   let driverPool = verifiedDrivers
   if (siteMatched.length < verifiedDrivers.length) {
     if (siteMatched.some(canCarry)) {
@@ -766,9 +881,9 @@ export function evaluateB(
       flags.push('site: no driver matches the subject lot — premium/penalty not adjusted')
     }
   }
-  const medianComps = driverPool.filter((x) => bCondTier(x.comp) === 'median')
+  const medianComps = driverPool.filter((x) => condOf(x.comp) === 'median')
   const preferred = driverPool.filter((x) =>
-    x.tier === 'arv' && !['median', 'distressed'].includes(bCondTier(x.comp)) && similarity(x) >= B_MIN_SIM)
+    x.tier === 'arv' && !['median', 'distressed'].includes(condOf(x.comp)) && similarity(x) >= B_MIN_SIM)
   let drivers: BContribution[] = []
   // Seat-driven selection — an upstream seat (Decisions/appraiser model)
   // named the drivers; the engine prices them and runs every downstream
@@ -790,7 +905,7 @@ export function evaluateB(
       dec({ compAddress: x.comp.address, stage: 'class', rule: 'tier-discipline', verdict: 'median-driver' })
     }
   } else {
-    const weak = driverPool.filter((x) => x.tier === 'arv' && !['median', 'distressed'].includes(bCondTier(x.comp)))
+    const weak = driverPool.filter((x) => x.tier === 'arv' && !['median', 'distressed'].includes(condOf(x.comp)))
     if (weak.length) {
       flags.push(`non-median comps below similarity floor (${B_MIN_SIM}) — falling to median`)
       drivers = medianComps.length ? medianComps : weak
@@ -799,7 +914,7 @@ export function evaluateB(
         ? Math.max(...driverPool.map((x) => bPpsfOf(x.comp) ?? 0))
         : null
       const retail = driverPool.filter((x) =>
-        x.tier !== 'as_is' && !['median', 'distressed'].includes(bCondTier(x.comp)) &&
+        x.tier !== 'as_is' && !['median', 'distressed'].includes(condOf(x.comp)) &&
         topPpsf != null && (bPpsfOf(x.comp) ?? 0) >= B_RETAIL_BAND * topPpsf)
       if (!retail.length) {
         // Median-only evidence — the band IS the answer. No AVM uplift:
@@ -947,7 +1062,7 @@ export function evaluateB(
   // If the pocket proves a renovated band, that band prices it — the
   // maintained evidence stands on its own here.
   const conditionAdj: number | null = null
-  if (drivers.length && drivers.every((x) => bCondTier(x.comp) === 'median')) {
+  if (drivers.length && drivers.every((x) => condOf(x.comp) === 'median')) {
     flags.push('median-tier anchor — ARV serves at maintained-market value (no modeled uplift)')
   }
 

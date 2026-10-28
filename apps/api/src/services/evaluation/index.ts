@@ -63,7 +63,7 @@ import { isDecisionsAvailable } from '../decisions'
 import { fetchImageAsBase64 } from '../llm/image-utils'
 import type { CompConditionResult } from '../clef'
 import type { CompDigestStages } from '../comp-evidence/digest'
-import { isClefAvailable } from '../clef'
+import { isClefAvailable, compClassifyDeferred } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 import { readSites, type SiteLot } from '../site-read'
 import { gradeVerdict } from './verdict-grade'
@@ -972,8 +972,7 @@ export async function performAnalysisPhase1(
                 subject: { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined },
                 // Post-geo classify runs just below — don't let the fallback
                 // gather pin geo-less per-comp reads the pool classify skips.
-                gatherOnly: !!env.ANTHROPIC_API_KEY ||
-                  (env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)),
+                gatherOnly: compClassifyDeferred(env),
               })
             : null
           const evGet = (propertyId: string): Promise<CompConditionEvidence | null> =>
@@ -1001,6 +1000,8 @@ export async function performAnalysisPhase1(
             const subjectRef = { squareFeet: bundle.property.squareFeet ?? undefined, address: bundle.property.address ?? undefined }
             const [early, filled] = await evidenceMaps()
             const classifyInputs = classifyInputsFor(early, filled)
+            // Clef already read each comp inside the gather.
+            if (!compClassifyDeferred(env)) return
             if (env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env)) {
               await classifyCompBatchDecisions(env, classifyInputs, subjectRef).catch(() => null)
             } else if (env.ANTHROPIC_API_KEY) {

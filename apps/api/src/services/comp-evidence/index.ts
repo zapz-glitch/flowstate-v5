@@ -328,6 +328,13 @@ export async function gatherCompConditionEvidence(
 ): Promise<CompConditionEvidence> {
   const key = evidenceKey(env, comp)
   const cached = await env.API_CACHE.get(key, 'json').catch(() => null) as CompConditionEvidence | null
+  // A cached listing whose condition read failed (or was left to a pool
+  // reader that failed) is read now from its cover photo + listing text —
+  // not served empty for the whole evidence TTL. No re-scrape.
+  if (cached?.listing && !cached.condition && !opts?.deferClassify) {
+    const images = cached.listing.coverPhotoUrl ? await embedPhotos([cached.listing.coverPhotoUrl]) : []
+    return classifyAndPin(env, { ...cached, skippedReason: undefined }, comp, subject, images, key)
+  }
   if (cached?.condition || cached?.listing) {
     // Backfill marketedSqft on evidence pinned before the scan existed —
     // the listing copy is already in the cache.
@@ -464,6 +471,21 @@ async function finishListing(
     return evidence
   }
 
+  return classifyAndPin(env, evidence, comp, subject, images, key)
+}
+
+/** Classify a comp from its listing evidence (Clef first, Luna backup)
+ *  and pin the stamp. Shared by a fresh scrape and a cached listing whose
+ *  earlier read failed. */
+async function classifyAndPin(
+  env: Env,
+  evidence: CompConditionEvidence,
+  comp: CompEvidenceInput,
+  subject: { squareFeet?: number; address?: string } | undefined,
+  images: ClefImage[],
+  key?: string,
+): Promise<CompConditionEvidence> {
+  const l = evidence.listing
   // Clef is the primary reader; Luna is the fallback — absent binding or a
   // failed call both route here. The stamp contract is identical.
   const clefReady = isClefAvailable(env)
@@ -472,11 +494,11 @@ async function finishListing(
       address: comp.address,
       salePrice: comp.salePrice,
       saleDate: comp.saleDate,
-      description: photos.description,
-      whatsSpecial: photos.whatsSpecial,
-      features: photos.features,
-      yearBuilt: comp.yearBuilt ?? photos.yearBuilt,
-      squareFeet: comp.squareFeet ?? photos.squareFeet,
+      description: l?.description,
+      whatsSpecial: l?.whatsSpecial,
+      features: l?.features,
+      yearBuilt: comp.yearBuilt ?? l?.details?.yearBuilt,
+      squareFeet: comp.squareFeet ?? l?.details?.squareFeet,
       images,
       subject,
     })
@@ -487,11 +509,11 @@ async function finishListing(
       address: comp.address,
       salePrice: comp.salePrice,
       saleDate: comp.saleDate,
-      description: photos.description,
-      whatsSpecial: photos.whatsSpecial,
-      features: photos.features,
-      yearBuilt: comp.yearBuilt ?? photos.yearBuilt,
-      squareFeet: comp.squareFeet ?? photos.squareFeet,
+      description: l?.description,
+      whatsSpecial: l?.whatsSpecial,
+      features: l?.features,
+      yearBuilt: comp.yearBuilt ?? l?.details?.yearBuilt,
+      squareFeet: comp.squareFeet ?? l?.details?.squareFeet,
       images,
     }).catch(() => null)
   }

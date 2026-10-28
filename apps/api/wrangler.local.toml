@@ -29,9 +29,10 @@ STREET_VIEW_ENABLED = "false"
 REASONING_STAGE_ONLY = "true"
 REASONING_PROVIDER = "anthropic"
 REASONING_MODEL = "claude-haiku-5-5"
-# Condition reader: the OpenAI Decisions model reads the subject and comps
-# against the renovation tiers (probability per tier); haiku is the backup.
-CONDITION_READER = "decisions"
+# Condition reader: Clef (Workers AI) reads the subject and comps (owner,
+# 2026-10-28); haiku is the backup for a split subject read. "decisions"
+# routes reads to the OpenAI Decisions model instead.
+CONDITION_READER = "clef"
 # Record every outbound API call of every run to a per-job call log, kept
 # 90 days in local KV (.wrangler/state). Read it at /v1/analyze/jobs/:id/calls.
 CALL_LOG_ENABLED = "true"

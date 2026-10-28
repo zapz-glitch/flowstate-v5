@@ -62,7 +62,7 @@ import {
 import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
 import { startCompEvidenceSource, type CompEvidenceSource, startCompEvidenceBatch, type CompConditionEvidence } from '../services/comp-evidence'
 import { startCompDigestBatch, type CompDigest, type DigestComp, type DigestSubject } from '../services/comp-evidence/digest'
-import { isClefAvailable } from '../services/clef'
+import { isClefAvailable, compClassifyDeferred } from '../services/clef'
 import { isReasoningProviderAvailable } from '../services/llm'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
@@ -777,8 +777,7 @@ export class AnalysisJobDO {
           // pool classify needs the gated pool's geocode context. Without
           // this the gather's geo-less per-comp reads get model-cached and
           // classifyCompPoolHaiku skips them. Evaluation classifies after.
-          gatherOnly: !!this.env.ANTHROPIC_API_KEY ||
-            (this.env.CONDITION_READER === 'decisions' && isDecisionsAvailable(this.env)),
+          gatherOnly: compClassifyDeferred(this.env),
         })
         // Stage-A digest on sale records — no listing data needed, runs
         // beside the listing fetch it precedes in the evidence batch.

@@ -273,6 +273,15 @@ export function isClefAvailable(env: Env): boolean {
     (env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env))
 }
 
+/** Whether comp condition waits for a pool-level read after geo stamps
+ *  land (Decisions batch, or Haiku). With CONDITION_READER=clef, Clef
+ *  reads each comp inside the listing gather instead — owner rule
+ *  2026-10-28: Clef is the condition reader. */
+export function compClassifyDeferred(env: Env): boolean {
+  if (env.CONDITION_READER === 'clef' && typeof env.AI?.run === 'function') return false
+  return !!env.ANTHROPIC_API_KEY || (env.CONDITION_READER === 'decisions' && isDecisionsAvailable(env))
+}
+
 export async function classifyCompCondition(
   env: Env,
   input: CompConditionInput,
