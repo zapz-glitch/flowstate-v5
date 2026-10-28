@@ -40,7 +40,7 @@ const MAX_BODY_CHARS = 12_000_000
 /** A failed call's response is kept only this far — error pages repeat. */
 const ERROR_BODY_CHARS = 2_000
 
-export type CallKind = 'provider' | 'scrape' | 'imagery' | 'decisions' | 'reasoning' | 'photo' | 'other'
+export type CallKind = 'provider' | 'scrape' | 'imagery' | 'decisions' | 'reasoning' | 'photo' | 'clef' | 'other'
 
 export interface CallEntry {
   seq: number
@@ -302,6 +302,54 @@ export function recordingFetch(original: FetchFn): FetchFn {
     }
   }
   return wrapped as FetchFn
+}
+
+type AiLike = { run: (model: string, input: never, ...rest: unknown[]) => Promise<unknown> }
+
+/**
+ * Wrap a Workers AI binding so Clef runs made inside a call-log scope are
+ * recorded — the binding never touches fetch, so without this they are
+ * invisible. Logged: model, question keys, image count, time, failure.
+ * Bodies are not kept (images); runs are never replayed.
+ */
+export function recordingAi<T extends AiLike>(ai: T): T {
+  const run = async (model: string, input: never, ...rest: unknown[]) => {
+    const scope = scopes.getStore()
+    if (!scope) return ai.run(model, input, ...rest)
+    const i = (input ?? {}) as { questions?: Record<string, unknown>; images?: unknown[] }
+    const q = Object.keys(i.questions ?? {}).join(',')
+    const started = Date.now()
+    const entry: CallEntry = {
+      seq: scope.log.entries.length + 1,
+      at: new Date(started).toISOString(),
+      ms: 0,
+      kind: 'clef',
+      method: 'RUN',
+      url: `workers-ai://${model}?q=${q}&images=${i.images?.length ?? 0}`,
+      model,
+      status: null,
+      requestHash: '',
+      request: null,
+      response: null,
+      responseType: null,
+      responseBytes: null,
+      truncated: false,
+      replayed: false,
+    }
+    scope.log.entries.push(entry)
+    try {
+      const out = await ai.run(model, input, ...rest)
+      entry.status = 200
+      return out
+    } catch (err) {
+      entry.status = 500
+      entry.error = err instanceof Error ? err.message : String(err)
+      throw err
+    } finally {
+      entry.ms = Date.now() - started
+    }
+  }
+  return new Proxy(ai, { get: (t, k) => (k === 'run' ? run : Reflect.get(t, k)) })
 }
 
 let installed = false

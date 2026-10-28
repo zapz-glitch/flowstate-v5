@@ -71,7 +71,10 @@ import { withAssistArm, type AssistArm } from '../services/llm/assist-arms'
 import { evidenceStageEnv } from '../services/llm/stage-env'
 import { isGeoGateActive } from '../services/geo/geo-gate'
 import { assistModel } from '../services/evaluation/assist'
-import { loadCallLog, newCallLog, runWithCallLog, saveCallLog, summarizeCallLog } from '../services/observability/call-log'
+import { loadCallLog, newCallLog, recordingAi, runWithCallLog, saveCallLog, summarizeCallLog } from '../services/observability/call-log'
+
+/** AI bindings already wrapped by the call recorder. */
+const aiRecorded = new WeakSet<object>()
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
 import { createApiLedger } from '../services/api-ledger'
@@ -431,6 +434,11 @@ export class AnalysisJobDO {
       meta: { harness: config.harness ?? null, arm: config.arm ?? null, assistModel: assistModel(this.reasoningEnv) },
       replayedFrom: replay ? replay.jobId : null,
     })
+    // Clef runs go through the AI binding, not fetch — record them too.
+    if (this.env.AI && !aiRecorded.has(this.env.AI)) {
+      this.env.AI = recordingAi(this.env.AI as never)
+      aiRecorded.add(this.env.AI)
+    }
     try {
       await runWithCallLog(log, { store: this.env.API_CACHE, replayFrom: replay }, run)
     } finally {
